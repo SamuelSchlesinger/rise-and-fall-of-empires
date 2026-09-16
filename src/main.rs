@@ -6,9 +6,13 @@ mod lang;
 mod noise;
 mod rng;
 mod ser;
+#[cfg(test)]
+mod ser_tests;
 mod sim;
 mod stats;
 mod term;
+#[cfg(test)]
+mod tests;
 mod theme;
 mod ui;
 
@@ -127,6 +131,11 @@ fn main() {
         },
         None => World::new(args.seed, args.width, args.height, args.detail),
     };
+    for (field, value) in &cfg.tunes {
+        if let Err(e) = world.tuning.set(field, *value) {
+            eprintln!("empires: {}", e);
+        }
+    }
     if args.load.is_some() && args.headless.is_some() {
         // A loaded world keeps its own detail unless one was given explicitly.
         if std::env::args().any(|a| a == "--detail" || a == "-d") {

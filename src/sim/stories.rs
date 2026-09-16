@@ -182,7 +182,7 @@ pub fn artifacts_on_capture(w: &mut World, city: usize, winner: usize, loser: us
     let mut s = String::new();
     for a in taken {
         let name = w.artifacts[a].name.clone();
-        if w.rng.chance(0.25) {
+        if w.rng.chance(w.tuning.artifact_capture_lost_chance) {
             w.artifacts[a].lost_at = Some(w.cities[city].cell);
             let how = prose::relic_vanished_in_sack(&w.cities[city].name.clone());
             artifact_passes(w, a, Holder::Lost, &how);
@@ -200,7 +200,7 @@ pub fn artifacts_on_capture(w: &mut World, city: usize, winner: usize, loser: us
 pub fn artifacts_on_fall(w: &mut World, p: usize, absorbed_by: Option<usize>) {
     for a in w.artifacts_of(p) {
         match absorbed_by {
-            Some(q) if w.rng.chance(0.7) => {
+            Some(q) if w.rng.chance(w.tuning.artifact_fall_pass_chance) => {
                 let how = prose::relic_passed_with_fall(w, q, p);
                 artifact_passes(w, a, Holder::Polity(q), &how);
             }
@@ -235,9 +235,11 @@ pub fn artifacts_on_ruler_death(w: &mut World, p: usize, r: usize) {
             | "the Lion"
     );
     if great
-        && rng.chance(0.25)
-        && w.artifacts_of(p).len() < 2
-        && w.artifacts.len() < 3 + w.living_polities().len() / 2
+        && rng.chance(w.tuning.artifact_ruler_chance)
+        && w.artifacts_of(p).len() < w.tuning.artifact_per_polity_cap
+        && w.artifacts.len()
+            < w.tuning.artifact_world_cap_base
+                + w.living_polities().len() / w.tuning.artifact_world_cap_divisor
     {
         let kind = *rng.pick(&[
             ArtifactKind::Crown,
@@ -262,9 +264,11 @@ pub fn artifacts_on_ruler_death(w: &mut World, p: usize, r: usize) {
 }
 
 pub fn artifacts_on_wonder(w: &mut World, p: usize, cap: usize) {
-    if w.rng.chance(0.3)
-        && w.artifacts_of(p).len() < 2
-        && w.artifacts.len() < 3 + w.living_polities().len() / 2
+    if w.rng.chance(w.tuning.artifact_wonder_chance)
+        && w.artifacts_of(p).len() < w.tuning.artifact_per_polity_cap
+        && w.artifacts.len()
+            < w.tuning.artifact_world_cap_base
+                + w.living_polities().len() / w.tuning.artifact_world_cap_divisor
     {
         let kind = *w.rng.pick(&[
             ArtifactKind::Gem,
@@ -288,7 +292,7 @@ pub fn artifacts_on_school(w: &mut World, s: usize) {
     let founder = w.schools[s].founder;
     let city = w.schools[s].home_city;
     let polity = w.cities[city].polity;
-    if w.rng.chance(0.25) {
+    if w.rng.chance(w.tuning.artifact_school_chance) {
         let kind = if w.schools[s].kind == super::SchoolKind::Arcane {
             *w.rng.pick(&[
                 ArtifactKind::Staff,
@@ -336,7 +340,7 @@ pub fn tick_artifacts(w: &mut World) {
     for a in 0..w.artifacts.len() {
         match w.artifacts[a].holder {
             Holder::Lost => {
-                if !rng.chance(0.004) {
+                if !rng.chance(w.tuning.artifact_found_chance) {
                     continue;
                 }
                 // Found by whoever now rules the ground it was lost on, or a nearby realm.
@@ -369,7 +373,7 @@ pub fn tick_artifacts(w: &mut World) {
                     artifact_passes(w, a, Holder::Polity(p), &how);
                 }
             }
-            Holder::Polity(_) | Holder::City(_) if rng.chance(0.0015) => {
+            Holder::Polity(_) | Holder::City(_) if rng.chance(w.tuning.artifact_lost_chance) => {
                 let p = match w.artifacts[a].holder {
                     Holder::Polity(p) => p,
                     Holder::City(c) => match w.cities[c].polity {
@@ -486,7 +490,8 @@ pub fn utter_prophecy(w: &mut World, seer: usize, p: usize) -> Option<usize> {
     }
     let weights: Vec<f64> = kinds.iter().map(|k| k.0).collect();
     let kind = kinds[rng.weighted(&weights)].1;
-    let years = 60 + rng.below(140) as i32;
+    let years = w.tuning.prophecy_deadline_min
+        + rng.below(w.tuning.prophecy_deadline_range as usize) as i32;
     let deadline = w.year + years;
     let seer_name = w.persons[seer].name.clone();
     let where_ = w.persons[seer]
@@ -617,7 +622,11 @@ pub fn tick_legends(w: &mut World) {
         };
         let per = &w.persons[r];
         let reign = w.year - w.polities[p].reign_start;
-        if per.traits.cruelty > 0.8 && reign >= 8 && per.epithet.is_none() && rng.chance(0.06) {
+        if per.traits.cruelty > 0.8
+            && reign >= 8
+            && per.epithet.is_none()
+            && rng.chance(w.tuning.tyrant_chance)
+        {
             w.persons[r].epithet = Some(
                 rng.pick(&[
                     "the Tyrant",

@@ -98,7 +98,9 @@ impl World {
         let (a, d) = (self.wars[wid].attacker, self.wars[wid].defender);
         self.polities[a].wars.retain(|&x| x != wid);
         self.polities[d].wars.retain(|&x| x != wid);
-        let until = self.year + 8 + self.rng.int(0, 12);
+        let until = self.year
+            + self.tuning.truce_years_min
+            + self.rng.int(0, self.tuning.truce_years_random);
         self.polities[a].truce.insert(d, until);
         self.polities[d].truce.insert(a, until);
         self.polities[a].tension.insert(d, 0.0);
@@ -118,6 +120,7 @@ impl World {
 
 pub fn diplomacy(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let alive = w.living_polities();
     for &p in &alive {
         let neighbors = w.polities[p].neighbors.clone();
@@ -130,50 +133,50 @@ pub fn diplomacy(w: &mut World) {
                 continue;
             }
             let qol = &w.polities[q];
-            let mut d = 0.008
+            let mut d = tn.tension_base_growth
                 * (border as f32 / 8.0).min(2.0)
                 * (0.5 + vals.militarism)
                 * (0.5 + traits.ambition);
             if qol.culture != pol.culture {
-                d += 0.02;
+                d += tn.tension_foreign_culture;
                 if w.cultures[qol.culture].race != w.cultures[pol.culture].race {
-                    d += 0.01;
+                    d += tn.tension_foreign_race;
                 }
             }
             // Claims: they hold lands of our people.
             let ours_under_them = qol.culture_counts.get(&pol.culture).copied().unwrap_or(0);
             if ours_under_them > 5 {
-                d += 0.02;
+                d += tn.tension_claims;
             }
             // Rival faiths.
             if let (Some(a), Some(b)) = (pol.school, qol.school) {
                 if a != b {
                     let sa = &w.schools[a];
                     if sa.kind == SchoolKind::Divine || w.schools[b].kind == SchoolKind::Divine {
-                        d += 0.025 * (sa.hostility + w.schools[b].hostility);
+                        d += tn.tension_faith_weight * (sa.hostility + w.schools[b].hostility);
                     }
                 }
             }
             // Trade calms things.
             if vals.mercantilism > 0.5 && w.cultures[qol.culture].values.mercantilism > 0.5 {
-                d -= 0.02;
+                d -= tn.tension_trade_relief;
             }
             // Weak neighbours tempt the ambitious.
             if qol.stability < 0.3 && traits.ambition > 0.5 {
-                d += 0.02;
+                d += tn.tension_weak_neighbor;
             }
             // Same parent (recently split) keeps grudges.
             if qol.parent == Some(p) || pol.parent == Some(q) {
                 d += 0.01;
             }
-            d -= 0.015;
+            d -= tn.tension_decay;
             let cur = pol.tension.get(&q).copied().unwrap_or(0.1);
             updates.push((q, (cur + d).clamp(0.0, 1.0)));
         }
         let pol = &mut w.polities[p];
         let neighbor_ids: BTreeSet<usize> = neighbors.iter().map(|&(q, _)| q).collect();
         pol.tension.retain(|q, v| {
-            *v *= 0.97;
+            *v *= tn.tension_decay_mult;
             neighbor_ids.contains(q) || *v > 0.05
         });
         for (q, v) in updates {
@@ -204,16 +207,18 @@ pub fn diplomacy(w: &mut World) {
             {
                 continue;
             }
-            if t < 0.65 {
+            if t < tn.war_declare_threshold {
                 continue;
             }
             let my = w.polities[p].army;
             let their = w.polities[q].army * (1.0 + w.polities[q].wars.len() as f32 * 0.2);
-            let bold = 0.7 + traits.valor * 0.5;
+            let bold = tn.war_boldness_base + traits.valor * 0.5;
             if my < their * bold * rng.range32(0.7, 1.2) {
                 continue;
             }
-            if !rng.chance(0.08 + traits.ambition as f64 * 0.15) {
+            if !rng.chance(
+                tn.war_declare_chance + traits.ambition as f64 * tn.war_declare_ambition_weight,
+            ) {
                 continue;
             }
             // Cause.
@@ -249,6 +254,7 @@ pub fn diplomacy(w: &mut World) {
 
 pub fn resolve_wars(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let active: Vec<usize> = w.wars.iter().filter(|x| x.alive()).map(|x| x.id).collect();
     if active.is_empty() {
         return;
@@ -311,10 +317,12 @@ pub fn resolve_wars(w: &mut World) {
         // Peace?
         let ex = (w.polities[a].exhaustion + w.polities[d].exhaustion) / 2.0;
         let score = w.wars[wid].score;
-        let mut p_peace = if years < 3 {
+        let mut p_peace = if years < tn.peace_min_years {
             0.0
         } else {
-            0.03 + ex as f64 * 0.15 + (score.abs() as f64 / 3.0).min(0.25)
+            tn.peace_base_chance
+                + ex as f64 * tn.peace_exhaustion_weight
+                + (score.abs() as f64 / 3.0).min(0.25)
         };
         if !has_front {
             p_peace += 0.2;
@@ -384,6 +392,7 @@ fn battle(
     quiet: bool,
 ) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     // Who takes the offensive this year?
     let sa = strength(w, a, &[]);
     let sd = strength(w, d, &[]);
@@ -404,11 +413,11 @@ fn battle(
     w.wars[wid].battles += 1;
     let (winner, loser) = if win { (off, def) } else { (def, off) };
     // Casualties.
-    w.polities[loser].army *= 1.0 - (0.08 + margin * 0.15);
-    w.polities[winner].army *= 1.0 - 0.04;
+    w.polities[loser].army *= 1.0 - (tn.battle_loser_casualties + margin * 0.15);
+    w.polities[winner].army *= 1.0 - tn.battle_winner_casualties;
     w.polities[winner].exhaustion += 0.02;
     w.polities[loser].exhaustion += 0.04;
-    let swing = 0.07 + margin * 0.2;
+    let swing = tn.battle_swing_base + margin * tn.battle_swing_margin_weight;
     if winner == a {
         w.wars[wid].score += swing;
     } else {
@@ -449,7 +458,7 @@ fn battle(
                 // Siege.
                 let walls = w.cities[city].walls;
                 let ratio = strength(w, winner, &[]) / strength(w, loser, &[]).max(0.05);
-                if ratio > 1.0 + walls * 0.6 && rng.chance(0.5) {
+                if ratio > 1.0 + walls * 0.6 && rng.chance(tn.siege_capture_chance) {
                     let s = capture_city(w, city, winner, loser, wid);
                     text.push_str(&s);
                     refs.push(Ref::City(city));
@@ -480,7 +489,11 @@ fn battle(
         if let Some(r) = w.polities[side].ruler {
             let t = w.persons[r].traits;
             let leads = t.valor > 0.55;
-            let p_die = if side == loser { 0.035 } else { 0.008 };
+            let p_die = if side == loser {
+                tn.ruler_battle_death_loser
+            } else {
+                tn.ruler_battle_death_winner
+            };
             if leads && rng.chance(p_die) {
                 let name = w.persons[r].name.clone();
                 politics::ruler_dies(w, side, prose::fell_at(&place), 2);
@@ -524,7 +537,8 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
     } else {
         w.wars[wid].score -= 0.3;
     }
-    let sack = rng.chance(0.3 + t.cruelty as f64 * 0.5);
+    let sack = rng
+        .chance(w.tuning.city_sack_chance + t.cruelty as f64 * w.tuning.city_sack_cruelty_weight);
     let mut s = if sack {
         w.cities[city].pop *= 0.5;
         w.cities[city].times_sacked += 1;

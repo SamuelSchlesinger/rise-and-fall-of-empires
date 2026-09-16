@@ -169,7 +169,7 @@ const AWKWARD: &[&str] = &[
     "nazi", "rape",
 ];
 
-fn awkward(w: &str) -> bool {
+pub(crate) fn awkward(w: &str) -> bool {
     let l = w.to_lowercase();
     AWKWARD
         .iter()

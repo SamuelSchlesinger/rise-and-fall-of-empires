@@ -724,7 +724,7 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                     FG,
                     0,
                 ));
-                out.push(line(format!("    Strain    {} overextension {:.0}%, foreign subjects {:.0}%, war-weariness {:.0}%, decadence {:.0}%", bar((pol.overextension() - 0.5).clamp(0.0, 1.0), 20, ascii), pol.overextension() * 100.0, pol.foreign_share * 100.0, pol.exhaustion * 100.0, pol.decadence * 100.0), FG, 0));
+                out.push(line(format!("    Strain    {} overextension {:.0}%, foreign subjects {:.0}%, war-weariness {:.0}%, decadence {:.0}%", bar((pol.overextension(&w.tuning) - 0.5).clamp(0.0, 1.0), 20, ascii), pol.overextension(&w.tuning) * 100.0, pol.foreign_share * 100.0, pol.exhaustion * 100.0, pol.decadence * 100.0), FG, 0));
                 let mut flags = Vec::new();
                 if pol.seafaring {
                     flags.push("seafaring");

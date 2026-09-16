@@ -251,6 +251,7 @@ pub fn found_polity(
 
 pub fn form_polities(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let n = w.cells.len();
     let tries = (n / 40).max(50);
     let mut founded = 0;
@@ -260,7 +261,7 @@ pub fn form_polities(w: &mut World) {
         }
         let i = rng.below(n);
         let cs = w.cells[i];
-        if cs.owner.is_some() || cs.pop < 0.7 || !w.terrain.is_land(i) {
+        if cs.owner.is_some() || cs.pop < tn.polity_form_min_pop || !w.terrain.is_land(i) {
             continue;
         }
         let culture = match cs.culture {
@@ -270,8 +271,8 @@ pub fn form_polities(w: &mut World) {
         // No existing state nearby.
         let (x, y) = w.terrain.xy(i);
         let mut near_state = false;
-        'scan: for dy in -3i32..=3 {
-            for dx in -5i32..=5 {
+        'scan: for dy in -tn.polity_form_radius_y..=tn.polity_form_radius_y {
+            for dx in -tn.polity_form_radius_x..=tn.polity_form_radius_x {
                 let cx = x as i32 + dx;
                 let cy = y as i32 + dy;
                 if cx < 0 || cy < 0 || cx >= w.terrain.w as i32 || cy >= w.terrain.h as i32 {
@@ -290,7 +291,7 @@ pub fn form_polities(w: &mut World) {
             continue;
         }
         let mil = w.cultures[culture].values.militarism;
-        if !rng.chance(0.2 * (0.5 + mil as f64) * (cs.pop as f64).min(3.0)) {
+        if !rng.chance(tn.polity_form_chance * (0.5 + mil as f64) * (cs.pop as f64).min(3.0)) {
             continue;
         }
         // Gather nearby cells of the same culture.
@@ -351,6 +352,7 @@ pub fn form_polities(w: &mut World) {
 
 pub fn expand(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let n = w.cells.len();
     let np = w.polities.len();
     let mut cand: Vec<Vec<(f32, usize, f32)>> = vec![Vec::new(); np];
@@ -420,13 +422,18 @@ pub fn expand(w: &mut World) {
             .ruler
             .map(|r| w.persons[r].traits.ambition)
             .unwrap_or(0.5);
-        let over = pol.overextension();
+        let over = pol.overextension(&tn);
         let over_pen = if over > 1.0 { 1.0 / (over * over) } else { 1.0 };
-        let war_pen = if pol.at_war() { 0.5 } else { 1.0 };
-        let mut budget = (0.7 + (pol.pop as f32).sqrt() * 0.14)
+        let war_pen = if pol.at_war() {
+            tn.expand_war_penalty
+        } else {
+            1.0
+        };
+        let mut budget = (tn.expand_budget_base
+            + (pol.pop as f32).sqrt() * tn.expand_budget_pop_factor)
             * pol.kind.expansion_mult()
-            * (0.5 + ambition)
-            * (0.4 + pol.stability)
+            * (tn.expand_ambition_base + ambition)
+            * (tn.expand_stability_base + pol.stability)
             * over_pen
             * war_pen;
         let list = &mut cand[p];
@@ -447,7 +454,7 @@ pub fn expand(w: &mut World) {
                 budget -= cost;
                 out.push(cell);
                 taken += 1;
-                if taken >= 6 {
+                if taken >= tn.expand_max_claims {
                     break;
                 }
             }
@@ -482,8 +489,8 @@ fn score_cell(
     let minerals = t.minerals[i] * 0.35;
     let cs = &w.cells[i];
     let pop = cs.pop * 0.25;
-    let reach = 9.0
-        + pol.dev * 14.0
+    let reach = w.tuning.expand_reach_base
+        + pol.dev * w.tuning.expand_reach_dev_weight
         + if pol.seafaring { 5.0 } else { 0.0 }
         + match pol.kind {
             PolityKind::Empire => 12.0,
@@ -495,7 +502,7 @@ fn score_cell(
             _ => 0.0,
         };
     let d = capital.map(|c| t.dist(c, i)).unwrap_or(5) as f32;
-    let dist_pen = (d / reach).powi(2) * 1.5;
+    let dist_pen = (d / reach).powi(2) * w.tuning.expand_distance_penalty;
     let culture_bonus = match cs.culture {
         Some(c) if c == pol.culture => 0.5,
         Some(c) => {
@@ -509,11 +516,17 @@ fn score_cell(
     };
     let race = w.cultures[pol.culture].race;
     let aff = w.affinity(race, i);
-    let score = f * 1.4 + river + coast + minerals + pop + culture_bonus + aff * 0.6
-        - base_cost * 0.35
+    let score = f * w.tuning.expand_fertility_weight
+        + river
+        + coast
+        + minerals
+        + pop
+        + culture_bonus
+        + aff * 0.6
+        - base_cost * w.tuning.expand_terrain_cost_weight
         - dist_pen
         + rng.range32(-0.2, 0.2);
-    let cost = base_cost * (1.0 + dist_pen * 0.5);
+    let cost = base_cost * (1.0 + dist_pen * w.tuning.expand_distance_cost_weight);
     Some((score, cost))
 }
 
@@ -523,6 +536,7 @@ fn score_cell(
 
 pub fn found_cities(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let n = w.cells.len();
     let np = w.polities.len();
     let mut by_owner: Vec<Vec<usize>> = vec![Vec::new(); np];
@@ -542,15 +556,16 @@ pub fn found_cities(w: &mut World) {
             continue;
         }
         let pol = &w.polities[p];
-        let max_cities = 1 + pol.cells / 16 + (pol.dev * 2.0) as usize;
+        let max_cities = 1 + pol.cells / tn.city_cells_per_city as usize + (pol.dev * 2.0) as usize;
         if pol.cities.len() >= max_cities {
             continue;
         }
-        if !rng.chance(0.2 * (0.5 + pol.dev as f64) * (0.4 + pol.stability as f64)) {
+        if !rng.chance(tn.city_found_chance * (0.5 + pol.dev as f64) * (0.4 + pol.stability as f64))
+        {
             continue;
         }
         let mut best = None;
-        let mut best_s = 0.6f32;
+        let mut best_s = tn.city_site_min_score;
         let cells = &by_owner[p];
         let samples = cells.len().min(80);
         for _ in 0..samples {
@@ -564,7 +579,8 @@ pub fn found_cities(w: &mut World) {
                 .chain(w.polities[p].cities.iter().map(|&c| &w.cities[c].cell))
                 .any(|&cc| {
                     let (cx, cy) = w.terrain.xy(cc);
-                    (cx as i32 - x as i32).abs() <= 5 && (cy as i32 - y as i32).abs() <= 3
+                    (cx as i32 - x as i32).abs() <= tn.city_spacing_x
+                        && (cy as i32 - y as i32).abs() <= tn.city_spacing_y
                 });
             if too_close {
                 continue;
@@ -603,6 +619,7 @@ pub fn found_cities(w: &mut World) {
 
 pub fn economy(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let np = w.polities.len();
     let neighbor_dev: Vec<f32> = (0..np)
         .map(|p| {
@@ -665,11 +682,11 @@ pub fn economy(w: &mut World) {
             }
             target += w.cities[c].wonders.len() as f32 * 0.08;
             let city = &mut w.cities[c];
-            city.prosperity += (target - city.prosperity) * 0.08;
+            city.prosperity += (target - city.prosperity) * tn.prosperity_adjust_rate;
             city.prosperity = city.prosperity.clamp(0.05, 2.5);
             city.walls += (dev * 0.8 - city.walls) * 0.03;
             prosp_sum += city.prosperity;
-            income += city.pop * city.prosperity * 0.08;
+            income += city.pop * city.prosperity * tn.city_income_factor;
         }
         let avg_prosp = if cities.is_empty() {
             0.3
@@ -677,8 +694,8 @@ pub fn economy(w: &mut World) {
             prosp_sum / cities.len() as f32
         };
         let pol = &mut w.polities[p];
-        income += pol.cells as f32 * 0.012 * (1.0 + pol.dev);
-        let upkeep = pol.army * 0.05 + pol.cells as f32 * 0.004;
+        income += pol.cells as f32 * tn.cell_income_factor * (1.0 + pol.dev);
+        let upkeep = pol.army * tn.army_upkeep_factor + pol.cells as f32 * tn.cell_upkeep_factor;
         pol.treasury = (pol.treasury + income - upkeep).clamp(-60.0, 600.0);
         // Army.
         let kind_mult = match pol.kind {
@@ -690,12 +707,16 @@ pub fn economy(w: &mut World) {
             _ => 1.0,
         };
         let target_army = pol.pop as f32
-            * (0.015 + vals.militarism * 0.04)
+            * (tn.army_pop_factor + vals.militarism * tn.army_militarism_weight)
             * kind_mult
             * (1.0 + pol.dev * 0.5)
             * army_mult
             * art_mult;
-        let rate = if at_war { 0.25 } else { 0.12 };
+        let rate = if at_war {
+            tn.army_build_rate_war
+        } else {
+            tn.army_build_rate_peace
+        };
         pol.army += (target_army - pol.army) * rate;
         if pol.treasury < 0.0 {
             pol.army *= 0.96;
@@ -703,7 +724,7 @@ pub fn economy(w: &mut World) {
         pol.army = pol.army.max(0.1);
         // Development.
         let stab = pol.stability;
-        let mut ddev = 0.0022 * (avg_prosp + vals.openness * 0.5 + dev_bonus);
+        let mut ddev = tn.dev_growth_rate * (avg_prosp + vals.openness * 0.5 + dev_bonus);
         if stab < 0.3 {
             ddev -= 0.0015;
         }
@@ -729,7 +750,7 @@ pub fn economy(w: &mut World) {
             .ruler
             .map(|r| (w.persons[r].traits.wisdom, w.persons[r].traits.charisma))
             .unwrap_or((0.3, 0.3));
-        let over = pol.overextension();
+        let over = pol.overextension(&tn);
         let kind_stab = match pol.kind {
             PolityKind::Kingdom | PolityKind::Republic => 0.05,
             PolityKind::Empire => -0.08,
@@ -737,29 +758,36 @@ pub fn economy(w: &mut World) {
             PolityKind::Theocracy => 0.03,
             _ => 0.0,
         };
-        let target = 0.5 + wisdom * 0.2 + charisma * 0.1 + stab_bonus + kind_stab
-            - (over - 1.0).max(0.0) * 0.25
-            - pol.foreign_share * 0.2
-            - pol.exhaustion * 0.3
-            - pol.decadence * 0.35
+        let target = tn.stability_base
+            + wisdom * tn.stability_wisdom_weight
+            + charisma * tn.stability_charisma_weight
+            + stab_bonus
+            + kind_stab
+            - (over - 1.0).max(0.0) * tn.stability_overextension_weight
+            - pol.foreign_share * tn.stability_foreign_weight
+            - pol.exhaustion * tn.stability_exhaustion_weight
+            - pol.decadence * tn.stability_decadence_weight
             + (avg_prosp - 0.4) * 0.15
             + vals.tradition * 0.05
             + (pol.treasury / 600.0).max(-0.2) * 0.2;
-        pol.stability += (target - pol.stability) * 0.1 + rng.range32(-0.02, 0.02);
+        pol.stability +=
+            (target - pol.stability) * tn.stability_adjust_rate + rng.range32(-0.02, 0.02);
         pol.stability = pol.stability.clamp(0.0, 1.0);
         // Exhaustion and decadence.
         if at_war {
-            pol.exhaustion = (pol.exhaustion + 0.035).min(1.5);
+            pol.exhaustion = (pol.exhaustion + tn.exhaustion_war_growth).min(1.5);
         } else {
-            pol.exhaustion = (pol.exhaustion - 0.03).max(0.0);
+            pol.exhaustion = (pol.exhaustion - tn.exhaustion_peace_decay).max(0.0);
         }
-        if pol.kind.rank() >= 2 && w.year - pol.founded > 70 {
+        if pol.kind.rank() >= 2 && w.year - pol.founded > tn.decadence_min_age {
             let kind_mult = if pol.kind == PolityKind::Empire {
-                1.6
+                tn.decadence_empire_mult
             } else {
                 1.0
             };
-            pol.decadence += (0.0045 * (1.0 + over) - wisdom * 0.002) * kind_mult;
+            pol.decadence += (tn.decadence_growth * (1.0 + over)
+                - wisdom * tn.decadence_wisdom_relief)
+                * kind_mult;
             pol.decadence = pol.decadence.clamp(0.0, 1.0);
         }
     }
@@ -890,7 +918,8 @@ fn succession(w: &mut World, p: usize, old: usize) {
         );
         return;
     }
-    let p_smooth = 0.6 + stability as f64 * 0.35;
+    let p_smooth = w.tuning.succession_smooth_base
+        + stability as f64 * w.tuning.succession_smooth_stability_weight;
     if rng.chance(p_smooth) {
         let heir = w.new_person(
             culture,
@@ -1024,6 +1053,7 @@ pub fn install_ruler(w: &mut World, p: usize, r: usize) {
 
 pub fn rulers(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     for p in w.living_polities() {
         let r = match w.polities[p].ruler {
             Some(r) => r,
@@ -1044,10 +1074,11 @@ pub fn rulers(w: &mut World) {
         let age = (w.year - per.born) as f32;
         let lifespan = w.races[per.race].lifespan;
         let rel = age / lifespan;
-        let p_nat = 0.0015 + 0.09 * rel.powi(6);
+        let p_nat = tn.ruler_death_base + tn.ruler_death_age_weight * rel.powi(6);
         let stability = w.polities[p].stability;
-        let p_assassin =
-            0.002 * (1.0 + per.traits.cruelty * 3.0) + (0.5 - stability).max(0.0) * 0.02;
+        let p_assassin = tn.ruler_assassination_base
+            * (1.0 + per.traits.cruelty * tn.ruler_assassination_cruelty_weight)
+            + (0.5 - stability).max(0.0) * tn.ruler_assassination_unrest_weight;
         let roll = rng.f64();
         if roll < p_nat as f64 {
             let cause = prose::natural_death(age as i32, &Pick::rolled(&rng));
@@ -1104,7 +1135,10 @@ pub fn split_off(
     }
     let seed = best?;
     let seed_culture = w.cells[seed].culture.unwrap_or(w.polities[p].culture);
-    let target = ((cells.len() as f32 * rng.range32(0.12, 0.35)) as usize).clamp(4, 90);
+    let target = ((cells.len() as f32
+        * rng.range32(w.tuning.split_min_share, w.tuning.split_max_share))
+        as usize)
+        .clamp(4, 90);
     // BFS from seed through cells of p.
     let mut region = vec![seed];
     let mut seen = std::collections::BTreeSet::new();
@@ -1213,6 +1247,7 @@ pub fn fall(
 
 pub fn unrest(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     for p in w.living_polities() {
         let pol = &w.polities[p];
         if pol.cells == 0 && pol.founded < w.year {
@@ -1226,10 +1261,14 @@ pub fn unrest(w: &mut World) {
         let stability = pol.stability;
         let since_revolt = w.year - pol.last_revolt;
         // Revolts.
-        if stability < 0.35 && since_revolt > 8 && pol.cells > 10 {
-            let mut p_rev = (0.35 - stability) as f64 * 0.4;
+        if stability < tn.revolt_stability_threshold
+            && since_revolt > tn.revolt_cooldown
+            && pol.cells > tn.revolt_min_cells as usize
+        {
+            let mut p_rev =
+                (tn.revolt_stability_threshold - stability) as f64 * tn.revolt_chance_factor;
             if pol.kind == PolityKind::Empire {
-                p_rev *= 1.4;
+                p_rev *= tn.revolt_empire_mult;
             }
             if rng.chance(p_rev) {
                 let cruelty = pol
@@ -1274,7 +1313,11 @@ pub fn unrest(w: &mut World) {
         }
         // Fragmentation of large, failing states.
         let pol = &w.polities[p];
-        if pol.stability < 0.15 && pol.cells > 45 && since_revolt > 5 && rng.chance(0.3) {
+        if pol.stability < tn.fragment_stability_threshold
+            && pol.cells > tn.fragment_min_cells as usize
+            && since_revolt > tn.fragment_cooldown
+            && rng.chance(tn.fragment_chance)
+        {
             fragment(w, p);
         }
     }
@@ -1319,7 +1362,7 @@ fn kind_changes(w: &mut World, p: usize) {
         | PolityKind::Republic
         | PolityKind::Theocracy
         | PolityKind::Magocracy => {
-            let empire_cells = 180.max(w.stats.owned_cells / 8);
+            let empire_cells = (w.tuning.empire_min_cells as usize).max(w.stats.owned_cells / 8);
             if pol.cells >= empire_cells
                 && (pol.conquered >= 2 || pol.cultures_within >= 3)
                 && pol.stability > 0.4

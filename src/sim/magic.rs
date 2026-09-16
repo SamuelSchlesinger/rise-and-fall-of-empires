@@ -312,6 +312,7 @@ impl World {
 
 pub fn tick(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     // Founding.
     let ncity = w.cities.len();
     for c in 0..ncity {
@@ -331,8 +332,10 @@ pub fn tick(w: &mut World) {
                     .count()
             })
             .unwrap_or(0);
-        let base = 0.0015 * (mana as f64 - 0.25).max(0.0) * (0.5 + vals.mysticism as f64 * 2.0)
-            + 0.0004 * (0.5 + vals.openness as f64);
+        let base = tn.school_found_mana_rate
+            * (mana as f64 - 0.25).max(0.0)
+            * (0.5 + vals.mysticism as f64 * 2.0)
+            + tn.school_found_open_rate * (0.5 + vals.openness as f64);
         let p = base * (w.cities[c].pop as f64 / 3.0).min(2.0) / (1.0 + existing as f64);
         if !rng.chance(p) {
             continue;
@@ -381,9 +384,9 @@ pub fn tick(w: &mut World) {
             let vals = w.cultures[pol.culture].values;
             let is_state = pol.school == Some(s);
             let rival_state = pol.school.is_some() && !is_state;
-            let mut d = 0.007 * (0.5 + vals.mysticism) * (0.5 + vals.openness);
+            let mut d = tn.school_influence_growth * (0.5 + vals.mysticism) * (0.5 + vals.openness);
             if is_state {
-                d += 0.012;
+                d += tn.school_state_bonus;
             }
             if rival_state {
                 d -= 0.01 * w.schools[pol.school.unwrap()].hostility;
@@ -391,7 +394,7 @@ pub fn tick(w: &mut World) {
             if home_polity == Some(p) {
                 d += 0.01;
             }
-            d -= 0.009;
+            d -= tn.school_influence_decay;
             gains.push((p, d));
             // Spread to neighbours.
             if v > 0.2 {
@@ -401,7 +404,8 @@ pub fn tick(w: &mut World) {
                     }
                     let qv = w.cultures[w.polities[q].culture].values;
                     let at_war = w.war_between(p, q).is_some();
-                    let mut sd = 0.002 * v * (0.5 + qv.openness) * (0.5 + qv.mysticism);
+                    let mut sd =
+                        tn.school_spread_rate * v * (0.5 + qv.openness) * (0.5 + qv.mysticism);
                     if at_war {
                         sd *= 0.3;
                     }
@@ -442,7 +446,7 @@ pub fn tick(w: &mut World) {
             };
             match pol.school {
                 None => {
-                    if v > 0.4 && rng.chance(0.04 * (0.3 + affinity as f64)) {
+                    if v > 0.4 && rng.chance(tn.school_adopt_chance * (0.3 + affinity as f64)) {
                         w.polities[p].school = Some(s);
                         w.schools[s].state_of.push(p);
                         let text = prose::school_adopted(w, p, s, v);
@@ -457,7 +461,7 @@ pub fn tick(w: &mut World) {
                 }
                 Some(state) if state != s => {
                     let sv = w.schools[state].influence.get(&p).copied().unwrap_or(0.0);
-                    if v > sv + 0.25 && rng.chance(0.05) {
+                    if v > sv + 0.25 && rng.chance(tn.school_convert_chance) {
                         // Conversion.
                         w.polities[p].school = Some(s);
                         w.schools[s].state_of.push(p);
@@ -472,7 +476,7 @@ pub fn tick(w: &mut World) {
                     } else if v > 0.25
                         && (w.schools[state].hostility + ruler_t.cruelty + ruler_t.piety * 0.5)
                             > 1.2
-                        && rng.chance(0.06)
+                        && rng.chance(tn.school_persecution_chance)
                     {
                         // Persecution.
                         let e = w.schools[s].influence.get_mut(&p).unwrap();
@@ -515,7 +519,7 @@ pub fn tick(w: &mut World) {
         }
         // Schism.
         let age = w.year - w.schools[s].founded;
-        if age > 60 && adherents >= 2 && rng.chance(0.006) {
+        if age > tn.school_schism_min_age && adherents >= 2 && rng.chance(tn.school_schism_chance) {
             let home = w.schools[s].home_city;
             // Pick a city in an adherent polity other than the home.
             let candidates: Vec<usize> = influence
@@ -532,7 +536,7 @@ pub fn tick(w: &mut World) {
                 // Split influence.
                 let mut moved = Vec::new();
                 for &(p, v) in &influence {
-                    if rng.chance(0.45) {
+                    if rng.chance(tn.school_schism_share) {
                         w.schools[child].influence.insert(p, v * 0.6);
                         if let Some(e) = w.schools[s].influence.get_mut(&p) {
                             *e *= 0.5;
@@ -557,10 +561,10 @@ pub fn tick(w: &mut World) {
         }
         // Extinction.
         let maxv = influence.iter().map(|(_, v)| *v).fold(0.0, f32::max);
-        if maxv < 0.04 && age > 10 {
+        if maxv < tn.school_extinction_threshold && age > 10 {
             match w.schools[s].fading_since {
                 None => w.schools[s].fading_since = Some(w.year),
-                Some(y) if w.year - y > 15 => {
+                Some(y) if w.year - y > tn.school_fading_years => {
                     w.schools[s].extinct = Some(w.year);
                     for p in 0..w.polities.len() {
                         if w.polities[p].school == Some(s) {
@@ -585,7 +589,9 @@ pub fn tick(w: &mut World) {
                 if let Some(cap) = w.polities[p].capital {
                     let cell = w.cities[cap].cell;
                     let mana = w.terrain.mana[cell];
-                    let pdis = 0.0012 * (v as f64) * (mana as f64 + w.polities[p].dev as f64 * 0.3);
+                    let pdis = tn.arcane_catastrophe_chance
+                        * (v as f64)
+                        * (mana as f64 + w.polities[p].dev as f64 * 0.3);
                     if rng.chance(pdis) {
                         catastrophe(w, s, p, cap);
                     }
