@@ -28,6 +28,7 @@ impl Ui {
         let avail = h - 1;
         let width = sw.saturating_sub(10);
         let mut lines = self.chronicle_lines(self.log_min, "", width, avail);
+        self.fold_battles(&mut lines, width);
         lines.truncate(avail);
         let mut y = y0 + h - 1;
         for (l, c, a, idx) in lines {
@@ -213,6 +214,122 @@ impl Ui {
                 (Rgb(230, 200, 120), BOLD)
             };
             self.screen.text_clip(2, k, l, sw - 3, c, bg, a);
+        }
+    }
+
+    /// A run of battles of one war reads as one line plus a count: the log
+    /// is for noticing things, not for counting skirmishes.
+    fn fold_battles(&self, lines: &mut Vec<(String, Rgb, u8, usize)>, width: usize) {
+        let war_of = |idx: usize| -> Option<usize> {
+            let e = &self.world.chronicle.events[idx];
+            if e.kind != EventKind::Battle {
+                return None;
+            }
+            e.refs.iter().find_map(|r| match r {
+                Ref::War(x) => Some(*x),
+                _ => None,
+            })
+        };
+        let mut out: Vec<(String, Rgb, u8, usize)> = Vec::new();
+        let mut i = 0;
+        while i < lines.len() {
+            let war = war_of(lines[i].3);
+            let mut j = i + 1;
+            if war.is_some() {
+                while j < lines.len() && war_of(lines[j].3) == war && lines[j].3 != lines[i].3 {
+                    j += 1;
+                }
+            }
+            out.push(lines[i].clone());
+            let folded = j - i - 1;
+            if folded > 0 {
+                let name = &self.world.wars[war.unwrap()].name;
+                let text = format!(
+                    "       and {} more battle{} of {}",
+                    folded,
+                    if folded == 1 { "" } else { "s" },
+                    name
+                );
+                let text: String = text.chars().take(width + 7).collect();
+                out.push((text, Rgb(150, 120, 110), DIM, lines[i].3));
+            }
+            i = j;
+        }
+        *lines = out;
+    }
+
+    /// The digest page: what has happened lately, in plain sentences.
+    pub(super) fn render_recap(&mut self) {
+        let sw = self.screen.w;
+        let sh = self.screen.h.saturating_sub(1);
+        let bg = Rgb(14, 14, 20);
+        let fg = Rgb(200, 200, 205);
+        self.screen.fill(0, 0, sw, sh, ' ', fg, bg);
+        let width = sw.saturating_sub(6).max(30);
+        let lines = recap::lines(&self.world, self.recap_years, self.recap_scope, width);
+        let max_scroll = lines.len().saturating_sub(sh.saturating_sub(1));
+        if self.recap_scroll > max_scroll {
+            self.recap_scroll = max_scroll;
+        }
+        for (k, line) in lines.iter().skip(self.recap_scroll).take(sh).enumerate() {
+            self.screen
+                .text_clip(3, k, &line.text, width, line.fg, bg, line.attr);
+        }
+        if lines.len() > sh {
+            let s = format!(
+                " {}/{} ",
+                self.recap_scroll + sh.min(lines.len()),
+                lines.len()
+            );
+            self.screen.text(
+                sw.saturating_sub(s.len() + 1),
+                0,
+                &s,
+                Rgb(120, 120, 130),
+                bg,
+            );
+        }
+    }
+
+    /// The first-run card, over whatever is behind it.
+    pub(super) fn render_tour(&mut self) {
+        let sw = self.screen.w;
+        let sh = self.screen.h;
+        let inner = TOUR
+            .iter()
+            .map(|l| l.chars().count())
+            .max()
+            .unwrap_or(40)
+            .min(sw.saturating_sub(6));
+        let w = (inner + 6).min(sw);
+        let h = (TOUR.len() + 4).min(sh);
+        let x = (sw.saturating_sub(w)) / 2;
+        let y = (sh.saturating_sub(h)) / 2;
+        let bg = Rgb(26, 26, 38);
+        let fg = Rgb(225, 225, 235);
+        self.screen.fill(x, y, w, h, ' ', fg, bg);
+        self.screen.frame(
+            x,
+            y,
+            w,
+            h,
+            "Rise and Fall of Empires",
+            Rgb(240, 210, 130),
+            bg,
+        );
+        for (k, l) in TOUR.iter().enumerate() {
+            if y + 2 + k >= y + h - 1 {
+                break;
+            }
+            let (c, a) = if k == 0 {
+                (Rgb(255, 230, 170), BOLD)
+            } else if k + 1 == TOUR.len() {
+                (Rgb(160, 210, 160), 0)
+            } else {
+                (fg, 0)
+            };
+            self.screen
+                .text_clip(x + 3, y + 2 + k, l, w.saturating_sub(5), c, bg, a);
         }
     }
 

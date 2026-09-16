@@ -21,7 +21,8 @@ cargo build --release
 Options: `--seed N`, `--width W --height H` (default 160×64), `--detail
 low|medium|high`, `--headless N`, `--min-importance 0-3` (headless filter),
 `--stats` (balance metrics per century, with `--headless N`), `--save FILE`,
-`--load FILE`, `--ascii`, `--no-mouse`, `--mkconfig`, `--snapshot PATH`
+`--load FILE`, `--ascii`, `--no-mouse`, `--tour` (show the introductory
+card again), `--mkconfig`, `--snapshot PATH`
 (render one frame to PATH.txt and PATH.html; combine with `--layer` and
 `--cols/--rows`).
 
@@ -48,6 +49,7 @@ full key list.
 | `gg` or `G` | jump to the selected thing |
 | `]` `[` and `}` `{` | next / previous realm, next / previous city |
 | `t` | go to the top story in the storyteller panel |
+| `r` | a recap of the last fifty years (of the selected realm, if one is selected) |
 | `/name`, `n`, `N` | search realms, cities, people, schools, wars, places, relics; cycle matches |
 | `f` | follow: the cursor jumps to each major event as it happens |
 | `e` | lists: realms, cities, peoples, schools, persons, wars, places, relics, prophecies |
@@ -76,6 +78,9 @@ chronicle line or a sidebar entry to jump to it. Pass `--no-mouse` (or
 | `:until 900`, `:step 50` | run to a year and pause; advance N years at once |
 | `:new [seed]` | start a fresh world without restarting |
 | `:story` | go to the top story |
+| `:recap [N]` | the digest of the last N years (default 50); `r` on the map does the same |
+| `:legend` | the one-line key under the map (on by default) |
+| `:tour` | show the introductory card again |
 | `:mute battle` | hide an event kind from the feeds (toggle); `:mute` lists |
 | `:set key value`, `:map <from> <to>`, `:unmap key`, `:maps` | runtime versions of the config file |
 | `:mkconfig`, `:config` | write a commented config template; show its path |
@@ -119,6 +124,38 @@ The sidebar's **Now** panel picks the three most interesting things in the
 world at the moment: the biggest war and who is winning it, a great realm
 about to break, a new empire, a plague, a prophecy about to run out. `t`
 jumps to the top one.
+
+### Reading the world
+
+Nothing asks you to decode a percentage. Stability reads *steady*,
+*restless*, *troubled* or *on the brink*; a treasury is *bankrupt*, *poor*,
+*solvent* or *rich*; an army is *outmatched*, *matched* or *formidable*
+against its neighbours; a realm is *a small realm* or *a great power*; a
+school of thought is *a local cult*, *spreading* or *a great faith*. The
+numbers stay beside the words in lists, where they are there to compare.
+
+**Causes sit next to effects.** A realm's page carries a **Why** block: what
+is pulling its stability up or down, ranked and in words — *overextended:
+383 lands, but the crown can govern about 250*, *the court has rotted
+through with luxury*, *the ruler is beloved* — with each contribution in
+points, adding up to the value stability is drifting towards. A war's page
+says who is ahead and why (hosts, generals, terrain, trouble at home) and
+what a peace signed this year would look like. A person's page opens with
+one sentence of standing: *a beloved ruler of twenty years*.
+
+**The map says what it is.** At zoom 1 each realm's name is written beside
+its capital, and a one-line legend under the map says what the current
+layer's colours and glyphs mean (`:legend` turns it off). The sidebar's
+**Here** block is a plain sentence about whatever the cursor sits on:
+*Steppe on the coast, where Fil stands, ruled by the Lystzylese
+Commonwealth, home to 4,470 Whendan folk.*
+
+**Digests.** `r` or `:recap` summarises the last fifty years — realms risen
+and fallen, wars begun and ended, rulers dead, cities founded and sacked,
+schools founded, who grew and who shrank — for the world, or for the
+selected realm. `:recap 200` looks further back. Coming back to the map
+after a while on another screen, the sidebar says in one line what you
+missed.
 
 ## How the world works
 
@@ -178,9 +215,14 @@ The simulation is deterministic: the same seed always produces the same
 history, and a saved world continues identically. Keep it that way (use
 ordered maps, never iterate a HashMap in the simulation).
 
+On a first run (no config file and no `~/.local/share/empires`) a short
+card explains the map, that time is already running, and the four keys that
+matter. Any key dismisses it for good; `--tour` or `:tour` brings it back.
+
 Source layout: `src/geo.rs` terrain, `src/lang.rs` languages and names,
 `src/sim/` the simulation (`politics`, `war`, `magic`, `people`, `events`,
-`stories`, `genesis`, `chronicle`, and `prose`, which writes every
-sentence the chronicle prints), `src/ser.rs` save files, `src/config.rs`
-and `src/theme.rs`, `src/term.rs` the raw terminal layer, `src/ui/` the
-interface, `src/stats.rs` the balance harness.
+`stories`, `genesis`, `chronicle`, `prose`, which writes every sentence the
+chronicle prints, and `explain` for why things are as they are), `src/ser.rs`
+save files, `src/config.rs` and `src/theme.rs`, `src/term.rs` the raw
+terminal layer, `src/ui/` the interface (`words` for numbers in plain
+language, `recap` for the digest), `src/stats.rs` the balance harness.

@@ -14,6 +14,7 @@ impl Ui {
     }
 
     pub(super) fn compose(&mut self) {
+        self.note_mode_change();
         let bg = Rgb(12, 12, 16);
         self.screen.clear(bg);
         match self.mode {
@@ -29,8 +30,12 @@ impl Ui {
             Mode::Detail => self.render_detail(),
             Mode::Chronicle => self.render_chronicle(),
             Mode::Help => self.render_help(),
+            Mode::Recap => self.render_recap(),
         }
         self.render_status();
+        if self.tour {
+            self.render_tour();
+        }
         if !self.theme.is_identity() {
             let t = self.theme;
             for c in self.screen.cells_mut() {
@@ -83,20 +88,21 @@ impl Ui {
             return;
         }
         let state = if self.paused {
-            "PAUSED".to_string()
+            "paused".to_string()
         } else {
-            format!("{}y/s", SPEEDS[self.speed_idx])
+            format!("{} years/sec", SPEEDS[self.speed_idx])
         };
-        let left = format!(
-            " {} | {} | detail:{} | seed {} | {:.1}ms/y {}fps",
-            state,
+        let left = format!(" year {} · {} ", self.world.year, state);
+        let mut x = self.screen.text_attr(0, y, &left, key, bg, BOLD);
+        let rest = format!(
+            "· {} map · detail {} · seed {} · {:.1}ms/y {}fps",
             self.layer.name(),
             self.world.detail.name(),
             self.world.seed,
             self.world.ticks_ms,
             self.fps
         );
-        let mut x = self.screen.text_attr(0, y, &left, key, bg, BOLD);
+        x = self.screen.text(x, y, &rest, Rgb(170, 170, 185), bg);
         if Instant::now() < self.msg_until {
             x = self
                 .screen
@@ -128,6 +134,7 @@ impl Ui {
             Mode::Chronicle => "j/k scroll  f importance  / filter  click a line to jump  Esc back",
             Mode::Help => "any key to return",
             Mode::Fate => "1-6 choose  Esc cancel",
+            Mode::Recap => "j/k scroll  :recap N for a longer look  Esc back",
         };
         let mut hx = sw.saturating_sub(hints.chars().count() + 1);
         let mut hints = hints;
@@ -138,6 +145,55 @@ impl Ui {
         if hx > x + 2 {
             self.screen.text(hx, y, hints, Rgb(170, 170, 180), bg);
         }
+    }
+
+    /// Remember what the viewer missed while they were off the map, and
+    /// hand them one line about it when they come back.
+    fn note_mode_change(&mut self) {
+        let was = self.last_mode;
+        self.last_mode = self.mode;
+        if self.mode == was {
+            return;
+        }
+        if was == Mode::Map && self.mode != Mode::Fate {
+            self.away_mark = Some(self.world.chronicle.len());
+            return;
+        }
+        if self.mode == Mode::Map {
+            if let Some(mark) = self.away_mark.take() {
+                self.since_note = self.missed_since(mark);
+            }
+        }
+    }
+
+    /// One plain sentence about the major events after chronicle entry
+    /// `mark`, or nothing if the world stayed quiet.
+    fn missed_since(&self, mark: usize) -> Option<String> {
+        let events = &self.world.chronicle.events;
+        if mark >= events.len() {
+            return None;
+        }
+        let major: Vec<&crate::sim::chronicle::Event> = events[mark..]
+            .iter()
+            .filter(|e| e.importance >= 2 && !self.muted.contains(&e.kind))
+            .collect();
+        let first = major.first()?;
+        let years = self.world.year - first.year;
+        let when = if years <= 1 {
+            "in the year".to_string()
+        } else {
+            format!("over the {} years", years)
+        };
+        Some(if major.len() == 1 {
+            format!("While you were away: {}", first.text)
+        } else {
+            format!(
+                "{} notable things {} you were away. The first: {}",
+                major.len(),
+                when,
+                first.text
+            )
+        })
     }
 
     /// The newest chronicle entries, wrapped to `width` and newest first, as

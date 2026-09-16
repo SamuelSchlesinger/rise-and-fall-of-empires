@@ -268,5 +268,85 @@ impl Ui {
                 self.screen.put(mx + sx, my + mh - 1, 'v', hint, dark);
             }
         }
+        // Labels last: a scroll hint may hide behind a name, but a name
+        // must never be broken by one.
+        self.render_map_labels(mx, my, mw, mh);
+        self.render_legend(mx, my, mw, mh);
+    }
+
+    /// Write each sizeable realm's short name beside its capital, where it
+    /// fits without covering another label, a city or the sidebar. Only at
+    /// zoom 1: closer in there is no room, further out the names collide.
+    fn render_map_labels(&mut self, mx: usize, my: usize, mw: usize, mh: usize) {
+        if self.zoom != 1 || mw < 40 {
+            return;
+        }
+        let (ox, oy) = self.view;
+        let tw = self.world.terrain.w;
+        // Biggest realms first, so the small fry give way to the great.
+        let mut ps: Vec<usize> = self.world.living_polities();
+        ps.sort_by_key(|&p| std::cmp::Reverse(self.world.polities[p].cells));
+        // Which columns of each row a label has already taken.
+        let mut taken: Vec<Vec<bool>> = vec![vec![false; mw]; mh];
+        for &p in &ps {
+            let pol = &self.world.polities[p];
+            if pol.cells < 12 {
+                continue;
+            }
+            let cell = match self.world.capital_cell(p) {
+                Some(c) => c,
+                None => continue,
+            };
+            let (cx, cy) = (cell % tw, cell / tw);
+            if cx < ox || cy < oy {
+                continue;
+            }
+            let (sx, sy) = (cx - ox, cy - oy);
+            if sx >= mw || sy >= mh {
+                continue;
+            }
+            let label = format!(" {}", pol.short);
+            let n = label.chars().count();
+            // Right of the capital, and never over the sidebar edge.
+            let x0 = sx + 1;
+            if x0 + n + 1 > mw {
+                continue;
+            }
+            if (x0..x0 + n + 1).any(|x| taken[sy][x]) {
+                continue;
+            }
+            for x in x0..x0 + n + 1 {
+                taken[sy][x] = true;
+            }
+            let color = pol.color;
+            let fg = color.mix(Rgb(255, 255, 255), 0.55);
+            for (k, ch) in label.chars().enumerate() {
+                let bg = self.screen.cell(mx + x0 + k, my + sy).bg.scale(0.45);
+                self.screen.put_attr(mx + x0 + k, my + sy, ch, fg, bg, BOLD);
+            }
+        }
+    }
+
+    /// The one-line key to the layer, along the bottom of the map.
+    fn render_legend(&mut self, mx: usize, my: usize, mw: usize, mh: usize) {
+        if !self.show_legend || mh < 6 || mw < 30 {
+            return;
+        }
+        let y = my + mh - 1;
+        let bg = Rgb(24, 24, 30);
+        let text = words::legend(self.layer, self.ascii);
+        self.screen.fill(mx, y, mw, 1, ' ', Rgb(170, 170, 180), bg);
+        self.screen
+            .text_attr(mx + 1, y, self.layer.name(), Rgb(235, 205, 130), bg, BOLD);
+        let x = mx + 2 + self.layer.name().chars().count();
+        self.screen.text_clip(
+            x,
+            y,
+            &text,
+            mw.saturating_sub(x - mx + 1),
+            Rgb(165, 165, 178),
+            bg,
+            0,
+        );
     }
 }

@@ -30,6 +30,13 @@ impl Ui {
         if k == Key::Ctrl('c') {
             return false;
         }
+        // The first-run card goes away at a touch, and never comes back.
+        if self.tour {
+            self.tour = false;
+            mark_tour_seen();
+            self.say("? for keys   : for commands   r for a recap   :q to quit");
+            return true;
+        }
         if self.prompt != Prompt::None {
             return self.key_prompt(k);
         }
@@ -172,6 +179,7 @@ impl Ui {
             Mode::List => self.key_list(k),
             Mode::Detail => self.key_detail(k),
             Mode::Chronicle => self.key_chronicle(k),
+            Mode::Recap => self.key_recap(k),
             Mode::Help | Mode::Fate => {}
         }
         self.count = None;
@@ -184,6 +192,7 @@ impl Ui {
             Mode::List => self.list_idx = 0,
             Mode::Detail => self.detail_scroll = 0,
             Mode::Chronicle => self.chron_scroll = usize::MAX / 2,
+            Mode::Recap => self.recap_scroll = 0,
             _ => {}
         }
     }
@@ -194,6 +203,7 @@ impl Ui {
             Mode::List => self.list_idx = usize::MAX / 2,
             Mode::Detail => self.detail_scroll = usize::MAX / 2,
             Mode::Chronicle => self.chron_scroll = 0,
+            Mode::Recap => self.recap_scroll = usize::MAX / 2,
             _ => {}
         }
     }
@@ -262,6 +272,7 @@ impl Ui {
                 self.mode = Mode::Chronicle;
                 self.chron_scroll = 0;
             }
+            Key::Char('r') | Key::Char('R') => self.open_recap(None),
             Key::Char('f') | Key::Char('F') => {
                 self.follow = !self.follow;
                 let m = if self.follow {
@@ -453,6 +464,28 @@ impl Ui {
         }
     }
 
+    fn key_recap(&mut self, k: Key) {
+        let n = self.count.unwrap_or(1).max(1);
+        let page = self.screen.h.saturating_sub(2).max(1);
+        match k {
+            Key::Esc | Key::Char('q') | Key::Backspace => self.mode = self.prev_mode,
+            Key::Up | Key::Char('k') => self.recap_scroll = self.recap_scroll.saturating_sub(n),
+            Key::Down | Key::Char('j') => self.recap_scroll += n,
+            Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => {
+                self.recap_scroll = self.recap_scroll.saturating_sub(page * n)
+            }
+            Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => self.recap_scroll += page * n,
+            Key::Ctrl('u') => self.recap_scroll = self.recap_scroll.saturating_sub(page / 2 * n),
+            Key::Ctrl('d') => self.recap_scroll += page / 2 * n,
+            Key::Home => self.recap_scroll = 0,
+            Key::End => self.recap_scroll = usize::MAX / 2,
+            Key::Char('c') => self.mode = Mode::Chronicle,
+            Key::Char('e') => self.mode = Mode::List,
+            Key::Enter | Key::Char('m') => self.mode = Mode::Map,
+            _ => {}
+        }
+    }
+
     fn key_fate(&mut self, k: Key) {
         let p = match self.selected {
             Some(Ref::Polity(p)) => p,
@@ -601,6 +634,12 @@ impl Ui {
                     self.mode = self.prev_mode;
                 }
             }
+            Mode::Recap => match m.kind {
+                MouseKind::WheelUp => self.recap_scroll = self.recap_scroll.saturating_sub(3),
+                MouseKind::WheelDown => self.recap_scroll += 3,
+                MouseKind::Press(_) => self.mode = self.prev_mode,
+                _ => {}
+            },
             Mode::Fate => {
                 if let MouseKind::Press(_) = m.kind {
                     let (fx, fy, fw, fh) = self.fate_rect;

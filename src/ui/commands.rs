@@ -17,13 +17,7 @@ enum Cmd {
 
 impl Ui {
     fn default_save_dir() -> std::path::PathBuf {
-        if let Ok(x) = std::env::var("XDG_DATA_HOME") {
-            if !x.is_empty() {
-                return std::path::PathBuf::from(x).join("empires");
-            }
-        }
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        std::path::PathBuf::from(home).join(".local/share/empires")
+        data_dir()
     }
 
     fn resolve_save_path(&self, arg: &str) -> std::path::PathBuf {
@@ -286,6 +280,25 @@ impl Ui {
             "help" | "h" | "?" => {
                 self.prev_mode = self.mode;
                 self.mode = Mode::Help;
+            }
+            "recap" | "digest" | "lately" => {
+                let years = arg.parse::<i32>().ok();
+                self.open_recap(years);
+            }
+            "legend" | "key" => {
+                self.show_legend = match arg.to_lowercase().as_str() {
+                    "on" | "1" | "yes" => true,
+                    "off" | "0" | "no" => false,
+                    _ => !self.show_legend,
+                };
+                self.say(if self.show_legend {
+                    "legend on"
+                } else {
+                    "legend off"
+                });
+            }
+            "tour" => {
+                self.tour = true;
             }
             "mouse" => {
                 self.mouse = !self.mouse;

@@ -3,6 +3,7 @@
 
 pub mod chronicle;
 pub mod events;
+pub mod explain;
 pub mod genesis;
 pub mod magic;
 pub mod people;

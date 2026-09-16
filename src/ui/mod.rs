@@ -6,7 +6,9 @@
 mod commands;
 mod detail;
 mod input;
+mod recap;
 mod render;
+mod words;
 
 use crate::config::Config;
 use crate::geo::Biome;
@@ -26,6 +28,7 @@ pub enum Mode {
     Chronicle,
     Help,
     Fate,
+    Recap,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -143,9 +146,67 @@ pub struct Ui {
     pub zoom: usize,
     pub muted: Vec<EventKind>,
     story_rows: Vec<(usize, Ref)>,
+    /// The one-line key under the map (`:legend` toggles it).
+    pub show_legend: bool,
+    /// The first-run card, dismissed by any key.
+    tour: bool,
+    recap_years: i32,
+    recap_scroll: usize,
+    recap_scope: Option<usize>,
+    /// The chronicle length when the viewer last left the map, and the
+    /// note built from whatever happened while they were away.
+    away_mark: Option<usize>,
+    since_note: Option<String>,
+    last_mode: Mode,
 }
 
-pub fn run(world: World, ascii: bool, mouse: bool, save_path: Option<String>, cfg: Config) {
+/// Where saves and the "tour has been seen" marker live.
+pub fn data_dir() -> std::path::PathBuf {
+    if let Ok(x) = std::env::var("XDG_DATA_HOME") {
+        if !x.is_empty() {
+            return std::path::PathBuf::from(x).join("empires");
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join(".local/share/empires")
+}
+
+/// True the very first time the game is started here: no config file, no
+/// data directory, and no marker saying the card has already been read.
+fn first_run() -> bool {
+    let dir = data_dir();
+    !dir.join(".tour-seen").exists() && !dir.exists() && !crate::config::config_path().exists()
+}
+
+fn mark_tour_seen() {
+    let dir = data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join(".tour-seen"), b"seen\n");
+}
+
+/// The card a first-time viewer sees, until any key dismisses it.
+pub const TOUR: &[&str] = &[
+    "This is a world, and it is already running.",
+    "",
+    "The map is the whole of it: colours are realms, @ is a capital, # a city,",
+    "! something that happened this year. The line under the map says what the",
+    "colours mean; the panel on the right says what the cursor is sitting on.",
+    "",
+    "Space  pause time             Enter  open whatever is under the cursor",
+    "h j k l  move the cursor      r      a recap of the last fifty years",
+    "Tab    another map layer      ?      every other key",
+    "",
+    "Nothing here needs you. Press any key and watch.",
+];
+
+pub fn run(
+    world: World,
+    ascii: bool,
+    mouse: bool,
+    save_path: Option<String>,
+    cfg: Config,
+    tour: bool,
+) {
     if !term::enter(mouse) {
         eprintln!("empires: stdin/stdout is not a terminal. Use --headless N to print a chronicle instead.");
         return;
@@ -159,6 +220,7 @@ pub fn run(world: World, ascii: bool, mouse: bool, save_path: Option<String>, cf
     let mut ui = Ui::new(world, ascii, mouse, w, h);
     ui.save_path = save_path.map(std::path::PathBuf::from);
     ui.apply_config(&cfg);
+    ui.tour = tour || first_run();
     if cfg.errors.is_empty() {
         ui.say("? for keys   : for commands   / to search   :w to save");
     } else {
@@ -231,6 +293,45 @@ pub fn snapshot(
                 ui.mode = Mode::Detail;
             }
         }
+        "war" => {
+            let mut ws: Vec<usize> = (0..ui.world.wars.len()).collect();
+            ws.sort_by_key(|&x| {
+                (
+                    ui.world.wars[x].ended.is_some(),
+                    std::cmp::Reverse(ui.world.wars[x].battles),
+                )
+            });
+            if let Some(&x) = ws.first() {
+                ui.selected = Some(Ref::War(x));
+                ui.mode = Mode::Detail;
+            }
+        }
+        "person" => {
+            let mut ps: Vec<usize> = (0..ui.world.persons.len()).collect();
+            ps.sort_by(|&a, &b| {
+                ui.world.persons[b]
+                    .renown
+                    .partial_cmp(&ui.world.persons[a].renown)
+                    .unwrap()
+            });
+            if let Some(&i) = ps.first() {
+                ui.selected = Some(Ref::Person(i));
+                ui.mode = Mode::Detail;
+            }
+        }
+        // As if the viewer had spent the last stretch of history on another
+        // screen and just come back to the map.
+        "missed" => {
+            let n = ui.world.chronicle.len();
+            ui.away_mark = Some(n.saturating_sub(40));
+            ui.last_mode = Mode::List;
+        }
+        "recap" => {
+            ui.selected = None;
+            ui.open_recap(Some(50));
+        }
+        "recap-realm" => ui.open_recap(Some(100)),
+        "tour" => ui.tour = true,
         "list" => ui.mode = Mode::List,
         "chronicle" => {
             ui.mode = Mode::Chronicle;
@@ -354,6 +455,14 @@ impl Ui {
             zoom: 1,
             muted: Vec::new(),
             story_rows: Vec::new(),
+            show_legend: true,
+            tour: false,
+            recap_years: 50,
+            recap_scroll: 0,
+            recap_scope: None,
+            away_mark: None,
+            since_note: None,
+            last_mode: Mode::Map,
         };
         // Start looking at the first race's homeland.
         let home = ui.world.races.first().map(|r| r.home).unwrap_or(0);
@@ -924,6 +1033,23 @@ impl Ui {
         out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         out.truncate(3);
         out.into_iter().map(|(_, t, r)| (t, r)).collect()
+    }
+
+    /// Open the digest, for the whole world or for the realm in hand.
+    pub(super) fn open_recap(&mut self, years: Option<i32>) {
+        if let Some(y) = years {
+            self.recap_years = y.clamp(1, 100_000);
+        }
+        self.recap_scope = match self.selected {
+            Some(Ref::Polity(p)) => Some(p),
+            Some(Ref::City(c)) => self.world.cities[c].polity,
+            _ => None,
+        };
+        if self.mode != Mode::Recap {
+            self.prev_mode = self.mode;
+        }
+        self.mode = Mode::Recap;
+        self.recap_scroll = 0;
     }
 
     fn open_fate(&mut self) {

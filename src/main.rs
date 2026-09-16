@@ -34,6 +34,7 @@ struct Args {
     layer: String,
     cols: usize,
     rows: usize,
+    tour: bool,
 }
 
 fn parse_args(cfg: &config::Config) -> Args {
@@ -56,6 +57,7 @@ fn parse_args(cfg: &config::Config) -> Args {
         layer: "political".into(),
         cols: 160,
         rows: 45,
+        tour: false,
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -88,6 +90,7 @@ fn parse_args(cfg: &config::Config) -> Args {
                 a.min_importance = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(1)
             }
             "--ascii" => a.ascii = true,
+            "--tour" => a.tour = true,
             "--stats" => a.stats = true,
             "--load" | "-l" => a.load = next(&mut i),
             "--save" | "-o" => a.save = next(&mut i),
@@ -105,7 +108,7 @@ fn parse_args(cfg: &config::Config) -> Args {
             }
             "--help" => {
                 println!(
-                    "empires — rise and fall of empires\n\n  --seed N          world seed (default: time)\n  --width W         map width (default 160)\n  --height H        map height (default 64)\n  --detail L        low | medium | high (default medium)\n  --headless N      run N years without a UI and print the chronicle\n  --stats           with --headless N: print balance metrics per century instead of the chronicle\n  --load FILE       continue a saved world\n  --save FILE       save to FILE (autosaves every 100 years and on quit; in headless mode, at the end)\n  --min-importance  0-3, filter for headless output (default 1)\n  --ascii           use plain ASCII glyphs\n  --no-mouse        do not capture the mouse (keeps the terminal's own text selection)\n  --mkconfig        write a commented config template to ~/.config/empires/config\n  --snapshot PATH   render one frame after --headless N years to PATH.txt and PATH.html\n  --layer L         layer for the snapshot (political, terrain, culture, mana, population, biomes)\n  --cols C --rows R terminal size for the snapshot"
+                    "empires — rise and fall of empires\n\n  --seed N          world seed (default: time)\n  --width W         map width (default 160)\n  --height H        map height (default 64)\n  --detail L        low | medium | high (default medium)\n  --headless N      run N years without a UI and print the chronicle\n  --stats           with --headless N: print balance metrics per century instead of the chronicle\n  --load FILE       continue a saved world\n  --save FILE       save to FILE (autosaves every 100 years and on quit; in headless mode, at the end)\n  --min-importance  0-3, filter for headless output (default 1)\n  --ascii           use plain ASCII glyphs\n  --no-mouse        do not capture the mouse (keeps the terminal's own text selection)\n  --tour            show the introductory card again\n  --mkconfig        write a commented config template to ~/.config/empires/config\n  --snapshot PATH   render one frame after --headless N years to PATH.txt and PATH.html\n  --layer L         layer for the snapshot (political, terrain, culture, mana, population, biomes)\n  --cols C --rows R terminal size for the snapshot"
                 );
                 std::process::exit(0);
             }
@@ -207,5 +210,12 @@ fn main() {
         );
         return;
     }
-    ui::run(world, args.ascii, args.mouse, args.save.or(args.load), cfg);
+    ui::run(
+        world,
+        args.ascii,
+        args.mouse,
+        args.save.or(args.load),
+        cfg,
+        args.tour,
+    );
 }

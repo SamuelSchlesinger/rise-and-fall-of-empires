@@ -1,6 +1,8 @@
 //! Lists, detail pages, summaries, the help text and the hand of fate.
 
+use super::words;
 use crate::sim::chronicle::{EventKind, Ref};
+use crate::sim::explain;
 use crate::sim::{SchoolKind, World};
 use crate::term::{self, Rgb, BOLD, DIM};
 
@@ -125,6 +127,19 @@ fn bar(v: f32, width: usize, ascii: bool) -> String {
     s
 }
 
+/// Green when a realm is holding together, red when it is not.
+pub fn stability_color(v: f32) -> Rgb {
+    if v >= 0.65 {
+        Rgb(150, 210, 150)
+    } else if v >= 0.45 {
+        Rgb(220, 210, 140)
+    } else if v >= 0.25 {
+        Rgb(230, 170, 110)
+    } else {
+        Rgb(240, 110, 100)
+    }
+}
+
 /// Short summary for the sidebar.
 pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
     let mut out = Vec::new();
@@ -135,26 +150,53 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
             if let Some(y) = pol.fell {
                 out.push((format!("fell in year {}", y), DIMC));
             }
+            out.push((
+                format!(
+                    "{}, {}",
+                    words::realm_size(pol.cells),
+                    words::polity_kind(pol.kind)
+                ),
+                FG,
+            ));
             out.push((w.ruler_short(p), FG));
             out.push((
                 format!(
-                    "{} · {} lands · {:.0}k people",
-                    pol.kind.name(),
+                    "{} lands · {} people",
                     pol.cells,
-                    pol.pop
+                    words::folk(pol.pop as f32)
                 ),
-                FG,
+                DIMC,
             ));
-            out.push((
-                format!(
-                    "stability {:.0}%  army {:.0}",
-                    pol.stability * 100.0,
-                    pol.army
-                ),
-                FG,
-            ));
+            if pol.alive() {
+                out.push((
+                    format!(
+                        "{} {}",
+                        words::stability(pol.stability),
+                        explain::stability_drift(w, p)
+                    ),
+                    stability_color(pol.stability),
+                ));
+                out.push((
+                    format!(
+                        "stability {:.0}% · treasury {} · army {}",
+                        pol.stability * 100.0,
+                        words::treasury(pol.treasury),
+                        words::army_standing(w, p)
+                    ),
+                    DIMC,
+                ));
+                if let Some(f) = explain::stability_factors(w, p)
+                    .into_iter()
+                    .find(|f| f.weight < -0.04)
+                {
+                    out.push((format!("worst of it: {}", f.text), Rgb(210, 150, 120)));
+                }
+            }
             if let Some(s) = pol.school {
-                out.push((w.schools[s].name.clone(), w.schools[s].color));
+                out.push((
+                    format!("{} ({})", w.schools[s].name, words::school_reach(w, s)),
+                    w.schools[s].color,
+                ));
             }
             for &wid in &pol.wars {
                 let war = &w.wars[wid];
@@ -163,8 +205,13 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
                 } else {
                     war.attacker
                 };
+                let lean = match explain::war_view(w, wid).leader {
+                    Some(q) if q == p => ", and ahead",
+                    Some(_) => ", and behind",
+                    None => ", evenly",
+                };
                 out.push((
-                    format!("at war with {}", w.polities[other].short),
+                    format!("at war with {}{}", w.polities[other].short, lean),
                     Rgb(240, 110, 100),
                 ));
             }
@@ -173,9 +220,14 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
             let city = &w.cities[c];
             out.push((city.name.clone(), Rgb(255, 255, 255)));
             out.push((
-                format!("{:.1}k people, founded {}", city.pop, city.founded),
+                format!(
+                    "{}, founded in {}",
+                    words::city_size(city.pop),
+                    city.founded
+                ),
                 FG,
             ));
+            out.push((format!("{} people", words::folk(city.pop)), DIMC));
             if let Some(p) = city.polity {
                 out.push((w.polities[p].name.clone(), w.polities[p].color));
             }
@@ -195,11 +247,15 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
         Ref::School(s) => {
             let sc = &w.schools[s];
             out.push((sc.name.clone(), sc.color));
-            out.push((format!("{} · {}", sc.kind.name(), sc.doctrine), FG));
+            out.push((words::school_reach(w, s).to_string(), FG));
+            out.push((format!("{} · {}", sc.kind.name(), sc.doctrine), DIMC));
             out.push((
                 format!(
                     "followed in {} realms",
-                    sc.influence.values().filter(|v| **v > 0.1).count()
+                    sc.influence
+                        .iter()
+                        .filter(|(&p, &v)| v > 0.1 && w.polities[p].alive())
+                        .count()
                 ),
                 DIMC,
             ));
@@ -207,6 +263,7 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
         Ref::Person(p) => {
             let per = &w.persons[p];
             out.push((per.full_name(), FG));
+            out.push((explain::standing(w, p), FG));
             out.push((format!("{} · born {}", per.role.name(), per.born), DIMC));
         }
         Ref::War(x) => {
@@ -214,11 +271,31 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
             out.push((war.name.clone(), Rgb(240, 110, 100)));
             out.push((
                 format!(
-                    "{} vs {}",
+                    "{} against {}",
                     w.polities[war.attacker].short, w.polities[war.defender].short
                 ),
                 FG,
             ));
+            if war.alive() {
+                let v = explain::war_view(w, x);
+                out.push((
+                    match v.leader {
+                        Some(p) => format!("{} is winning", w.polities[p].short),
+                        None => "neither side is winning".to_string(),
+                    },
+                    FG,
+                ));
+                out.push((
+                    format!(
+                        "{} years on; {}",
+                        w.year - war.started,
+                        explain::war_weariness(w, x)
+                    ),
+                    DIMC,
+                ));
+            } else {
+                out.push((format!("it {}", war.result), DIMC));
+            }
         }
         Ref::Race(x) => {
             out.push((format!("the {}", w.races[x].plural), ACCENT));
@@ -242,10 +319,10 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
 
 pub fn list_header(tab: usize) -> &'static str {
     match tab {
-        0 => "  name                                    kind        lands   people  stab   ruler",
-        1 => "  name                    realm                            people  founded",
+        0 => "  name                              kind          lands    people  stability          ruler",
+        1 => "  name                    realm                            people   size              founded",
         2 => "  people                  race          lands   people   language",
-        3 => "  school                              kind        realms  home",
+        3 => "  school                              kind         realms reach                         home",
         4 => "  name                          role         realm                  born   died",
         5 => "  war                                       attacker vs defender          years",
         6 => "  place                                   kind",
@@ -273,12 +350,17 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                     None => format!("{:>5}", pol.cells),
                 };
                 let row = format!(
-                    "{:<40}{:<12}{:>6}  {:>7.0}k  {:>3.0}%   {}",
-                    clip(&pol.name, 39),
+                    "{:<34}{:<12}{:>7}  {:>7.0}k  {:>3.0}% {:<13} {}",
+                    clip(&pol.name, 33),
                     pol.kind.name(),
                     status,
                     pol.pop,
                     pol.stability * 100.0,
+                    if pol.alive() {
+                        words::stability(pol.stability)
+                    } else {
+                        ""
+                    },
                     if pol.alive() {
                         w.ruler_short(p)
                     } else {
@@ -305,10 +387,15 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                         .unwrap_or_else(|| "independent".into()),
                 };
                 let row = format!(
-                    "{:<24}{:<32}{:>7.1}k  {:>6}",
+                    "{:<24}{:<32}{:>7.1}k  {:<18}{:>6}",
                     clip(&city.name, 23),
                     clip(&realm, 31),
                     city.pop,
+                    if city.destroyed.is_none() {
+                        words::city_size(city.pop)
+                    } else {
+                        "ruins"
+                    },
                     city.founded
                 );
                 rows.push((row, Ref::City(c)));
@@ -360,10 +447,11 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                     None => format!("{:>5}", realms),
                 };
                 let row = format!(
-                    "{:<36}{:<12}{:>6}  {}",
+                    "{:<36}{:<12}{:>6}  {:<30}{}",
                     clip(&sc.name, 35),
                     sc.kind.name(),
                     status,
+                    words::school_reach(w, s),
                     w.cities[sc.home_city].name
                 );
                 rows.push((row, Ref::School(s)));
@@ -643,10 +731,10 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                     let per = &w.persons[rl];
                     out.push(line(
                         format!(
-                            "              {} · age {} · reigning {} years",
+                            "              {} · age {} · {} years on the throne",
                             per.traits.describe(),
                             w.year - per.born,
-                            w.year - pol.reign_start
+                            (w.year - pol.reign_start).max(0)
                         ),
                         DIMC,
                         0,
@@ -698,8 +786,9 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                 out.push(line("", FG, 0));
                 out.push(line(
                     format!(
-                        "    Lands     {} (peak {} in year {})   Cities {}",
+                        "    Lands     {} — {} (peak {} in year {})   Cities {}",
                         pol.cells,
+                        words::realm_size(pol.cells),
                         pol.peak_cells,
                         pol.peak_year,
                         pol.cities.len()
@@ -709,21 +798,62 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                 ));
                 out.push(line(
                     format!(
-                        "    People    {:.0}k   Army {:.1}   Treasury {:.0}   Development {:.2}",
-                        pol.pop, pol.army, pol.treasury, pol.dev
+                        "    People    {}   Army {:.1} ({})   Treasury {:.0} ({})   Development {:.2}",
+                        words::folk(pol.pop as f32),
+                        pol.army,
+                        words::army_standing(w, p),
+                        pol.treasury,
+                        words::treasury(pol.treasury),
+                        pol.dev
                     ),
                     FG,
                     0,
                 ));
                 out.push(line(
                     format!(
-                        "    Stability {} {:.0}%",
+                        "    Stability {} {} ({:.0}%), {}",
                         bar(pol.stability, 20, ascii),
-                        pol.stability * 100.0
+                        words::stability(pol.stability),
+                        pol.stability * 100.0,
+                        explain::stability_drift(w, p)
                     ),
-                    FG,
+                    stability_color(pol.stability),
                     0,
                 ));
+                // Why it stands where it does: the same weights the
+                // simulation uses each year, ranked and in plain words.
+                let factors = explain::stability_factors(w, p);
+                if !factors.is_empty() {
+                    out.push(line("", FG, 0));
+                    out.push(line("Why", ACCENT, BOLD));
+                    for f in factors.iter().take(8) {
+                        let (mark, c) = if f.weight > 0.0 {
+                            (if ascii { '+' } else { '▲' }, Rgb(150, 210, 150))
+                        } else {
+                            (if ascii { '-' } else { '▼' }, Rgb(230, 150, 120))
+                        };
+                        for (k, l) in term::wrap(&f.text, w2.saturating_sub(18))
+                            .into_iter()
+                            .enumerate()
+                        {
+                            let pre = if k == 0 {
+                                format!("  {} {:>5}  ", mark, format!("{:+.0}", f.weight * 100.0))
+                            } else {
+                                "           ".to_string()
+                            };
+                            out.push(line(format!("{}{}", pre, l), c, 0));
+                        }
+                    }
+                    out.push(line(
+                        format!(
+                            "  everything together pulls stability towards {:.0}%",
+                            explain::stability_target(w, p) * 100.0
+                        ),
+                        DIMC,
+                        DIM,
+                    ));
+                    out.push(line("", FG, 0));
+                }
                 out.push(line(format!("    Strain    {} overextension {:.0}%, foreign subjects {:.0}%, war-weariness {:.0}%, decadence {:.0}%", bar((pol.overextension(&w.tuning) - 0.5).clamp(0.0, 1.0), 20, ascii), pol.overextension(&w.tuning) * 100.0, pol.foreign_share * 100.0, pol.exhaustion * 100.0, pol.decadence * 100.0), FG, 0));
                 let mut flags = Vec::new();
                 if pol.seafaring {
@@ -777,7 +907,7 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                             format!("{} ({})", w.polities[q].short, mood)
                         })
                         .collect();
-                    labelled(&mut out, "    Neighbours", &s.join(", "), w2, DIMC);
+                    labelled(&mut out, "    Bordering", &s.join(", "), w2, DIMC);
                 }
                 if !pol.cities.is_empty() {
                     let names: Vec<String> = pol
@@ -890,7 +1020,41 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                 LINK,
                 0,
             ));
-            out.push(line(format!("    People    {:.1}k (peak {:.1}k)   Prosperity {:.0}%   Walls {:.0}%   Sacked {} times", city.pop, city.peak_pop, city.prosperity * 100.0, city.walls * 100.0, city.times_sacked), FG, 0));
+            out.push(line(
+                format!(
+                    "    Size      {} of {} people (at its greatest {})",
+                    words::capitalize(words::city_size(city.pop)),
+                    words::folk(city.pop),
+                    words::folk(city.peak_pop)
+                ),
+                FG,
+                0,
+            ));
+            out.push(line(
+                format!(
+                    "    Fortunes  {} ({:.0}% prosperity)   walls {}   sacked {} times",
+                    if city.prosperity > 0.8 {
+                        "thriving"
+                    } else if city.prosperity > 0.45 {
+                        "comfortable"
+                    } else if city.prosperity > 0.25 {
+                        "getting by"
+                    } else {
+                        "wretched"
+                    },
+                    city.prosperity * 100.0,
+                    if city.walls > 0.6 {
+                        "strong"
+                    } else if city.walls > 0.3 {
+                        "serviceable"
+                    } else {
+                        "thin"
+                    },
+                    city.times_sacked
+                ),
+                FG,
+                0,
+            ));
             for wn in &city.wonders {
                 out.push(line(format!("    Wonder    {}", wn), ACCENT, 0));
             }
@@ -1018,6 +1182,22 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                     0,
                 ));
             }
+            out.push(line(
+                format!(
+                    "    Reach     {} — followed in {} realms, {} of them by law",
+                    words::capitalize(words::school_reach(w, s)),
+                    sc.influence
+                        .iter()
+                        .filter(|(&p, &v)| v > 0.1 && w.polities[p].alive())
+                        .count(),
+                    w.polities
+                        .iter()
+                        .filter(|p| p.alive() && p.school == Some(s))
+                        .count()
+                ),
+                FG,
+                0,
+            ));
             out.push(line("", FG, 0));
             out.push(line("Tenets", ACCENT, BOLD));
             for t in &sc.tenets {
@@ -1073,7 +1253,8 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
             let per = &w.persons[pi];
             out.push(line(per.full_name().to_uppercase(), FG, BOLD));
             let mut desc = format!(
-                "A {} {} of the {}, born in year {}",
+                "{} {} {} of the {}, born in year {}",
+                article(&per.traits.describe()),
                 per.traits.describe(),
                 per.role.name(),
                 w.cultures[per.culture].plural,
@@ -1090,6 +1271,9 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
             }
             for l in term::wrap(&desc, w2) {
                 out.push(line(l, FG, 0));
+            }
+            for l in term::wrap(&explain::standing(w, pi), w2) {
+                out.push(line(l, ACCENT, 0));
             }
             out.push(line("", FG, 0));
             if let Some(p) = per.polity {
@@ -1226,6 +1410,60 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                 LINK,
                 0,
             ));
+            // Who is ahead, why, and what a peace would cost.
+            let v = explain::war_view(w, x);
+            out.push(line("", FG, 0));
+            out.push(line("Who is winning", ACCENT, BOLD));
+            let lean = match v.leader {
+                Some(p) if war.alive() => format!("  {} is ahead.", w.polities[p].name),
+                Some(p) => format!("  {} had the better of it.", w.polities[p].name),
+                None => "  Neither side has the better of it.".to_string(),
+            };
+            out.push(line(lean, FG, BOLD));
+            // One bar pulled between the two sides, rather than two bars
+            // the eye has to compare.
+            let total = v.attacker_strength + v.defender_strength;
+            let n = 24usize;
+            let a = ((v.attacker_strength / total) * n as f32).round() as usize;
+            let (mine, theirs) = if ascii { ('#', '-') } else { ('█', '▒') };
+            out.push(line(
+                format!(
+                    "  {} {}{} {}   ({:.0} against {:.0} in the field)",
+                    w.polities[war.attacker].short,
+                    mine.to_string().repeat(a.min(n)),
+                    theirs.to_string().repeat(n - a.min(n)),
+                    w.polities[war.defender].short,
+                    v.attacker_strength,
+                    v.defender_strength
+                ),
+                DIMC,
+                0,
+            ));
+            for r in &v.reasons {
+                for (k, l) in term::wrap(r, w2.saturating_sub(4)).into_iter().enumerate() {
+                    out.push(line(
+                        format!("{}{}", if k == 0 { "  · " } else { "    " }, l),
+                        FG,
+                        0,
+                    ));
+                }
+            }
+            if war.alive() {
+                out.push(line(
+                    format!(
+                        "  After {} years of it, {}.",
+                        (w.year - war.started).max(1),
+                        explain::war_weariness(w, x)
+                    ),
+                    DIMC,
+                    0,
+                ));
+                out.push(line("", FG, 0));
+                out.push(line("If it ended now", ACCENT, BOLD));
+                for l in term::wrap(&v.peace, w2.saturating_sub(2)) {
+                    out.push(line(format!("  {}", l), FG, 0));
+                }
+            }
             history(w, r, width, &mut out, 300);
         }
         Ref::Race(x) => {
@@ -1337,6 +1575,7 @@ pub const HELP: &[&str] = &[
     "             Home centre   zz centre on cursor   zi zo zoom in / out (or :zoom N)   Tab layer",
     "             Enter open   s select   Esc clear   gg or G jump to selection   f follow events",
     "             ] [ next / previous realm   } { next / previous city   t go to the top story",
+    "             r a recap of the last fifty years (of the selected realm, if one is selected)",
     "             v filter the event log by importance   x the Hand of Fate for the selected realm",
     "",
     "Search       /name finds realms, cities, people, peoples, schools, wars, places and relics;",
@@ -1346,6 +1585,7 @@ pub const HELP: &[&str] = &[
     "             ~/.local/share/empires; --save FILE or --load FILE on the command line)",
     "             :speed 25  :layer culture  :detail high  :zoom 2  :theme paper  :find Velen",
     "             :new [seed]  :until YEAR  :step N  :follow on  :log 2  :mute battle  :story",
+    "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
     "             :fate 3  :q  :wq  :q!",
     "",
@@ -1356,13 +1596,16 @@ pub const HELP: &[&str] = &[
     "",
     "Mouse        click selects, click again opens, wheel scrolls, clicking a chronicle line or",
     "             a sidebar entry jumps there.  --no-mouse or :mouse leaves it to the terminal.",
-    "",
     "Config       ~/.config/empires/config: key = value settings (detail speed theme mouse ascii",
     "             autosave width height log follow zoom) and vim-style remaps: map <S-Up> K",
     "Themes       default  phosphor  amber  paper  dusk   (:theme cycles)",
     "Quitting     :q  or  ZZ  or q twice on the map. With a save file set, quitting saves.",
-    "",
     "Symbols      @ capital  # city  × ruins  ! recent event  ≈ river  ▲ mountains  ♣ forest",
+    "             At zoom 1 a realm's name stands beside its capital; the line under the map says",
+    "             what the colours of the layer mean (:legend turns it off).",
+    "Plain words  stability reads steady / restless / troubled / on the brink, a treasury bankrupt /",
+    "             poor / solvent / rich, an army outmatched / matched / formidable. A realm's page",
+    "             has a Why block: what pulls its stability up or down, ranked, in words.",
 ];
 
 pub fn fate_menu(w: &World, p: usize) -> Vec<String> {

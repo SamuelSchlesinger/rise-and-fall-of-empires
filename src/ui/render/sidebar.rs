@@ -32,29 +32,60 @@ impl Ui {
         y += 1;
         self.screen.text_clip(x, y, &era, tx, dim, bg, 0);
         y += 1;
-        for l in term::wrap(&era_desc, tx).into_iter().take(2) {
+        for l in term::wrap(&era_desc, tx).into_iter().take(1) {
             self.screen.text_clip(x, y, &l, tx, Rgb(95, 95, 105), bg, 0);
             y += 1;
         }
         y += 1;
+        // Two counts to a line: the sidebar has better uses for the rows.
         let st = &w.stats;
         let lines = [
-            format!("people   {:>7.0}k", st.pop),
-            format!("realms   {:>7}", st.polities_alive),
-            format!("cities   {:>7}", st.cities_alive),
-            format!("peoples  {:>7}", st.cultures_alive),
-            format!("schools  {:>7}", st.schools_alive),
-            format!("wars     {:>7}", st.wars_active),
+            format!("{} people", words::folk(st.pop as f32)),
+            format!("{} realms · {} cities", st.polities_alive, st.cities_alive),
+            format!(
+                "{} peoples · {} schools · {} wars",
+                st.cultures_alive, st.schools_alive, st.wars_active
+            ),
         ];
         for l in lines.iter() {
-            self.screen.text(x, y, l, fg, bg);
+            self.screen.text_clip(x, y, l, tx, fg, bg, 0);
             y += 1;
         }
-        y += 1;
+        // What happened while the viewer was on another screen.
+        if let Some(note) = self.since_note.clone() {
+            self.screen
+                .text_attr(x, y, "Since you last looked", Rgb(255, 220, 120), bg, BOLD);
+            y += 1;
+            for l in term::wrap(&note, tx).into_iter().take(3) {
+                self.screen
+                    .text_clip(x, y, &l, tx, Rgb(235, 215, 165), bg, 0);
+                y += 1;
+            }
+            y += 1;
+        }
+        // Every block below wants room; share it out in order of what a
+        // newcomer needs, so the last block is never starved by the first.
+        let mut avail = mh.saturating_sub(y);
+        let take = |avail: &mut usize, want: usize| -> usize {
+            let got = want.min(*avail);
+            *avail -= got;
+            got
+        };
+        let here_need = take(&mut avail, 8);
+        let sel_need = if self.selected.is_some() {
+            take(&mut avail, 10)
+        } else {
+            0
+        };
+        let story_room = take(&mut avail, 5);
+        // The great powers list runs to the bottom, so it only needs a
+        // reserve here; anything left over goes to it.
+        let powers_need = take(&mut avail, 5);
+        let story_floor = y + story_room;
         // The storyteller.
         self.story_rows.clear();
         let stories = self.stories();
-        if !stories.is_empty() && y + 4 < mh {
+        if !stories.is_empty() && y + 4 < story_floor {
             self.screen.hline(x0 + 1, y, width - 1, Rgb(60, 60, 70), bg);
             y += 1;
             self.screen.text_attr(x, y, "Now", accent, bg, BOLD);
@@ -63,7 +94,7 @@ impl Ui {
                 let color = detail::ref_color(&self.world, r);
                 let lines = term::wrap(&text, tx.saturating_sub(2));
                 for (k, l) in lines.into_iter().take(2).enumerate() {
-                    if y >= mh.saturating_sub(6) {
+                    if y >= story_floor {
                         break;
                     }
                     if k == 0 {
@@ -85,34 +116,16 @@ impl Ui {
         y += 1;
         let cs = &w.cells[i];
         let mut here: Vec<(String, Rgb)> = Vec::new();
-        here.push((w.terrain.describe_cell(i), fg));
-        if let Some(f) = w.terrain.river_at(i) {
-            here.push((w.terrain.features[f].display(), Rgb(120, 170, 240)));
+        // One sentence first, so a newcomer never has to decode a column
+        // of bare nouns; the particulars follow it.
+        here.push((words::here_sentence(w, i), fg));
+        if let Some(p) = cs.owner {
+            here.push((w.ruler_short(p), w.polities[p].color));
         }
         if let Some(f) = w.terrain.feature_at(i) {
-            here.push((w.terrain.features[f].display(), dim));
-        }
-        if let Some(c) = cs.city {
-            let city = &w.cities[c];
-            if city.destroyed.is_none() {
-                here.push((
-                    format!("{} ({:.0}k)", city.name, city.pop),
-                    Rgb(255, 255, 255),
-                ));
-            } else {
-                here.push((format!("ruins of {}", city.name), dim));
+            if w.terrain.features[f].name.is_some() {
+                here.push((w.terrain.features[f].display(), dim));
             }
-        }
-        if let Some(p) = cs.owner {
-            let pol = &w.polities[p];
-            here.push((pol.name.clone(), pol.color));
-            here.push((w.ruler_short(p), fg));
-        }
-        if let Some(c) = cs.culture {
-            here.push((
-                format!("{} folk, {:.1}k", w.cultures[c].adj, cs.pop),
-                w.cultures[c].color,
-            ));
         }
         here.push((
             format!(
@@ -122,9 +135,10 @@ impl Ui {
             ),
             dim,
         ));
+        let here_stop = (y + here_need).min(mh.saturating_sub(sel_need + powers_need).max(y + 3));
         for (s, c) in here {
             for l in term::wrap(&s, tx) {
-                if y >= mh.saturating_sub(2) {
+                if y >= here_stop {
                     break;
                 }
                 self.screen.text_clip(x, y, &l, tx, c, bg, 0);
@@ -138,9 +152,10 @@ impl Ui {
             y += 1;
             self.screen.text_attr(x, y, "Selected", accent, bg, BOLD);
             y += 1;
+            let sel_stop = (y + sel_need).min(mh.saturating_sub(powers_need).max(y + 3));
             for (s, c) in detail::summary(w, r) {
                 for l in term::wrap(&s, tx) {
-                    if y >= mh.saturating_sub(1) {
+                    if y >= sel_stop {
                         break;
                     }
                     self.screen.text_clip(x, y, &l, tx, c, bg, 0);
@@ -150,7 +165,7 @@ impl Ui {
             y += 1;
         }
         // Great powers.
-        if y + 3 < mh {
+        if y + 2 < mh {
             self.screen.hline(x0 + 1, y, width - 1, Rgb(60, 60, 70), bg);
             y += 1;
             self.screen
@@ -165,7 +180,24 @@ impl Ui {
                 self.screen
                     .put(x, y, if self.ascii { '#' } else { '■' }, pol.color, bg);
                 let war = if pol.at_war() { "!" } else { " " };
-                let namew = tx.saturating_sub(9);
+                let arrow = match words::trend(w, p) {
+                    Some("rising") => {
+                        if self.ascii {
+                            "up  "
+                        } else {
+                            "↑   "
+                        }
+                    }
+                    Some(_) => {
+                        if self.ascii {
+                            "down"
+                        } else {
+                            "↓   "
+                        }
+                    }
+                    None => "    ",
+                };
+                let namew = tx.saturating_sub(13);
                 let name: String = if pol.name.chars().count() > namew {
                     pol.name
                         .chars()
@@ -175,7 +207,7 @@ impl Ui {
                 } else {
                     pol.name.clone()
                 };
-                let s = format!("{} {:<w$} {:>4}", war, name, pol.cells, w = namew);
+                let s = format!("{} {:<w$} {:>4} {}", war, name, pol.cells, arrow, w = namew);
                 self.screen.text_clip(x + 2, y, &s, tx - 2, fg, bg, 0);
                 y += 1;
             }
