@@ -1,0 +1,8 @@
+# Clippy runs with its default thresholds on purpose. If a lint fires, the
+# fix is the code, not a raised limit here; a single `#[allow]` with a comment
+# beats loosening a threshold for the whole crate.
+#
+# Kept in step with `rust-version` in Cargo.toml so that MSRV-gated lints
+# (`clippy::manual_let_else` and friends) only suggest what the oldest
+# supported compiler can actually build.
+msrv = "1.96"

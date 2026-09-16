@@ -3,6 +3,24 @@ name = "empires"
 version = "0.1.0"
 edition = "2021"
 description = "Rise and Fall of Empires — a lo-fi passive world simulator for the terminal"
+authors = ["Sam Schlesinger"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sam/rise-and-fall-of-empires"
+readme = "README.md"
+keywords = ["simulation", "terminal", "tui", "worldgen", "game"]
+categories = ["games", "simulation", "command-line-utilities"]
+# See CONTRIBUTING.md ("Minimum supported Rust version"). Nothing in the tree
+# needs a library feature newer than `std::sync::OnceLock` (1.70); the binding
+# constraint is a type-inference improvement that older compilers lack.
+rust-version = "1.96"
+exclude = [
+    ".claude/",
+    ".github/",
+    ".editorconfig",
+    "docs/screenshot.png",
+    "tests/fixtures/",
+    "tools/",
+]
 
 [dependencies]
 

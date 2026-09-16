@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The tree builds without warnings; keep it that way.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: fmt, clippy, tests, docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile default --no-self-update
+          rustup default stable
+          rustc --version
+
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo build --release
+
+      - name: Docs
+        run: cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  musl:
+    name: static build (x86_64 musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain and musl
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: It runs
+        run: ./target/x86_64-unknown-linux-musl/release/empires --seed 1 --headless 50 | tail -3
+
+  behaviour:
+    name: determinism and the interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - run: cargo build --release
+
+      # The whole project rests on this: one seed, one history.
+      - name: The same seed twice
+        run: |
+          ./target/release/empires --seed 11 --headless 300 --min-importance 0 > first.txt
+          ./target/release/empires --seed 11 --headless 300 --min-importance 0 > second.txt
+          if ! diff -u first.txt second.txt; then
+            echo "::error::the same seed produced two different histories"
+            exit 1
+          fi
+          echo "identical: $(wc -l < first.txt) lines"
+
+      # Presses a few hundred keys in a pty and fails on a panic, a bad exit,
+      # or a terminal left on the alternate screen.
+      - name: Drive the interface
+        run: python3 tools/ptytest.py target/release/empires
+
+  msrv:
+    name: minimum supported Rust version
+    runs-on: ubuntu-latest
+    # An old compiler warns about things a new one does not; that is not a
+    # reason to fail the build.
+    env:
+      RUSTFLAGS: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: |
+          v=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "MSRV is $v"
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install ${{ steps.msrv.outputs.version }} \
+            --profile minimal --no-self-update
+
+      - run: cargo +${{ steps.msrv.outputs.version }} check --all-targets
+
+  package:
+    name: cargo package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      # Catches a stale `exclude`: no .claude, no tools, no fixtures.
+      - run: cargo package --list
+      - run: cargo package

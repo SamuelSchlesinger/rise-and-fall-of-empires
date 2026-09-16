@@ -1,1 +1,21 @@
-target/
+# Build output
+/target/
+**/*.rs.bk
+
+# Saved worlds: the game writes these wherever it is run from. The version-1
+# fixture the save tests read is checked in and must survive this rule.
+*.rfe
+!tests/fixtures/*.rfe
+
+# Snapshots written by --snapshot (docs/screenshot.png is checked in)
+/docs/*.html
+/docs/*.txt
+
+# Agent scratch space and git worktrees
+/.claude/
+
+# Editors
+*.swp
+*~
+.idea/
+.vscode/

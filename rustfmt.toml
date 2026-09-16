@@ -1,0 +1,8 @@
+# The tree is formatted with stock rustfmt: every default is what the code
+# already matches, so this file deliberately sets nothing but the edition.
+# `cargo fmt` reads the edition from Cargo.toml, but a bare `rustfmt src/*.rs`
+# or an editor-on-save hook does not, and without it 2015 parsing kicks in.
+#
+# Before adding an option here, run `cargo fmt --check` with it: an option
+# that reformats the tree is a change to every file, not a style preference.
+edition = "2021"
