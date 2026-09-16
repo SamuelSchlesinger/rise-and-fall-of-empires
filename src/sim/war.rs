@@ -8,15 +8,19 @@ use super::{Role, SchoolKind, War, WarKind, World};
 use std::collections::{BTreeMap, BTreeSet};
 
 impl World {
+    /// The war being fought between `p` and `q`, if any. A polity's `wars`
+    /// holds only its live ones, so this reads a handful of ids rather than
+    /// the whole history of wars; the lowest id wins, as a scan would give.
     pub fn war_between(&self, p: usize, q: usize) -> Option<usize> {
-        self.wars
+        self.polities[p]
+            .wars
             .iter()
-            .find(|w| {
-                w.alive()
-                    && ((w.attacker == p && w.defender == q)
-                        || (w.attacker == q && w.defender == p))
+            .copied()
+            .filter(|&id| {
+                let w = &self.wars[id];
+                w.alive() && (w.attacker == q || w.defender == q)
             })
-            .map(|w| w.id)
+            .min()
     }
 
     pub fn wars_start(
@@ -264,17 +268,18 @@ pub fn resolve_wars(w: &mut World) {
         .iter()
         .map(|&i| (w.wars[i].attacker, w.wars[i].defender))
         .collect();
-    let mut front: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new(); // (owner, enemy) -> cells of owner adjacent to enemy
-    let n = w.cells.len();
-    for i in 0..n {
-        let p = match w.cells[i].owner {
-            Some(p) => p,
-            None => continue,
-        };
-        for nb in w.terrain.neighbors8(i) {
-            if let Some(q) = w.cells[nb].owner {
-                if q != p && (pairs.contains(&(p, q)) || pairs.contains(&(q, p))) {
-                    front.entry((p, q)).or_default().push(i);
+    // (owner, enemy) -> cells of owner adjacent to enemy. Only a belligerent's
+    // own land can hold a front, so walk that rather than the whole map; the
+    // lists are sorted below, so the order the realms come in does not matter.
+    let mut front: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
+    let belligerents: BTreeSet<usize> = pairs.iter().flat_map(|&(a, d)| [a, d]).collect();
+    for p in belligerents {
+        for &i in w.cells_of_ref(p) {
+            for nb in w.terrain.neighbors8(i) {
+                if let Some(q) = w.cells[nb].owner {
+                    if q != p && (pairs.contains(&(p, q)) || pairs.contains(&(q, p))) {
+                        front.entry((p, q)).or_default().push(i);
+                    }
                 }
             }
         }

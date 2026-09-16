@@ -313,6 +313,17 @@ impl World {
 pub fn tick(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
+    // How many living schools already have a footing in each realm. New
+    // schools start at 0.15 influence, below the 0.2 threshold, so this does
+    // not change while towns are founding.
+    let mut rooted: Vec<u32> = vec![0; w.polities.len()];
+    for s in w.schools.iter().filter(|s| s.alive()) {
+        for (&p, &v) in s.influence.iter() {
+            if v > 0.2 {
+                rooted[p] += 1;
+            }
+        }
+    }
     // Founding.
     let ncity = w.cities.len();
     for c in 0..ncity {
@@ -324,14 +335,7 @@ pub fn tick(w: &mut World) {
         let culture = w.cities[c].culture;
         let vals = w.cultures[culture].values;
         let polity = w.cities[c].polity;
-        let existing = polity
-            .map(|p| {
-                w.schools
-                    .iter()
-                    .filter(|s| s.alive() && s.influence.get(&p).copied().unwrap_or(0.0) > 0.2)
-                    .count()
-            })
-            .unwrap_or(0);
+        let existing = polity.map(|p| rooted[p] as usize).unwrap_or(0);
         let base = tn.school_found_mana_rate
             * (mana as f64 - 0.25).max(0.0)
             * (0.5 + vals.mysticism as f64 * 2.0)
