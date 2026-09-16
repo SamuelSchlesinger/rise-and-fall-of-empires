@@ -4,6 +4,8 @@
 //! commands and `/` search, with mouse and modified arrows as well.
 
 mod detail;
+mod recap;
+mod words;
 
 use crate::config::Config;
 use crate::geo::Biome;
@@ -23,6 +25,7 @@ pub enum Mode {
     Chronicle,
     Help,
     Fate,
+    Recap,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -140,9 +143,67 @@ pub struct Ui {
     pub zoom: usize,
     pub muted: Vec<EventKind>,
     story_rows: Vec<(usize, Ref)>,
+    /// The one-line key under the map (`:legend`).
+    pub show_legend: bool,
+    /// The first-run card, dismissed by any key.
+    tour: bool,
+    recap_years: i32,
+    recap_scroll: usize,
+    recap_scope: Option<usize>,
+    /// Chronicle length when the viewer last left the map, and the note
+    /// built from what happened while they were away.
+    away_mark: Option<usize>,
+    since_note: Option<String>,
+    last_mode: Mode,
 }
 
-pub fn run(world: World, ascii: bool, mouse: bool, save_path: Option<String>, cfg: Config) {
+/// Where saves and the "you have seen the tour" marker live.
+pub fn data_dir() -> std::path::PathBuf {
+    if let Ok(x) = std::env::var("XDG_DATA_HOME") {
+        if !x.is_empty() {
+            return std::path::PathBuf::from(x).join("empires");
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join(".local/share/empires")
+}
+
+/// True the first time the game is ever started here: no config, no data
+/// directory, and no marker saying the card has already been read.
+fn first_run() -> bool {
+    let dir = data_dir();
+    !dir.join(".tour-seen").exists() && !dir.exists() && !crate::config::config_path().exists()
+}
+
+fn mark_tour_seen() {
+    let dir = data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join(".tour-seen"), b"seen\n");
+}
+
+/// The card a first-time viewer sees, until any key dismisses it.
+pub const TOUR: &[&str] = &[
+    "This is a world, and it is already running.",
+    "",
+    "The map is the whole of it: colours are realms, @ is a capital, # a city,",
+    "! something that happened this year. The line under the map says what the",
+    "colours mean; the panel on the right says what the cursor is sitting on.",
+    "",
+    "Space  pauses time            Enter  opens whatever is under the cursor",
+    "h j k l  move the cursor      r      what has happened lately",
+    "Tab    another map layer      ?      every other key",
+    "",
+    "Nothing needs you. Press any key and watch.",
+];
+
+pub fn run(
+    world: World,
+    ascii: bool,
+    mouse: bool,
+    save_path: Option<String>,
+    cfg: Config,
+    tour: bool,
+) {
     if !term::enter(mouse) {
         eprintln!("empires: stdin/stdout is not a terminal. Use --headless N to print a chronicle instead.");
         return;
@@ -156,6 +217,7 @@ pub fn run(world: World, ascii: bool, mouse: bool, save_path: Option<String>, cf
     let mut ui = Ui::new(world, ascii, mouse, w, h);
     ui.save_path = save_path.map(std::path::PathBuf::from);
     ui.apply_config(&cfg);
+    ui.tour = tour || first_run();
     if cfg.errors.is_empty() {
         ui.say("? for keys   : for commands   / to search   :w to save");
     } else {
@@ -351,6 +413,14 @@ impl Ui {
             zoom: 1,
             muted: Vec::new(),
             story_rows: Vec::new(),
+            show_legend: true,
+            tour: false,
+            recap_years: 50,
+            recap_scroll: 0,
+            recap_scope: None,
+            away_mark: None,
+            since_note: None,
+            last_mode: Mode::Map,
         };
         // Start looking at the first race's homeland.
         let home = ui.world.races.first().map(|r| r.home).unwrap_or(0);
@@ -1496,13 +1566,7 @@ impl Ui {
     }
 
     fn default_save_dir() -> std::path::PathBuf {
-        if let Ok(x) = std::env::var("XDG_DATA_HOME") {
-            if !x.is_empty() {
-                return std::path::PathBuf::from(x).join("empires");
-            }
-        }
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        std::path::PathBuf::from(home).join(".local/share/empires")
+        data_dir()
     }
 
     fn resolve_save_path(&self, arg: &str) -> std::path::PathBuf {
@@ -2056,6 +2120,7 @@ impl Ui {
     }
 
     fn compose(&mut self) {
+        self.note_mode_change();
         let bg = Rgb(12, 12, 16);
         self.screen.clear(bg);
         match self.mode {
@@ -2071,8 +2136,12 @@ impl Ui {
             Mode::Detail => self.render_detail(),
             Mode::Chronicle => self.render_chronicle(),
             Mode::Help => self.render_help(),
+            Mode::Recap => self.render_recap(),
         }
         self.render_status();
+        if self.tour {
+            self.render_tour();
+        }
         if !self.theme.is_identity() {
             let t = self.theme;
             for c in self.screen.cells_mut() {
