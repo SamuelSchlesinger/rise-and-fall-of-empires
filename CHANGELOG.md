@@ -10,10 +10,9 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
-## [Unreleased]
+## [0.1.0] - 2026-09-16
 
-Everything so far. The project has not been released yet; this section is the
-history of the work that led to the first release.
+The first release. Everything below is the work that led to it.
 
 ### Added
 
@@ -260,3 +259,5 @@ history of the work that led to the first release.
   window blank.
 - Person traits and a school's following line up in columns; the headless
   summary says "1 school", not "1 schools".
+
+[0.1.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.0
