@@ -116,8 +116,5 @@ pub fn dawn_age(world_name: &str) -> String {
 
 /// A race's entry in the chronicle: who they are and where they live.
 pub fn race_awakes(plural: &str, description: &str, place: &str) -> String {
-    format!(
-        "The {} are {}. They dwell {}.",
-        plural, description, place
-    )
+    format!("The {} are {}. They dwell {}.", plural, description, place)
 }

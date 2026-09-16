@@ -1,7 +1,10 @@
 //! War: why it was declared, what happened on the field, what became of
 //! the cities, and how it ended.
 
-use super::{cap, count, ordinal_word, realm, realm_adj, realm_full, who, years, Pick};
+use super::{
+    cap, count, host, ordinal_word, realm, realm_adj, realm_full, realm_full_cap, realm_its,
+    realm_was, who, years, Pick,
+};
 use crate::sim::{WarKind, World};
 
 // ---------------------------------------------------------------------------
@@ -37,11 +40,7 @@ pub fn war_name_internal(w: &World, attacker: usize, defender: usize, kind: WarK
 
 /// A war named after the ground it is fought over.
 pub fn war_name_feature(ordinal: &str, feature: &str) -> String {
-    format!(
-        "the {}War of {}",
-        ordinal,
-        feature.trim_start_matches("the ")
-    )
+    format!("the {}War of {}", ordinal, feature)
 }
 
 /// A war named after the realms fighting it. One draw.
@@ -76,7 +75,7 @@ pub fn war_cause(w: &World, attacker: usize, defender: usize, holy: bool, pick: 
     match pick.index(6) {
         0 => format!("a dispute over the borderlands of {}", realm(w, defender)),
         1 => "the insult of a refused marriage".to_string(),
-        2 => format!("the ambition of {}", w.ruler_short(attacker)),
+        2 => format!("the ambition of the crown of {}", realm(w, attacker)),
         3 => format!(
             "the {} settlers living under {} rule",
             w.cultures[w.polities[attacker].culture].adj,
@@ -146,16 +145,17 @@ pub fn battle_opening(
                 place
             ),
             1 => format!(
-                "{} met {} at {} and broke its line.",
-                realm_full(w, offence),
+                "{} met {} at {} and broke {} line.",
+                realm_full_cap(w, offence),
                 realm_full(w, defence),
-                place
+                place,
+                realm_its(w, defence)
             ),
             _ => format!(
-                "At the Battle of {}, the {} host drove the {} from the field.",
+                "At the Battle of {}, {} drove {} from the field.",
                 place,
-                realm_adj(w, offence),
-                realm_adj(w, defence)
+                host(w, offence),
+                host(w, defence)
             ),
         }
     } else {
@@ -167,28 +167,32 @@ pub fn battle_opening(
                 place
             ),
             _ => format!(
-                "{} held the field at the Battle of {}, and the {} withdrew.",
-                realm_full(w, defence),
+                "{} held the field at the Battle of {}, and {} withdrew.",
+                realm_full_cap(w, defence),
                 place,
-                realm_adj(w, offence)
+                host(w, offence)
             ),
         }
     }
 }
 
-/// A city that held out behind its walls.
+/// A city that held out behind its walls. Draws no random number: the
+/// variant comes from the year and the city, so two sieges in one report
+/// do not read alike.
 pub fn siege_withstood(w: &World, city: usize) -> String {
-    format!(
-        " {} shut its gates and withstood the siege.",
-        w.cities[city].name
-    )
+    let name = &w.cities[city].name;
+    match Pick::stable(w.year, city).index(3) {
+        0 => format!(" {} shut its gates and withstood the siege.", name),
+        1 => format!(" The walls of {} held.", name),
+        _ => format!(" {} was besieged and did not fall.", name),
+    }
 }
 
 /// The defenders turn a defence into an advance.
 pub fn pressed_advantage(w: &World, winner: usize) -> String {
     format!(
-        " The {} pressed their advantage and took ground.",
-        realm_adj(w, winner)
+        " {} pressed its advantage and took ground.",
+        cap(&host(w, winner))
     )
 }
 
@@ -215,11 +219,11 @@ pub fn fell_at(place: &str) -> String {
 pub fn battle_flourish(w: &World, winner: usize, loser: usize, pick: &Pick) -> String {
     match pick.index(5) {
         0 => " The river ran red for a day.".to_string(),
-        1 => format!(" The {} held the high ground.", realm_adj(w, winner)),
+        1 => format!(" {} held the high ground.", cap(&host(w, winner))),
         2 => " Rain turned the field to mud, and the wounded drowned in it.".to_string(),
         3 => format!(
-            " The {} fled at dusk, leaving their baggage.",
-            realm_adj(w, loser)
+            " {} fled at dusk, leaving its baggage.",
+            cap(&host(w, loser))
         ),
         _ => " Both sides claimed the victory; the ravens did not care.".to_string(),
     }
@@ -236,16 +240,16 @@ pub fn city_sacked(w: &World, city: &str, winner: usize, wonder_lost: Option<&st
         None => String::new(),
     };
     format!(
-        " {} was taken and sacked by the {}.{}",
+        " {} was taken and sacked by {}.{}",
         city,
-        realm_adj(w, winner),
+        host(w, winner),
         lost
     )
 }
 
 /// A city that surrendered rather than be stormed.
 pub fn city_surrendered(w: &World, city: &str, winner: usize) -> String {
-    format!(" {} opened its gates to the {}.", city, realm_adj(w, winner))
+    format!(" {} opened its gates to {}.", city, host(w, winner))
 }
 
 /// A defeated realm moves its court.
@@ -256,15 +260,18 @@ pub fn court_flees(w: &World, loser: usize, to: &str) -> String {
 /// A realm that has lost its last city.
 pub fn capital_lost(w: &World, loser: usize) -> String {
     format!(
-        " With its capital lost and no city left to rule from, {} was no more.",
-        realm_full(w, loser)
+        " With {} capital lost and no city left to rule from, {} {} no more.",
+        realm_its(w, loser),
+        realm_full(w, loser),
+        realm_was(w, loser)
     )
 }
 
 /// Why a realm ended: it was conquered.
-pub fn conquered_by(w: &World, winner: usize, city: &str) -> String {
+pub fn conquered_by(w: &World, loser: usize, winner: usize, city: &str) -> String {
     format!(
-        "was conquered by {} with the fall of {}.",
+        "{} conquered by {} with the fall of {}.",
+        realm_was(w, loser),
         realm_full(w, winner),
         city
     )
@@ -280,18 +287,20 @@ pub fn war_ended(war_name: &str, result: &str) -> String {
 }
 
 /// A rising put down. `cause` phrasing for the rebel realm's end.
-pub fn rebellion_crushed(w: &World, defender: usize, years_fought: i32) -> String {
+pub fn rebellion_crushed(w: &World, rebel: usize, defender: usize, years_fought: i32) -> String {
     format!(
-        "was crushed by {} after {} of fighting.",
+        "{} crushed by {} after {} of fighting.",
+        realm_was(w, rebel),
         realm_full(w, defender),
         years(years_fought.max(1) as i64)
     )
 }
 
 /// The rebels won and took the old realm's seat.
-pub fn rebellion_triumphant(w: &World, attacker: usize) -> String {
+pub fn rebellion_triumphant(w: &World, defender: usize, attacker: usize) -> String {
     format!(
-        "was overthrown; {} took the old capital and ruled in its place.",
+        "{} overthrown; {} took the old capital and ruled in its place.",
+        realm_was(w, defender),
         realm_full(w, attacker)
     )
 }
@@ -306,7 +315,12 @@ pub fn independence_recognised(w: &World, attacker: usize, defender: usize) -> S
 }
 
 /// The attacker got what it came for.
-pub fn peace_attacker_won(w: &World, attacker: usize, defender: usize, years_fought: i32) -> String {
+pub fn peace_attacker_won(
+    w: &World,
+    attacker: usize,
+    defender: usize,
+    years_fought: i32,
+) -> String {
     format!(
         "ended in victory for {} after {}; {} ceded the lands it had lost and paid tribute.",
         realm(w, attacker),
@@ -372,4 +386,9 @@ pub fn general_appointed(w: &World, p: usize, general: usize, pick: &Pick) -> St
 /// How many battles a legend is remembered for.
 pub fn battles_remembered(n: u32) -> String {
     count(n.max(3) as i64, "battle")
+}
+
+/// The cause a wronged notable raises an army under.
+pub fn grievances_of(name: &str) -> String {
+    format!("the grievances of {}", name)
 }

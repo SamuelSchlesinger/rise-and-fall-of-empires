@@ -34,7 +34,7 @@ pub use politics::*;
 pub use stories::*;
 pub use war::*;
 
-use super::{Gender, World};
+use super::{Gender, PolityKind, World};
 use crate::rng::Rng;
 
 // ---------------------------------------------------------------------------
@@ -176,16 +176,7 @@ pub fn number(n: i64) -> String {
 }
 
 const ORDINAL_WORDS: &[&str] = &[
-    "zeroth",
-    "first",
-    "second",
-    "third",
-    "fourth",
-    "fifth",
-    "sixth",
-    "seventh",
-    "eighth",
-    "ninth",
+    "zeroth", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
     "tenth",
 ];
 
@@ -306,10 +297,6 @@ impl Pronouns {
     pub fn has(&self) -> &'static str {
         self.verb("has", "have")
     }
-    /// "had" either way, but spelled out for symmetry at call sites.
-    pub fn had(&self) -> &'static str {
-        "had"
-    }
 }
 
 /// The pronoun set for a gender.
@@ -357,7 +344,9 @@ pub fn who(w: &World, person: usize) -> Pronouns {
 /// [`Pick::rolled`] consumes exactly one draw per choice, which is what the
 /// call sites that used `rng.below(k)` or `rng.pick(..)` always did.
 /// [`Pick::stable`] consumes none: it hashes the year and an entity id, so
-/// a site that never drew a number still never draws one.
+/// a site that never drew a number still never draws one. A stable pick
+/// holds one hash, so several [`Pick::index`] calls on it are correlated;
+/// make a fresh one per independent choice.
 pub enum Pick<'a> {
     Rolled(&'a Rng),
     Stable(u64),
@@ -419,6 +408,57 @@ pub fn realm(w: &World, p: usize) -> String {
     w.polities[p].short.clone()
 }
 
+/// Whether a realm's name takes a plural verb. "The Free Cities of Velen
+/// **were** conquered", but "The Kingdom of Velen **was** conquered".
+///
+/// The head noun of a name is the word before "of" when there is one and
+/// the last word otherwise, and a tribe is always its people, so it is
+/// plural whatever its name looks like.
+pub fn name_is_plural(name: &str, kind: PolityKind) -> bool {
+    if kind == PolityKind::Tribe {
+        return true;
+    }
+    let head = match name.split(" of ").next() {
+        Some(before) if before.len() < name.len() => before,
+        _ => name,
+    };
+    let last = head.split_whitespace().last().unwrap_or("");
+    let lower = last.to_lowercase();
+    lower.len() > 2 && lower.ends_with('s') && !lower.ends_with("ss") && !lower.ends_with("us")
+}
+
+/// Whether this realm takes plural verbs and pronouns.
+pub fn realm_plural(w: &World, p: usize) -> bool {
+    name_is_plural(&w.polities[p].name, w.polities[p].kind)
+}
+
+/// "was" or "were", to agree with a realm's name.
+pub fn realm_was(w: &World, p: usize) -> &'static str {
+    if realm_plural(w, p) {
+        "were"
+    } else {
+        "was"
+    }
+}
+
+/// "it" or "they", to agree with a realm's name.
+pub fn realm_it(w: &World, p: usize) -> &'static str {
+    if realm_plural(w, p) {
+        "they"
+    } else {
+        "it"
+    }
+}
+
+/// "its" or "their", to agree with a realm's name.
+pub fn realm_its(w: &World, p: usize) -> &'static str {
+    if realm_plural(w, p) {
+        "their"
+    } else {
+        "its"
+    }
+}
+
 /// A realm's adjective: `"Velenic"`.
 pub fn realm_adj(w: &World, p: usize) -> String {
     w.polities[p].adj.clone()
@@ -438,9 +478,16 @@ pub fn school_full(w: &World, s: usize) -> String {
     w.schools[s].name.clone()
 }
 
-/// A school's short name, for later mentions: `"Ashen Circle"`.
-pub fn school(w: &World, s: usize) -> String {
-    w.schools[s].short.clone()
+/// A school's short name with the article its full name carries, for use
+/// after a preposition: "the faithful of the Nameless", but
+/// "the disciples of Raiwhism".
+pub fn school_the(w: &World, s: usize) -> String {
+    let short = &w.schools[s].short;
+    if w.schools[s].name.starts_with("the ") {
+        format!("the {}", short)
+    } else {
+        short.clone()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -480,7 +527,7 @@ mod tests {
         assert_eq!(plural("church"), "churches");
         assert_eq!(plural("valley"), "valleys");
         assert_eq!(plural("person"), "people");
-            assert_eq!(count(3, "battle"), "3 battles");
+        assert_eq!(count(3, "battle"), "3 battles");
         assert_eq!(count(1, "battle"), "one battle");
         assert_eq!(count(0, "battle"), "no battles");
         assert_eq!(count(2, "city"), "2 cities");
@@ -498,6 +545,20 @@ mod tests {
         assert_eq!(ordinal(22), "22nd");
         assert_eq!(ordinal_word(2), "second");
         assert_eq!(ordinal_word(40), "40th");
+    }
+
+    #[test]
+    fn plural_realm_names_take_plural_verbs() {
+        use crate::sim::PolityKind::{Chiefdom, Kingdom, Republic, Tribe};
+        assert!(!name_is_plural("the Kingdom of Velen", Kingdom));
+        assert!(!name_is_plural("the Velenic Empire", Kingdom));
+        assert!(name_is_plural("the Velenic Clans", Chiefdom));
+        assert!(name_is_plural("the Free Cities of Velen", Republic));
+        assert!(name_is_plural("the Towers of Velen", Republic));
+        // A tribe is its people, whatever the name looks like.
+        assert!(name_is_plural("the Safar", Tribe));
+        // "-ss" and "-us" endings are singular.
+        assert!(!name_is_plural("the Blessed Land of Velen", Kingdom));
     }
 
     #[test]
@@ -536,7 +597,10 @@ mod tests {
         assert_eq!((m.subject, m.object, m.possessive), ("he", "him", "his"));
         assert_eq!(m.possessive_pronoun, "his");
         let n = pronouns(Gender::N);
-        assert_eq!((n.subject, n.object, n.possessive), ("they", "them", "their"));
+        assert_eq!(
+            (n.subject, n.object, n.possessive),
+            ("they", "them", "their")
+        );
         assert_eq!(n.reflexive, "themselves");
         assert_eq!(n.was(), "were");
         assert_eq!(n.has(), "have");
@@ -551,8 +615,9 @@ mod tests {
         assert_eq!(a, b);
         assert!(a < 5);
         // Different years and ids do not all collapse to the same variant.
-        let spread: std::collections::BTreeSet<usize> =
-            (0..40).map(|i| Pick::stable(100 + i, i as usize).index(5)).collect();
+        let spread: std::collections::BTreeSet<usize> = (0..40)
+            .map(|i| Pick::stable(100 + i, i as usize).index(5))
+            .collect();
         assert!(spread.len() > 1);
     }
 

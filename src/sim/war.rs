@@ -514,7 +514,12 @@ fn battle(
         }
     }
     if w.high_detail() && importance == 1 && rng.chance(0.25) {
-        text.push_str(&prose::battle_flourish(w, winner, loser, &Pick::rolled(&rng)));
+        text.push_str(&prose::battle_flourish(
+            w,
+            winner,
+            loser,
+            &Pick::rolled(&rng),
+        ));
     }
     if quiet && importance < 2 {
         return;
@@ -575,7 +580,7 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
             let to = w.cities[nc].name.clone();
             s.push_str(&prose::court_flees(w, loser, &to));
         } else {
-            let cause = prose::conquered_by(w, winner, &name);
+            let cause = prose::conquered_by(w, loser, winner, &name);
             s.push_str(&prose::capital_lost(w, loser));
             politics::fall(w, loser, cause, Some(winner), 2);
         }
@@ -592,7 +597,7 @@ fn make_peace(w: &mut World, wid: usize) {
         WarKind::Rebellion | WarKind::CivilWar | WarKind::Succession => {
             if score < -0.4 {
                 // Rebels crushed.
-                let cause = prose::rebellion_crushed(w, d, years);
+                let cause = prose::rebellion_crushed(w, a, d, years);
                 let leader = w.polities[a].ruler;
                 politics::fall(w, a, cause, Some(d), 2);
                 if let Some(l) = leader {
@@ -608,7 +613,7 @@ fn make_peace(w: &mut World, wid: usize) {
                 && w.polities[a].cells > w.polities[d].cells
             {
                 // Rebels take over the old realm.
-                let cause = prose::rebellion_triumphant(w, a);
+                let cause = prose::rebellion_triumphant(w, d, a);
                 politics::fall(w, d, cause, Some(a), 2);
                 return;
             } else {

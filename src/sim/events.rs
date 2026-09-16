@@ -5,22 +5,6 @@ use super::politics;
 use super::prose::{self, Pick};
 use super::{Era, Plague, PolityKind, Role, SchoolKind, World};
 
-const PLAGUE_ADJ: &[&str] = &[
-    "Grey",
-    "Red",
-    "Weeping",
-    "Sweating",
-    "Black",
-    "Silent",
-    "Blistering",
-    "Yellow",
-    "Coughing",
-    "Shivering",
-];
-const PLAGUE_NOUN: &[&str] = &[
-    "Death", "Plague", "Sickness", "Fever", "Rot", "Pox", "Wasting",
-];
-
 pub fn disasters(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
@@ -105,7 +89,7 @@ pub fn disasters(w: &mut World) {
     {
         let c = big_cities[rng.below(big_cities.len())];
         let p = w.cities[c].polity.unwrap();
-        let name = format!("the {} {}", rng.pick(PLAGUE_ADJ), rng.pick(PLAGUE_NOUN));
+        let name = prose::plague_name(&Pick::rolled(&rng));
         w.plagues.push(Plague {
             name: name.clone(),
             years_left: 3 + rng.below(4) as i32,
@@ -271,7 +255,7 @@ pub fn notables(w: &mut World) {
                                 Ref::Person(pid) => Some(w.persons[*pid].full_name()),
                                 _ => None,
                             })
-                            .unwrap_or_else(|| "the old days".to_string());
+                            .unwrap_or_else(|| prose::nothing_in_particular().to_string());
                         let form = *rng.pick(&["Lay", "Song", "Lament", "Epic", "Ballad"]);
                         w.persons[poet].renown += 2.0;
                         prose::poet_sings(w, p, poet, form, &what)
@@ -406,7 +390,7 @@ pub fn notables(w: &mut World) {
                     } else {
                         super::WarKind::Rebellion
                     };
-                    let cause = format!("the grievances of {}", w.persons[leader].name);
+                    let cause = prose::grievances_of(&w.persons[leader].name);
                     w.wars_start(rebel, p, kind, cause);
                     let text =
                         prose::rebellion_of_the_wronged(w, p, rebel, leader, &Pick::rolled(&rng));
@@ -503,27 +487,6 @@ pub fn notables(w: &mut World) {
     }
 }
 
-const WONDER_ADJ: &[&str] = &[
-    "Great", "Golden", "Black", "Sunken", "Ninefold", "White", "Hanging", "Singing", "Eternal",
-    "Iron",
-];
-const WONDER_KIND: &[&str] = &[
-    "Tower",
-    "Ziggurat",
-    "Library",
-    "Colossus",
-    "Gardens",
-    "Lighthouse",
-    "Temple",
-    "Walls",
-    "Bridge",
-    "Aqueduct",
-    "Mausoleum",
-    "Observatory",
-    "Arena",
-    "Gate",
-];
-
 pub fn wonders(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
@@ -540,12 +503,8 @@ pub fn wonders(w: &mut World) {
             continue;
         }
         let cost = tn.wonder_cost;
-        let name = format!(
-            "the {} {} of {}",
-            rng.pick(WONDER_ADJ),
-            rng.pick(WONDER_KIND),
-            w.cities[cap].name
-        );
+        let city = w.cities[cap].name.clone();
+        let name = prose::wonder_name(&city, &Pick::rolled(&rng));
         w.polities[p].treasury -= cost;
         w.polities[p].prestige += 20.0;
         w.polities[p].dev = (w.polities[p].dev + 0.05).min(3.0);
@@ -587,59 +546,37 @@ pub fn eras(w: &mut World) {
     let (name, desc) = if share > 0.35 && w.polities[biggest.unwrap()].kind == PolityKind::Empire {
         let p = biggest.unwrap();
         (
-            rng.pick(&[
-                format!("the Age of {}", w.polities[p].short),
-                format!("the {} Peace", w.polities[p].adj),
-                format!("the {} Ascendancy", w.polities[p].adj),
-            ])
-            .clone(),
+            prose::era_name_empire(w, p, &Pick::rolled(&rng)),
             prose::era_of_empire(w, p),
         )
     } else if pop_change < -0.15 {
         (
-            rng.pick(&["the Silent Years", "the Long Winter", "the Age of Ash", "the Dark Age"]).to_string(),
+            prose::era_name_dying(&Pick::rolled(&rng)),
             prose::era_of_dying(pop_change < -0.3),
         )
     } else if warlike {
         (
-            rng.pick(&[
-                "the Warring Age",
-                "the Age of Blood",
-                "the Century of Spears",
-                "the Age of Iron",
-            ])
-            .to_string(),
+            prose::era_name_war(&Pick::rolled(&rng)),
             prose::era_of_war(wars),
         )
     } else if schools >= 4 {
         (
-            rng.pick(&["the Age of Wonders", "the Age of the Star-Readers", "the Age of Prophets", "the Enlightenment"]).to_string(),
+            prose::era_name_schools(&Pick::rolled(&rng)),
             prose::era_of_schools(schools),
         )
     } else if born > realms {
         (
-            rng.pick(&[
-                "the Age of Kings",
-                "the Age of Petty Kings",
-                "the Age of Banners",
-            ])
-            .to_string(),
+            prose::era_name_crowns(&Pick::rolled(&rng)),
             prose::era_of_crowns(born),
         )
     } else if peaceful && pop_change > 0.05 {
         (
-            rng.pick(&["the Long Peace", "the Age of Plenty", "the Quiet Age", "the Age of Roads"]).to_string(),
+            prose::era_name_peace(&Pick::rolled(&rng)),
             prose::era_of_peace().to_string(),
         )
     } else {
         (
-            rng.pick(&[
-                "the Middle Years",
-                "the Age of Kings",
-                "the Age of Walls",
-                "the Uncertain Age",
-            ])
-            .to_string(),
+            prose::era_name_ordinary(&Pick::rolled(&rng)),
             prose::era_ordinary().to_string(),
         )
     };

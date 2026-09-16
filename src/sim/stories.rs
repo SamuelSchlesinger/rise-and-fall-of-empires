@@ -306,7 +306,7 @@ pub fn artifacts_on_school(w: &mut World, s: usize) {
                 ArtifactKind::Horn,
             ])
         };
-        let sname = w.schools[s].short.clone();
+        let sname = prose::school_the(w, s);
         make_artifact(
             w,
             kind,

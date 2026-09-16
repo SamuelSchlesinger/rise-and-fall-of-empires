@@ -1,6 +1,6 @@
 //! Disasters, notable lives, wonders and the naming of ages.
 
-use super::{cap, cap_a, capital_name, count, join_names, realm_full, who, Pick};
+use super::{cap, cap_a, capital_name, count, join_names, realm, realm_full, who, Pick};
 use crate::sim::World;
 
 // ---------------------------------------------------------------------------
@@ -102,6 +102,11 @@ pub fn omen(pick: &Pick) -> String {
 // Notable lives
 // ---------------------------------------------------------------------------
 
+/// The subject of a song when nothing memorable has happened lately.
+pub fn nothing_in_particular() -> &'static str {
+    "the Old Days"
+}
+
 /// A poet writes about something that happened. No draw beyond `form`.
 pub fn poet_sings(w: &World, p: usize, poet: usize, form: &str, subject: &str) -> String {
     format!(
@@ -189,7 +194,7 @@ pub fn wonder_built(w: &World, p: usize, name: &str, ruler: &str, pick: &Pick) -
             ruler
         ),
         _ => {
-            let house = w.polities[p].dynasty.trim_start_matches("the ").trim();
+            let house = w.polities[p].dynasty.trim();
             if house.is_empty() {
                 format!(
                     "The masons of {} finished {}, greatest of the works of the age.",
@@ -240,8 +245,8 @@ pub fn era_of_war(wars: u32) -> String {
 /// An age of new ideas.
 pub fn era_of_schools(schools: u32) -> String {
     format!(
-        "{} arose, and the courts of the world argued over doctrine.",
-        cap(&count(schools as i64, "new school of thought"))
+        "{} of thought arose, and the courts of the world argued over doctrine.",
+        cap(&count(schools as i64, "new school"))
     )
 }
 
@@ -296,4 +301,127 @@ pub fn legend_remembered(w: &World, person: usize, role: &str, folk: &str) -> St
             name, folk, g.object, g.possessive
         ),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Naming plagues, wonders and ages
+// ---------------------------------------------------------------------------
+
+const PLAGUE_ADJ: &[&str] = &[
+    "Grey",
+    "Red",
+    "Weeping",
+    "Sweating",
+    "Black",
+    "Silent",
+    "Blistering",
+    "Yellow",
+    "Coughing",
+    "Shivering",
+];
+const PLAGUE_NOUN: &[&str] = &[
+    "Death", "Plague", "Sickness", "Fever", "Rot", "Pox", "Wasting",
+];
+
+/// What the physicians call a new sickness. Two draws, as before.
+pub fn plague_name(pick: &Pick) -> String {
+    let adj = pick.text(PLAGUE_ADJ);
+    let noun = pick.text(PLAGUE_NOUN);
+    format!("the {} {}", adj, noun)
+}
+
+const WONDER_ADJ: &[&str] = &[
+    "Great", "Golden", "Black", "Sunken", "Ninefold", "White", "Hanging", "Singing", "Eternal",
+    "Iron",
+];
+const WONDER_KIND: &[&str] = &[
+    "Tower",
+    "Ziggurat",
+    "Library",
+    "Colossus",
+    "Gardens",
+    "Lighthouse",
+    "Temple",
+    "Walls",
+    "Bridge",
+    "Aqueduct",
+    "Mausoleum",
+    "Observatory",
+    "Arena",
+    "Gate",
+];
+
+/// What a great work is called. Two draws, as before.
+pub fn wonder_name(city: &str, pick: &Pick) -> String {
+    let adj = pick.text(WONDER_ADJ);
+    let kind = pick.text(WONDER_KIND);
+    format!("the {} {} of {}", adj, kind, city)
+}
+
+/// The name of a century ruled by one empire. One draw.
+pub fn era_name_empire(w: &World, p: usize, pick: &Pick) -> String {
+    match pick.index(3) {
+        0 => format!("the Age of {}", realm(w, p)),
+        1 => format!("the {} Peace", w.polities[p].adj),
+        _ => format!("the {} Ascendancy", w.polities[p].adj),
+    }
+}
+
+/// The name of a century in which the world lost people. One draw.
+pub fn era_name_dying(pick: &Pick) -> String {
+    pick.text(&[
+        "the Silent Years",
+        "the Long Winter",
+        "the Age of Ash",
+        "the Dark Age",
+    ])
+}
+
+/// The name of a century of war. One draw.
+pub fn era_name_war(pick: &Pick) -> String {
+    pick.text(&[
+        "the Warring Age",
+        "the Age of Blood",
+        "the Century of Spears",
+        "the Age of Iron",
+    ])
+}
+
+/// The name of a century of new ideas. One draw.
+pub fn era_name_schools(pick: &Pick) -> String {
+    pick.text(&[
+        "the Age of Wonders",
+        "the Age of the Star-Readers",
+        "the Age of Prophets",
+        "the Enlightenment",
+    ])
+}
+
+/// The name of a century of new crowns. One draw.
+pub fn era_name_crowns(pick: &Pick) -> String {
+    pick.text(&[
+        "the Age of Kings",
+        "the Age of Petty Kings",
+        "the Age of Banners",
+    ])
+}
+
+/// The name of a quiet century. One draw.
+pub fn era_name_peace(pick: &Pick) -> String {
+    pick.text(&[
+        "the Long Peace",
+        "the Age of Plenty",
+        "the Quiet Age",
+        "the Age of Roads",
+    ])
+}
+
+/// The name of a century with nothing to mark it. One draw.
+pub fn era_name_ordinary(pick: &Pick) -> String {
+    pick.text(&[
+        "the Middle Years",
+        "the Age of Kings",
+        "the Age of Walls",
+        "the Uncertain Age",
+    ])
 }

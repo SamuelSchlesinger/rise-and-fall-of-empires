@@ -335,11 +335,7 @@ pub fn form_polities(w: &mut World) {
         w.log(
             1,
             EventKind::Founding,
-            &[
-                Ref::Polity(p),
-                Ref::Culture(culture),
-                Ref::City(capital),
-            ],
+            &[Ref::Polity(p), Ref::Culture(culture), Ref::City(capital)],
             Some(i),
             text,
         );
@@ -908,7 +904,7 @@ fn succession(w: &mut World, p: usize, old: usize) {
             None,
         );
         install_ruler(w, p, heir);
-        let text = prose::elected(w, p, kind, heir);
+        let text = prose::elected(w, p, kind, heir, old);
         w.log(
             1,
             EventKind::Politics,
@@ -1251,7 +1247,7 @@ pub fn unrest(w: &mut World) {
     for p in w.living_polities() {
         let pol = &w.polities[p];
         if pol.cells == 0 && pol.founded < w.year {
-            let cause = prose::faded_away(!pol.wars.is_empty()).to_string();
+            let cause = prose::faded_away(w, p, !pol.wars.is_empty());
             fall(w, p, cause, None, 1);
             continue;
         }
@@ -1440,13 +1436,7 @@ fn fragment(w: &mut World, p: usize) {
     let k = (2 + rng.below(3)).min(cities.len());
     if k < 1 {
         // No cities to seed successors: the state simply collapses.
-        fall(
-            w,
-            p,
-            prose::collapsed_into_lawlessness().to_string(),
-            None,
-            2,
-        );
+        fall(w, p, prose::collapsed_into_lawlessness(w, p), None, 2);
         return;
     }
     let seeds: Vec<usize> = cities[..k].iter().map(|&c| w.cities[c].cell).collect();

@@ -2,7 +2,7 @@
 //! taken up by a crown, driven out, split, forgotten, or allowed to go
 //! too far.
 
-use super::{cap, realm, realm_full, school, school_full, who, years, Pick};
+use super::{cap, realm, realm_full, school_full, school_the, who, years, Pick};
 use crate::sim::{SchoolKind, World};
 
 /// A new school is founded in a city. No draw.
@@ -52,32 +52,31 @@ pub fn school_from_vision(w: &World, s: usize, founder: usize, city: usize) -> S
 /// A crown takes a school as its own. No draw.
 pub fn school_adopted(w: &World, p: usize, s: usize, influence: f32) -> String {
     let kind = w.schools[s].kind;
-    let following = if influence > 0.7 {
+    let because = if influence > 0.7 {
         "most of the realm already followed it"
     } else {
         "it had won the towns and the roads"
     };
     match kind {
         SchoolKind::Arcane => format!(
-            "{} took the adepts of {} into royal service, {}. Henceforth {} would be the magic of {}.",
+            "{} took the adepts of {} into royal service, since {}. Henceforth it would be the magic of {}.",
             w.ruler_title(p),
-            school(w, s),
-            following,
             school_full(w, s),
+            because,
             realm(w, p)
         ),
         SchoolKind::Divine => format!(
-            "{} was baptised into {}, {}, and it became the faith of {}.",
+            "{} was baptised into {}, since {}, and it became the faith of {}.",
             w.ruler_title(p),
             school_full(w, s),
-            following,
+            because,
             realm_full(w, p)
         ),
         SchoolKind::Philosophical => format!(
-            "The court of {} adopted the teachings of {}, {}, and its laws were rewritten by the {}.",
+            "The court of {} adopted the teachings of {}, since {}, and its laws were rewritten by the {}.",
             realm_full(w, p),
             school_full(w, s),
-            following,
+            because,
             w.schools[s].kind.follower()
         ),
     }
@@ -97,13 +96,13 @@ pub fn school_converted(w: &World, p: usize, from: usize, to: usize) -> String {
 /// A school is outlawed. No draw.
 pub fn school_persecuted(w: &World, p: usize, s: usize, state: usize, capital: &str) -> String {
     format!(
-        "{} outlawed {} throughout {} at the urging of the {} of {}, and its {} were driven from {}.",
+        "{} outlawed {} throughout {}, which was sworn to {}. The {} of {} were driven from {}.",
         w.ruler_title(p),
         school_full(w, s),
         realm_full(w, p),
-        w.schools[state].kind.follower(),
-        school(w, state),
+        school_full(w, state),
         w.schools[s].kind.follower(),
+        school_the(w, s),
         capital
     )
 }
@@ -116,7 +115,7 @@ pub fn martyr_made(w: &World, s: usize, martyr: usize, capital: &str) -> String 
         w.persons[martyr].name,
         capital,
         w.schools[s].kind.follower(),
-        school(w, s),
+        school_the(w, s),
         g.object
     )
 }
@@ -126,7 +125,7 @@ pub fn martyr_death(w: &World, s: usize, capital: &str) -> String {
     format!(
         "was burned in the square of {} for the teachings of {}.",
         capital,
-        school(w, s)
+        school_the(w, s)
     )
 }
 
@@ -141,7 +140,11 @@ pub fn schism_dispute(w: &World, parent: usize, child: usize, pick: &Pick) -> St
             0 => "over the true name of the god".to_string(),
             1 => format!(
                 "over the tenet \"{}\"",
-                w.schools[parent].tenets.first().cloned().unwrap_or_default()
+                w.schools[parent]
+                    .tenets
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
             ),
             _ => "over who might sit on the high seat".to_string(),
         },
@@ -190,7 +193,7 @@ pub fn catastrophe(
 ) -> String {
     format!(
         "The adepts of {} in {} reached too far. In a single night the city was unmade: a great working went wrong, and where {} had stood there was only glass, ash and silence. The land for miles about was blighted and is called {}. Some {} thousand souls perished.",
-        school(w, s),
+        school_the(w, s),
         city_name,
         city_name,
         blight_name,
@@ -227,11 +230,10 @@ pub fn school_champion(w: &World, p: usize, s: usize, person: usize) -> String {
     let g = who(w, person);
     match w.schools[s].kind {
         SchoolKind::Arcane => format!(
-            "{}, an adept of {}, performed wonders before the court of {} and won many to {}.",
+            "{}, an adept of {}, performed wonders before the court of {} and won many of its nobles to that teaching.",
             w.persons[person].name,
-            school(w, s),
-            realm_full(w, p),
-            school_full(w, s)
+            school_full(w, s),
+            realm_full(w, p)
         ),
         SchoolKind::Divine => format!(
             "{} walked the roads of {} preaching {}, and the villages followed {}.",

@@ -2,7 +2,8 @@
 //! rank, and how they break apart.
 
 use super::{
-    cap, capital_name, count, join_names, realm, realm_full, realm_full_cap, who, years, Pick,
+    cap, capital_name, count, join_names, realm, realm_full, realm_full_cap, realm_it, realm_its,
+    realm_was, who, years, Pick,
 };
 use crate::sim::{PolityKind, World};
 
@@ -41,9 +42,9 @@ pub fn polity_founded(
             realm_full(w, p)
         ),
         _ => format!(
-            "The {} were many enough {} to need a leader, and took {}. They walled the settlement of {}, and so began {}.",
-            folk,
+            "Living {}, the {} grew numerous enough to need a leader and took {}. They walled the settlement of {}, and so began {}.",
             place,
+            folk,
             w.ruler_short(p),
             seat,
             realm_full(w, p)
@@ -73,9 +74,10 @@ pub fn city_founded(w: &World, p: usize, city: usize, place: &str, pick: &Pick) 
 /// A realm learns to build seagoing ships.
 pub fn learned_seafaring(w: &World, p: usize) -> String {
     format!(
-        "The shipwrights of {} learned to build vessels fit for the open sea, and {} looked beyond its own coasts.",
+        "The shipwrights of {} learned to build vessels fit for the open sea, and {} looked beyond {} own coasts.",
         realm_full(w, p),
-        realm(w, p)
+        realm(w, p),
+        realm_its(w, p)
     )
 }
 
@@ -111,8 +113,9 @@ pub fn ruler_death_flourish(w: &World, p: usize, ruler: usize, reign: i32, pick:
         0 => String::new(),
         1 => format!(" The people of {} mourned for many days.", realm(w, p)),
         2 => format!(
-            " {} was laid in the tombs of {}.",
+            " {} {} laid in the tombs of {}.",
             g.subject_cap(),
+            g.was(),
             capital_name(w, p)
         ),
         3 => " Few wept.".to_string(),
@@ -160,29 +163,33 @@ pub fn murdered_by(by: &str) -> String {
 // Succession
 // ---------------------------------------------------------------------------
 
-/// A realm without a dynasty chooses its next leader. No draw.
-pub fn elected(w: &World, p: usize, kind: PolityKind, heir: usize) -> String {
+/// A realm without a dynasty chooses its next leader, naming the one who
+/// died. No draw.
+pub fn elected(w: &World, p: usize, kind: PolityKind, heir: usize, old: usize) -> String {
     let name = &w.persons[heir].name;
+    let gone = &w.persons[old].name;
     match kind {
         PolityKind::Republic => format!(
-            "The assemblies of {} elected {} consul for the year, the old consul being dead.",
+            "The assemblies of {} elected {} consul after the death of {}.",
             realm_full(w, p),
-            name
+            name,
+            gone
         ),
         PolityKind::Magocracy => format!(
-            "The towers of {} chose {} as archmage, the seat having fallen vacant.",
+            "The towers of {} chose {} as archmage after the death of {}.",
             realm_full(w, p),
-            name
+            name,
+            gone
         ),
         PolityKind::Theocracy => format!(
-            "The priests of {} raised {} to the hierarchy in place of the dead hierarch.",
+            "The priests of {} raised {} to the hierarchy in place of {}.",
             realm_full(w, p),
-            name
+            name,
+            gone
         ),
         _ => format!(
-            "The {} chose {} to lead them in place of the leader they had lost.",
-            w.cultures[w.polities[p].culture].plural,
-            name
+            "The {} chose {} to lead them after the death of {}.",
+            w.cultures[w.polities[p].culture].plural, name, gone
         ),
     }
 }
@@ -206,10 +213,10 @@ pub fn succession_smooth(w: &World, p: usize, heir: usize, dynasty: &str, pick: 
         )
     } else {
         format!(
-            "The crown of {} passed by right of blood to {} {}.{}",
-            realm_full(w, p),
+            "By right of blood the throne passed to {} {} of {}.{}",
             hon,
             name,
+            realm_full(w, p),
             house
         )
     }
@@ -304,21 +311,29 @@ pub fn rank_changed(
     capital: &str,
 ) -> (u8, String) {
     let short = realm(w, p);
+    // The old name may be plural ("the Velenic Clans are now ...").
+    let was_named = if super::name_is_plural(old_name, old) {
+        "are"
+    } else {
+        "is"
+    };
     match new {
         PolityKind::Chiefdom => (
             0,
             format!(
-                "The clans of {} bent the knee to a single chieftain, having tired of raiding one another. {} is now {}.",
+                "The clans of {} bent the knee to a single chieftain, having tired of raiding one another. {} {} now {}.",
                 short,
                 cap(old_name),
+                was_named,
                 new_name
             ),
         ),
         PolityKind::Kingdom if old == PolityKind::Empire => (
             2,
             format!(
-                "Shrunken and humbled, {} was an empire no longer. Its rulers styled it {}.",
+                "Shrunken and humbled, {} {} an empire no longer. Its rulers styled it {}.",
                 cap(old_name),
+                if was_named == "are" { "were" } else { "was" },
                 new_name
             ),
         ),
@@ -339,8 +354,9 @@ pub fn rank_changed(
         PolityKind::Empire => (
             3,
             format!(
-                "{} was proclaimed {}. {} took the imperial diadem before the assembled peoples of {}.",
+                "{} {} proclaimed {}. {} took the imperial diadem before the assembled peoples of {}.",
                 cap(old_name),
+                if was_named == "are" { "were" } else { "was" },
                 new_name,
                 ruler,
                 count(w.polities[p].cells as i64, "land")
@@ -349,24 +365,26 @@ pub fn rank_changed(
         PolityKind::Theocracy => (
             2,
             format!(
-                "The priests of {} took the crown for their own, the ruler being devout and the faith strong. {} is now {}.",
+                "The priests of {} took the crown for their own, the ruler being devout and the faith strong. {} {} now {}.",
                 short,
                 cap(old_name),
+                was_named,
                 new_name
             ),
         ),
         PolityKind::Magocracy => (
             2,
             format!(
-                "The mages who counselled the throne of {} dispensed with the throne. {} is now {}.",
+                "The mages who counselled the throne of {} dispensed with the throne. {} {} now {}.",
                 short,
                 cap(old_name),
+                was_named,
                 new_name
             ),
         ),
         _ => (
             1,
-            format!("{} is now {}.", cap(old_name), new_name),
+            format!("{} {} now {}.", cap(old_name), was_named, new_name),
         ),
     }
 }
@@ -437,8 +455,10 @@ pub fn realm_fell(w: &World, p: usize, cause: &str, cities_built: usize) -> Stri
     let peak = w.polities[p].peak_cells;
     if peak > 40 {
         text.push_str(&format!(
-            " At its height in year {} it had ruled {} and {}.",
+            " At {} height in year {}, {} had ruled {} and {}.",
+            realm_its(w, p),
             w.polities[p].peak_year,
+            realm_it(w, p),
             count(peak as i64, "land"),
             count(cities_built as i64, "city")
         ));
@@ -454,26 +474,37 @@ pub fn shattered(
     successor_names: &[String],
     capital: &str,
 ) -> String {
+    let now = realm_full(w, p);
+    let remnant = if now == old_name {
+        format!("What remained held only the lands about {}.", capital)
+    } else {
+        format!(
+            "What remained of the old realm, now {}, held only the lands about {}.",
+            now, capital
+        )
+    };
     format!(
-        "{} shattered, its throne too weak to hold its provinces. Its governors and generals each crowned themselves, and from its ruin rose {}. What remained of the old realm, now {}, held only the lands about {}.",
+        "{} shattered, its throne too weak to hold its provinces. Its governors and generals each crowned themselves, and from its ruin rose {}. {}",
         cap(old_name),
         join_names(successor_names),
-        realm_full(w, p),
-        capital
+        remnant
     )
 }
 
 /// A realm with nothing left to divide. No draw.
-pub fn collapsed_into_lawlessness() -> &'static str {
-    "collapsed into lawlessness, its lords each seizing what they could."
+pub fn collapsed_into_lawlessness(w: &World, p: usize) -> String {
+    format!(
+        "collapsed into lawlessness, {} lords each seizing what they could.",
+        realm_its(w, p)
+    )
 }
 
 /// A realm that simply ran out of land. No draw.
-pub fn faded_away(at_war: bool) -> &'static str {
+pub fn faded_away(w: &World, p: usize, at_war: bool) -> String {
     if at_war {
-        "was overrun and destroyed."
+        format!("{} overrun and destroyed.", realm_was(w, p))
     } else {
-        "faded away, its last lands abandoned."
+        format!("faded away, {} last lands abandoned.", realm_its(w, p))
     }
 }
 
@@ -491,6 +522,12 @@ pub fn tyrant(w: &World, p: usize, ruler: usize, nobles: usize) -> String {
         g.subject_cap(),
         count(nobles as i64, "noble")
     )
+}
+
+/// A realm's army, so that an adjective is never used as a noun:
+/// "the Velenic host".
+pub fn host(w: &World, p: usize) -> String {
+    format!("the {} host", w.polities[p].adj)
 }
 
 /// A general takes the throne by force. No draw.

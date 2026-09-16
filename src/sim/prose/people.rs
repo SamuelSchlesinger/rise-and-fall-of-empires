@@ -27,7 +27,12 @@ pub fn city_assimilated(
 
 /// A realm has more foreign subjects than its own people, and takes their
 /// culture for its own.
-pub fn realm_changes_culture(w: &World, p: usize, old_culture: usize, new_culture: usize) -> String {
+pub fn realm_changes_culture(
+    w: &World,
+    p: usize,
+    old_culture: usize,
+    new_culture: usize,
+) -> String {
     format!(
         "The rulers of {} had long spoken {} at court, but their subjects were {}. {} now counts itself {}, and the court speaks as the country does.",
         realm_full(w, p),

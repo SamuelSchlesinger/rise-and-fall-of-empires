@@ -154,10 +154,9 @@ pub fn relic_buried_with(name: &str) -> String {
 pub fn prophecy_what(w: &World, kind: ProphecyKind) -> String {
     match kind {
         ProphecyKind::RealmFalls(q) => format!("{} would fall", realm_full(w, q)),
-        ProphecyKind::CrownOfEmpire(q) => format!(
-            "a ruler of {} would wear an emperor's crown",
-            realm(w, q)
-        ),
+        ProphecyKind::CrownOfEmpire(q) => {
+            format!("a ruler of {} would wear an emperor's crown", realm(w, q))
+        }
         ProphecyKind::CityBurns(c, _) => format!("{} would burn", w.cities[c].name),
         ProphecyKind::RulerMurdered(q) => format!(
             "a ruler of {} would die by a hand they trusted",
@@ -168,11 +167,9 @@ pub fn prophecy_what(w: &World, kind: ProphecyKind) -> String {
             w.schools[s].name,
             super::count(n as i64, "realm")
         ),
-        ProphecyKind::RelicReturns(a, q) => format!(
-            "{} would return to {}",
-            w.artifacts[a].name,
-            realm(w, q)
-        ),
+        ProphecyKind::RelicReturns(a, q) => {
+            format!("{} would return to {}", w.artifacts[a].name, realm(w, q))
+        }
     }
 }
 

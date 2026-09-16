@@ -180,6 +180,7 @@ ordered maps, never iterate a HashMap in the simulation).
 
 Source layout: `src/geo.rs` terrain, `src/lang.rs` languages and names,
 `src/sim/` the simulation (`politics`, `war`, `magic`, `people`, `events`,
-`stories`, `genesis`, `chronicle`), `src/ser.rs` save files, `src/config.rs`
+`stories`, `genesis`, `chronicle`, and `prose`, which writes every
+sentence the chronicle prints), `src/ser.rs` save files, `src/config.rs`
 and `src/theme.rs`, `src/term.rs` the raw terminal layer, `src/ui/` the
 interface, `src/stats.rs` the balance harness.
