@@ -9,6 +9,8 @@ mod ser;
 mod sim;
 mod stats;
 mod term;
+#[cfg(test)]
+mod tests;
 mod theme;
 mod ui;
 
