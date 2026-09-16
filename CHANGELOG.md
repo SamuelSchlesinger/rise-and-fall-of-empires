@@ -128,6 +128,39 @@ history of the work that led to the first release.
 
 ### Fixed
 
+- **The map now shows who holds what.** The political layer used to be the
+  terrain layer in other colours: identical glyphs, a different palette, and
+  nothing at all in a monochrome terminal or a black-and-white screenshot. It
+  and the culture layer now draw a neutral field of `·` under their colours
+  and rule the frontiers off with `│ ─ ┼` (`| - +` under `--ascii`)
+  wherever the realm or the people changes, leaving unheld land blank, with
+  rivers, cities, capitals, ruins and event marks still on top. Terrain,
+  biomes, mana and population keep their own glyphs.
+- **A key to the colours.** The sidebar's *Great powers* block, which at 44
+  rows was often down to a single realm, is now an **On screen** block: the
+  largest realms in view, each with its swatch, its size and its trend. The
+  sidebar shares its rows out by what each block actually has to say instead
+  of by fixed reserves, and the key keeps a floor of rows of its own.
+- **Nothing in the sidebar stops mid-sentence.** Every block — the era, the
+  storyteller, Here, Selected — is cut with an ellipsis (`...` under
+  `--ascii`, where a lone `…` flattened to a full stop) at 150, 120 and 100
+  columns alike.
+- **The event log defaults to the notable.** Level 1 printed about seven
+  lines a year, unreadable at five years a second; the default is now 2, `v`
+  cycles the same 1-3 that `:log` takes, and both the feed's title and the
+  message say what the level means in words. `--min-importance` on the
+  command line is unchanged for scripts.
+- **A world smaller than the map pane is centred in it** at every zoom
+  rather than pinned to the top-left corner, in the renderer, the map labels
+  and the mouse alike.
+- **Every glyph the map draws is in a legend.** The terrain and biome keys
+  name hills, taiga, grassland, steppe, tundra, ice and wastes as well, and
+  each key is fitted to the width it is given rather than clipped.
+- **A realm's stability trend and its Why block agree.** The page said
+  "restless (65%), and holding there" three lines above "pulls stability
+  towards 62%"; the trend now carries that very number. The *Strain* bar,
+  which drew from overextension alone and stood full above three other
+  percentages, is gone; the four pressures are named instead.
 - **Terminal restoration.** The saved termios state is kept in sound statics,
   the panic hook can read it without allocating or blocking, and SIGINT,
   SIGTERM and SIGHUP restore the terminal instead of leaving it in raw mode on

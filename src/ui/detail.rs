@@ -170,9 +170,12 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
             if pol.alive() {
                 out.push((
                     format!(
-                        "{} {}",
+                        "{}, {}",
                         words::stability(pol.stability),
-                        explain::stability_drift(w, p)
+                        words::stability_trend(
+                            explain::stability_drift(w, p),
+                            explain::stability_target(w, p)
+                        )
                     ),
                     stability_color(pol.stability),
                 ));
@@ -838,13 +841,19 @@ fn realm_page(
             FG,
             0,
         ));
+        // The word for where it is going comes from the same target the Why
+        // block below totals up, and says the number, so the two lines
+        // cannot contradict one another.
         out.push(line(
             format!(
                 "    Stability {} {} ({:.0}%), {}",
                 bar(pol.stability, 20, ascii),
                 words::stability(pol.stability),
                 pol.stability * 100.0,
-                explain::stability_drift(w, p)
+                words::stability_trend(
+                    explain::stability_drift(w, p),
+                    explain::stability_target(w, p)
+                )
             ),
             stability_color(pol.stability),
             0,
@@ -883,7 +892,28 @@ fn realm_page(
             ));
             out.push(line("", FG, 0));
         }
-        out.push(line(format!("    Strain    {} overextension {:.0}%, foreign subjects {:.0}%, war-weariness {:.0}%, decadence {:.0}%", bar((pol.overextension(&w.tuning) - 0.5).clamp(0.0, 1.0), 20, ascii), pol.overextension(&w.tuning) * 100.0, pol.foreign_share * 100.0, pol.exhaustion * 100.0, pol.decadence * 100.0), FG, 0));
+        // Four separate pressures, so no single bar can stand for them: the
+        // one that used to sit here drew from overextension alone and was
+        // full for any realm past its reach, above three numbers it said
+        // nothing about.
+        out.push(line(
+            format!(
+                "    Strain    overextension {:.0}% of what the crown can govern",
+                pol.overextension(&w.tuning) * 100.0
+            ),
+            FG,
+            0,
+        ));
+        out.push(line(
+            format!(
+                "              foreign subjects {:.0}%   war-weariness {:.0}%   decadence {:.0}%",
+                pol.foreign_share * 100.0,
+                pol.exhaustion * 100.0,
+                pol.decadence * 100.0
+            ),
+            FG,
+            0,
+        ));
         let mut flags = Vec::new();
         if pol.seafaring {
             flags.push("seafaring");
@@ -1712,7 +1742,8 @@ pub const HELP: &[&str] = &[
     "             gg or G jump to selection   f follow events   PageUp PageDown half a screen",
     "             ] [ next / previous realm   } { next / previous city   t go to the top story",
     "             r a recap of the last fifty years (of the selected realm or city, if selected)",
-    "             v filter the event log by importance (0-2)   x the Hand of Fate for that realm",
+    "             v the event log's level: 1 everything, 2 the notable (the default), 3 the great",
+    "             x the Hand of Fate for that realm",
     "",
     "Search       /name finds realms, cities, people, peoples, schools, wars, places and relics;",
     "             Enter jumps, n N cycle.  In lists and the chronicle, / filters the rows instead.",
@@ -1720,7 +1751,7 @@ pub const HELP: &[&str] = &[
     "Commands     :w [name]  :e name  :saveas name  :saves  :autosave N   (saves live in",
     "             ~/.local/share/empires; --save FILE or --load FILE on the command line)",
     "             :speed 25  :layer culture  :detail high  :zoom 2  :theme paper  :find Velen",
-    "             :new [seed]  :until YEAR  :step N  :follow on  :log 2  :mute battle  :story",
+    "             :new [seed]  :until YEAR  :step N  :follow on  :log 1-3  :mute battle  :story",
     "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
     "             :fate 3  :q  :wq  :q!",
@@ -1741,9 +1772,14 @@ pub const HELP: &[&str] = &[
     "Themes       default  phosphor  amber  paper  dusk   (:theme cycles)",
     "Quitting     :q  ZZ  Ctrl-C  or q twice on the map, all of which save if a save file is",
     "             set.  :q! or ZQ quit without saving.",
-    "Symbols      @ capital  # city  × ruins  ! a recent event  ≈ river  ▲ mountains  ♣ forest",
+    "Symbols      @ capital  # city  × ruins  ! a recent event  ≈ river  ▲ mountains  ∩ hills",
+    "             ♣ forest  ♠ taiga  \" grassland  , steppe  : desert  . tundra  ¤ wastes  * ice",
+    "             On the political and culture layers the land is a plain field of · under the",
+    "             colours, ruled off with │ ─ ┼ wherever the realm (or the people) changes, and",
+    "             blank where nobody holds it — so the frontiers read without colour at all.",
     "             At zoom 1 a realm's name stands beside its capital; the line under the map says",
-    "             what the colours of the layer mean (:legend turns it off).",
+    "             what the colours of the layer mean (:legend turns it off). The sidebar's",
+    "             On screen block names the largest realms in view, with their colour.",
     "Plain words  stability reads steady / restless / troubled / on the brink, a treasury bankrupt /",
     "             poor / solvent / rich, an army outmatched / matched / formidable. A realm's page",
     "             has a Why block: what pulls its stability up or down, ranked, in words.",

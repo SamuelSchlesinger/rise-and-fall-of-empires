@@ -277,9 +277,19 @@ impl Ui {
                 Some(l) => self.layer = l,
                 None => self.say("layers: political terrain culture mana population biomes"),
             },
+            // 1 is everything the chronicle keeps, 2 the notable, 3 only the
+            // great. (0 is taken as 1: a single line in the simulation is
+            // logged below importance 1, so the two show the same feed.)
             "log" => match arg.parse::<u8>() {
-                Ok(v) if v <= 3 => self.log_min = v,
-                _ => self.say("usage: :log 0-3"),
+                Ok(v) if v <= 3 => {
+                    self.log_min = v.max(1);
+                    self.say(&format!(
+                        "event log: {} (importance {} and up)",
+                        words::log_level(self.log_min),
+                        self.log_min
+                    ));
+                }
+                _ => self.say("usage: :log 1-3   (1 everything, 2 notable, 3 great)"),
             },
             "filter" => match arg.parse::<u8>() {
                 Ok(v) if v <= 3 => self.chron_min = v,

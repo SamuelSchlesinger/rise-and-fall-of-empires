@@ -197,9 +197,11 @@ fn mark_tour_seen() {
 pub const TOUR: &[&str] = &[
     "This is a world, and it is already running.",
     "",
-    "The map is the whole of it: colours are realms, @ is a capital, # a city,",
-    "× ruins and ! a recent event. The line under the map says what the",
-    "colours mean; the panel on the right says what the cursor is sitting on.",
+    "The map is the whole of it: each realm is a patch of colour ruled off",
+    "from its neighbours, @ is a capital, # a city, × ruins and ! a recent",
+    "event. The line under the map says what the colours and marks mean; the",
+    "panel on the right names the realms on screen and says what the cursor",
+    "is sitting on.",
     "",
     "Space  pause time             Enter  open whatever is under the cursor",
     "h j k l  move the cursor      r      a recap of the last fifty years",
@@ -420,7 +422,10 @@ impl Ui {
             chron_scroll: 0,
             help_scroll: 0,
             chron_min: 1,
-            log_min: 1,
+            // Level 2, the notable: about a line a year, which is a feed a
+            // reader can follow at five years a second. Level 1 is roughly
+            // seven lines a year, which at that speed is a blur.
+            log_min: 2,
             ascii,
             msg: String::new(),
             msg_until: Instant::now(),
@@ -501,7 +506,7 @@ impl Ui {
             self.autosave = a.max(0);
         }
         if let Some(l) = cfg.log {
-            self.log_min = l.min(3);
+            self.log_min = l.clamp(1, 3);
         }
         if let Some(f) = cfg.follow {
             self.follow = f;
@@ -616,6 +621,20 @@ impl Ui {
     fn view_dims(&self) -> (usize, usize) {
         let (_, _, mw, mh) = self.map_rect();
         (mw * self.zoom, mh * self.zoom)
+    }
+
+    /// Blank characters left of and above the world in the map pane.
+    ///
+    /// Zoomed out far enough the whole world is smaller than the pane. It
+    /// then sits in the middle of it rather than in the top-left corner,
+    /// and every mapping between screen and world — the renderer, the map
+    /// labels and the mouse — goes through this.
+    pub(crate) fn view_pad(&self) -> (usize, usize) {
+        let (_, _, mw, mh) = self.map_rect();
+        (
+            pane_pad(mw, self.world.terrain.w, self.zoom),
+            pane_pad(mh, self.world.terrain.h, self.zoom),
+        )
     }
 
     fn center_view(&mut self) {
@@ -1098,6 +1117,15 @@ pub fn biome_style(b: Biome, ascii: bool) -> (Rgb, char) {
     (c, if ascii { a } else { g })
 }
 
+/// Where a world `world` cells across starts in a pane `pane` characters
+/// across, at `zoom` cells to the character: half the slack, so a world too
+/// small to fill the pane is centred in it instead of pinned to a corner.
+pub(crate) fn pane_pad(pane: usize, world: usize, zoom: usize) -> usize {
+    let zoom = zoom.max(1);
+    let need = (world + zoom - 1) / zoom;
+    pane.saturating_sub(need) / 2
+}
+
 pub fn event_style(kind: EventKind, importance: u8) -> (Rgb, u8) {
     let c = match kind {
         EventKind::Genesis => Rgb(230, 200, 120),
@@ -1179,6 +1207,111 @@ mod tests {
                         mode, cols, rows, c, c as u32
                     );
                 }
+            }
+        }
+    }
+
+    /// The complaint this answers: the political layer was the terrain layer
+    /// in other colours, so a black-and-white screenshot of one was the same
+    /// picture as the other. Borders and a neutral field must make them
+    /// different frames, glyph for glyph, with no colour at all.
+    #[test]
+    fn ownership_is_visible_without_colour() {
+        for ascii in [false, true] {
+            let mut ui = Ui::new(world(), ascii, false, 120, 40);
+            ui.paused = true;
+            let of = |ui: &mut Ui, layer: Layer| {
+                ui.layer = layer;
+                ui.compose();
+                text(ui)
+            };
+            let political = of(&mut ui, Layer::Political);
+            let terrain = of(&mut ui, Layer::Terrain);
+            let culture = of(&mut ui, Layer::Culture);
+            assert_ne!(political, terrain, "ascii = {}", ascii);
+            assert_ne!(culture, terrain, "ascii = {}", ascii);
+            assert_ne!(political, culture, "ascii = {}", ascii);
+            // And the difference is frontiers, not a stray glyph or two.
+            let rules = if ascii {
+                ['|', '-', '+']
+            } else {
+                ['│', '─', '┼']
+            };
+            for (name, frame) in [("political", &political), ("culture", &culture)] {
+                let n = frame.chars().filter(|c| rules.contains(c)).count();
+                assert!(n > 40, "{} layer drew {} border marks", name, n);
+            }
+        }
+    }
+
+    /// The key to the colours has to be on screen: with fixed reserves for
+    /// the blocks above it, it was down to a single row at 44 rows.
+    #[test]
+    fn the_sidebar_names_the_realms_on_screen() {
+        for (cols, rows, want) in [(150usize, 44usize, 4usize), (120, 40, 4), (100, 30, 2)] {
+            let ui = frame(false, Mode::Map, cols, rows);
+            assert!(
+                ui.power_rows.len() >= want,
+                "{}x{} named {} realms, wanted {}",
+                cols,
+                rows,
+                ui.power_rows.len(),
+                want
+            );
+        }
+    }
+
+    /// A world smaller than the pane sits in the middle of it, and every
+    /// mapping between screen and world agrees about where that is.
+    #[test]
+    fn a_small_world_is_centred() {
+        assert_eq!(pane_pad(100, 160, 2), 10);
+        assert_eq!(pane_pad(100, 160, 1), 0);
+        assert_eq!(pane_pad(100, 60, 1), 20);
+        assert_eq!(pane_pad(9, 5, 2), 3);
+        let mut ui = Ui::new(world(), false, false, 120, 40);
+        ui.set_zoom(2);
+        ui.paused = true;
+        ui.compose();
+        let (_, _, mw, mh) = ui.map_rect();
+        let (padx, pady) = ui.view_pad();
+        assert!(padx > 0 && pady > 0, "{} {}", padx, pady);
+        // Blank on both sides, not just the right: the same number of empty
+        // columns before the world as after it.
+        for sy in pady..mh - pady {
+            for sx in 0..padx {
+                assert_eq!(ui.screen.cell(sx, sy).ch, ' ');
+                assert_eq!(ui.screen.cell(mw - 1 - sx, sy).ch, ' ');
+            }
+        }
+    }
+
+    /// A click lands on the cell the eye is pointing at, margins and all:
+    /// the renderer, the labels and the mouse all read the same padding.
+    #[test]
+    fn a_click_lands_where_the_world_is_drawn() {
+        use crate::term::{Mouse, MouseKind};
+        for zoom in [1usize, 2, 3] {
+            let mut ui = Ui::new(world(), false, true, 120, 40);
+            ui.paused = true;
+            ui.set_zoom(zoom);
+            ui.compose();
+            let (padx, pady) = ui.view_pad();
+            let (ox, oy) = ui.view;
+            for (dx, dy) in [(0usize, 0usize), (3, 2), (7, 5)] {
+                ui.handle_key(Key::Mouse(Mouse {
+                    kind: MouseKind::Press(0),
+                    x: padx + dx,
+                    y: pady + dy,
+                }));
+                assert_eq!(
+                    ui.cursor,
+                    (ox + dx * zoom + zoom / 2, oy + dy * zoom + zoom / 2),
+                    "zoom {} at +{},+{}",
+                    zoom,
+                    dx,
+                    dy
+                );
             }
         }
     }

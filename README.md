@@ -98,7 +98,7 @@ in the game for the full key list — it is the authority, and it scrolls.
 | Space, `+`/`-`, `.` | pause, change speed (0.5 to 100 years/second), step a year |
 | `h j k l` / arrows | move the cursor; `H`/`L` or Shift+arrows 8 cells, `K`/`J` 4 rows, Ctrl+arrows 20 and 10 |
 | `0` `$` Home `zz` `zt` | left edge, right edge, centre of the world, centre on cursor, cursor to the top |
-| `zi` `zo` | zoom in / out (1 to 4 world cells per character; the whole world fits at 2) |
+| `zi` `zo` | zoom in / out (1 to 4 world cells per character; the whole world fits at 2, centred in the pane) |
 | Tab / Shift+Tab | map layer: political, terrain, culture, mana, population, biomes |
 | Enter / `s` / Esc | open / select what is under the cursor / clear the selection |
 | `gg` or `G` | jump to the selected thing |
@@ -110,7 +110,7 @@ in the game for the full key list — it is the authority, and it scrolls.
 | `e` | lists: realms, cities, peoples, schools, persons, wars, places, relics, prophecies |
 | `c` | the full chronicle (`f` or `v` cycles importance 0–3, `/` filters by text) |
 | `x` | the Hand of Fate: intervene in the selected realm |
-| `D`, `v` | cycle simulation detail; filter the event log (0–2) |
+| `D`, `v` | cycle simulation detail; the event log's level (1 everything, 2 the notable, 3 only the great) |
 | `?` or F1 | help |
 | `q` twice, `ZZ`, Ctrl-C | quit, saving if a save file is set; `ZQ` quits without saving |
 
@@ -144,7 +144,7 @@ text.
 | `:new [seed]` | start a fresh world without restarting |
 | `:story` | go to the top story |
 | `:recap [N]` | the digest of the last N years (default 50, and `N` sticks); `r` on the map does the same |
-| `:follow on`, `:log 2`, `:filter 2` | jump to major events as they happen; least importance shown in the event log, and in the chronicle |
+| `:follow on`, `:log 2`, `:filter 2` | jump to major events as they happen; the event log's level (1–3, default 2), and the chronicle's |
 | `:legend` | the one-line key under the map (on by default) |
 | `:tour` | show the introductory card again |
 | `:mute battle` | hide an event kind from the feeds (toggle); `:mute` lists |
@@ -190,7 +190,8 @@ on adding a field.
 # autosave = 100         # years between autosaves when a save file is set (0 = off)
 # width = 160            # 40-600
 # height = 64            # 20-300
-# log = 1                # minimum importance shown in the event log (0-3)
+# log = 2                # least importance shown in the event log: 1 everything,
+#                        # 2 the notable (the default), 3 only the great
 # follow = on            # jump the cursor to major events
 # zoom = 1               # 1-4, how many world cells per character
 
@@ -242,6 +243,18 @@ layer's colours and glyphs mean (`:legend` turns it off). The sidebar's
 **Here** block is a plain sentence about whatever the cursor sits on:
 *Steppe on the coast, where Fil stands, ruled by the Lystzylese
 Commonwealth, home to 4,470 Whendan folk.*
+
+**Ownership is drawn, not only coloured.** The political and culture layers
+put a plain field of `·` under their colours and rule the frontiers off
+with `│ ─ ┼` wherever the realm — or the people — changes, leaving land
+nobody holds blank; rivers, cities, capitals, ruins and event marks stay on
+top of it. So the same frame read on a monochrome terminal, in a black-and-
+white screenshot, or under `--ascii` (where the rules come out as `| - +`)
+still shows where one realm stops and the next begins. The terrain, biome,
+mana and population layers keep their own glyphs, and their legends name
+every one of them. Beside the map, the sidebar's **On screen** block is the
+key to the colours: the largest realms in view, each with its swatch, its
+size and whether it is rising or falling.
 
 **Digests.** `r` or `:recap` summarises the last fifty years — realms risen
 and fallen, wars begun and ended, rulers dead, cities founded and sacked,

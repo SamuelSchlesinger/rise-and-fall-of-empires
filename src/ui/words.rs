@@ -206,33 +206,153 @@ pub fn here_sentence(w: &World, cell: usize) -> String {
     s
 }
 
-/// The one-line key to whatever the map is currently showing.
-pub fn legend(layer: Layer, ascii: bool) -> String {
-    let s = match layer {
-        Layer::Political => {
-            "colours are realms · brighter edges are borders · @ capital · # city · × ruins · ! a recent event"
-        }
-        Layer::Terrain => {
-            "the bare land · ▲ mountains · ♣ forest · : desert · ≈ rivers · @ and # are cities"
-        }
-        Layer::Culture => {
-            "colours are peoples, not realms · the deeper the colour, the thicker they live"
-        }
-        Layer::Magic => {
-            "purple is wild mana · a realm is tinted by the school it follows · * a school's home"
-        }
-        Layer::Population => "dark to gold to red as people crowd in · the sea is left bare",
-        Layer::Biomes => "flat colours are biomes · green forest · gold desert · grey peaks · blue sea",
-    };
-    if ascii {
-        s.replace('·', "|")
-            .replace('×', "x")
-            .replace('▲', "^")
-            .replace('♣', "T")
-            .replace('≈', "~")
-    } else {
-        s.to_string()
+/// Where a realm's stability is going: the simulation's own word for it,
+/// and the number that word is about.
+///
+/// `drift` is [`stability_drift`](crate::sim::explain::stability_drift) and
+/// `target` is [`stability_target`](crate::sim::explain::stability_target),
+/// which is the total the realm page's **Why** block prints. Saying them
+/// together is the point: the page used to call a realm "restless (65%),
+/// and holding there" three lines above "pulls stability towards 62%",
+/// with nothing to say those were the same fact.
+pub fn stability_trend(drift: &str, target: f32) -> String {
+    let word = drift.trim().trim_start_matches("and ").trim();
+    format!(
+        "{}: the pull is towards {:.0}%",
+        word,
+        (target * 100.0).round()
+    )
+}
+
+/// What a level of the event log is worth in words, so the feed says what
+/// it is showing rather than only a number.
+///
+/// Level 2, the default, is about one line a year at five years a second —
+/// a feed a reader can actually follow. Level 1 is everything the chronicle
+/// keeps, which at speed scrolls past far faster than anyone can read.
+pub fn log_level(min: u8) -> &'static str {
+    match min {
+        0 | 1 => "everything",
+        2 => "the notable",
+        _ => "only the great",
     }
+}
+
+/// The key to whatever the map is currently showing, cut to the one line
+/// of `width` characters it is given under the map.
+pub fn legend(layer: Layer, ascii: bool, width: usize) -> String {
+    fit(&legend_parts(layer, ascii), width, ascii)
+}
+
+/// Every piece of a layer's key, the most worth knowing first, so a narrow
+/// terminal loses the tail of the key rather than half of a sentence.
+///
+/// The glyphs come from [`biome_style`](crate::ui::biome_style), the same
+/// call the map draws with, so the key cannot drift from the map.
+pub fn legend_parts(layer: Layer, ascii: bool) -> Vec<String> {
+    use crate::geo::Biome;
+    let g = |b: Biome| crate::ui::biome_style(b, ascii).1;
+    let biome = |b: Biome, name: &str| format!("{}{}", g(b), name);
+    let river = if ascii { '~' } else { '≈' };
+    let ruins = if ascii { 'x' } else { '×' };
+    let field = if ascii { '.' } else { '·' };
+    match layer {
+        Layer::Political => vec![
+            "lines are borders".into(),
+            format!("{} realm land", field),
+            "blank unclaimed".into(),
+            "@ capital".into(),
+            "# city".into(),
+            format!("{} ruins", ruins),
+            "! an event".into(),
+            format!("{} river", river),
+        ],
+        Layer::Culture => vec![
+            "lines part peoples".into(),
+            format!("{} their land", field),
+            "blank is empty".into(),
+            "deeper colour, more of them".into(),
+            "@ # cities".into(),
+        ],
+        Layer::Terrain => vec![
+            biome(Biome::Mountain, " peak"),
+            biome(Biome::Hills, " hill"),
+            biome(Biome::Forest, " wood"),
+            biome(Biome::Taiga, " pine"),
+            biome(Biome::Grassland, " grass"),
+            biome(Biome::Steppe, " steppe"),
+            biome(Biome::Desert, " desert"),
+            format!("{} river or lake", river),
+            "@ # cities".into(),
+            biome(Biome::Tundra, " tundra"),
+            biome(Biome::Ice, " ice"),
+            biome(Biome::Wastes, " waste"),
+            biome(Biome::Ocean, " sea"),
+        ],
+        Layer::Biomes => vec![
+            "flat colours are biomes".into(),
+            biome(Biome::Mountain, " peak"),
+            biome(Biome::Hills, " hill"),
+            biome(Biome::Forest, " wood"),
+            biome(Biome::Taiga, " pine"),
+            biome(Biome::Grassland, " grass"),
+            biome(Biome::Steppe, " steppe"),
+            biome(Biome::Desert, " desert"),
+            biome(Biome::Tundra, " tundra"),
+            biome(Biome::Ice, " ice"),
+            biome(Biome::Wastes, " waste"),
+            biome(Biome::Ocean, " sea"),
+            biome(Biome::Shallows, " shoal or lake"),
+        ],
+        Layer::Magic => vec![
+            "purple is wild mana".into(),
+            "a realm takes its school's colour".into(),
+            "* a school's home".into(),
+            "@ # cities".into(),
+        ],
+        Layer::Population => vec![
+            "dark to gold to red as people crowd in".into(),
+            "the sea is left bare".into(),
+            "@ # cities".into(),
+        ],
+    }
+}
+
+/// As many `parts` as `width` has room for, two spaces apart, ending in an
+/// ellipsis when some had to be left out.
+pub fn fit(parts: &[String], width: usize, ascii: bool) -> String {
+    let sep = "  ";
+    let more = if ascii { "..." } else { "…" };
+    let len = |s: &str| s.chars().count();
+    let mut used = 0;
+    let mut taken = 0;
+    for (i, p) in parts.iter().enumerate() {
+        let add = len(p) + if i == 0 { 0 } else { sep.len() };
+        if used + add > width {
+            break;
+        }
+        used += add;
+        taken += 1;
+    }
+    if taken == parts.len() {
+        return parts.join(sep);
+    }
+    // Something was left out, so say so — dropping one more part if that is
+    // what it takes to make room for the mark.
+    while taken > 0 && used + 1 + len(more) > width {
+        taken -= 1;
+        used = used.saturating_sub(len(&parts[taken]) + if taken == 0 { 0 } else { sep.len() });
+    }
+    if taken == 0 {
+        return parts
+            .first()
+            .map(|p| {
+                let room = width.saturating_sub(len(more));
+                p.chars().take(room).collect::<String>() + more
+            })
+            .unwrap_or_default();
+    }
+    format!("{} {}", parts[..taken].join(sep), more)
 }
 
 pub fn capitalize(s: &str) -> String {
@@ -255,6 +375,29 @@ mod tests {
         assert_eq!(stability(0.5), "restless");
         assert_eq!(stability(0.3), "troubled");
         assert_eq!(stability(0.0), "on the brink");
+    }
+
+    /// The word and the number are one sentence, so the page cannot say a
+    /// realm is holding steady beside a target it is nowhere near.
+    #[test]
+    fn the_trend_carries_the_number_it_is_about() {
+        assert_eq!(
+            stability_trend("and holding there", 0.62),
+            "holding there: the pull is towards 62%"
+        );
+        assert_eq!(
+            stability_trend("and getting worse", 0.2),
+            "getting worse: the pull is towards 20%"
+        );
+        assert!(stability_trend("and recovering", 0.344).contains("34%"));
+    }
+
+    #[test]
+    fn log_levels_have_words() {
+        assert_eq!(log_level(1), "everything");
+        assert_eq!(log_level(2), "the notable");
+        assert_eq!(log_level(3), "only the great");
+        assert_eq!(log_level(0), log_level(1));
     }
 
     #[test]
@@ -299,15 +442,85 @@ mod tests {
         }
     }
 
+    /// The widths the key is actually given under the map: a 150-, a 120-,
+    /// a 100- and an 80-column terminal, less the sidebar, the layer's name
+    /// and the margins.
+    const LEGEND_WIDTHS: [usize; 4] = [102, 72, 51, 66];
+
     #[test]
     fn legends_fit_on_one_line() {
         for l in Layer::all() {
             for ascii in [false, true] {
-                let s = legend(l, ascii);
-                assert!(!s.contains('\n'));
-                assert!(s.chars().count() < 110, "{}", s);
-                if ascii {
-                    assert!(s.is_ascii(), "{}", s);
+                for w in LEGEND_WIDTHS {
+                    let s = legend(l, ascii, w);
+                    assert!(!s.contains('\n'));
+                    assert!(
+                        s.chars().count() <= w,
+                        "{:?} at {}: {:?} is {} wide",
+                        l,
+                        w,
+                        s,
+                        s.chars().count()
+                    );
+                    assert!(!s.is_empty(), "{:?} at {} says nothing", l, w);
+                    if ascii {
+                        assert!(s.is_ascii(), "{}", s);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A key cut short says so, and the part it does show is whole.
+    #[test]
+    fn a_shortened_legend_is_marked() {
+        let parts = legend_parts(Layer::Terrain, false);
+        let full = fit(&parts, 400, false);
+        for p in &parts {
+            assert!(full.contains(p.as_str()), "{} missing from {}", p, full);
+        }
+        let short = fit(&parts, 30, false);
+        assert!(short.ends_with('…'), "{}", short);
+        assert!(short.starts_with(&parts[0]), "{}", short);
+        assert!(fit(&parts, 30, true).ends_with("..."));
+    }
+
+    /// Every glyph the terrain and biome layers draw is named in their key.
+    #[test]
+    fn the_map_glyphs_are_all_in_the_key() {
+        use crate::geo::Biome;
+        let biomes = [
+            Biome::DeepOcean,
+            Biome::Ocean,
+            Biome::Shallows,
+            Biome::Lake,
+            Biome::Ice,
+            Biome::Tundra,
+            Biome::Taiga,
+            Biome::Steppe,
+            Biome::Grassland,
+            Biome::Forest,
+            Biome::Jungle,
+            Biome::Savanna,
+            Biome::Desert,
+            Biome::Swamp,
+            Biome::Hills,
+            Biome::Mountain,
+            Biome::Peak,
+            Biome::Wastes,
+        ];
+        for ascii in [false, true] {
+            for layer in [Layer::Terrain, Layer::Biomes] {
+                let key = legend_parts(layer, ascii).join(" ");
+                for b in biomes {
+                    let g = crate::ui::biome_style(b, ascii).1;
+                    assert!(
+                        key.contains(g),
+                        "{:?}: {:?} is in no key: {}",
+                        layer,
+                        g,
+                        key
+                    );
                 }
             }
         }

@@ -21,7 +21,13 @@ impl Ui {
             Style::new(Rgb(200, 200, 200), bg),
         );
         self.screen.hline(0, y0, sw, Rgb(60, 60, 70), bg);
-        let title = format!(" Chronicle (importance ≥{}) ", self.log_min);
+        // What the feed is showing, in words as well as in the number `v`
+        // and `:log` set: "importance ≥2" says nothing on its own.
+        let title = format!(
+            " Chronicle: {} (importance ≥{}, v changes it) ",
+            words::log_level(self.log_min),
+            self.log_min
+        );
         let title = if self.ascii {
             title.replace('≥', ">=")
         } else {

@@ -288,9 +288,20 @@ impl Ui {
                 };
                 self.say(m);
             }
+            // The same 1-3 `:log` takes. Importance 0 is not a level worth
+            // cycling through: one line in the whole simulation carries it,
+            // so 0 and 1 show the same feed.
             Key::Char('v') => {
-                self.log_min = (self.log_min + 1) % 3;
-                self.say(&format!("event log shows importance >= {}", self.log_min));
+                self.log_min = if self.log_min >= 3 {
+                    1
+                } else {
+                    self.log_min + 1
+                };
+                self.say(&format!(
+                    "event log: {} (importance {} and up)",
+                    words::log_level(self.log_min),
+                    self.log_min
+                ));
             }
             Key::Char('x') | Key::Char('X') => self.open_fate(),
             Key::Char('t') | Key::Char('T') => {
@@ -690,10 +701,11 @@ impl Ui {
                     MouseKind::WheelUp => self.move_cursor(0, -3 * self.zoom as i32),
                     MouseKind::WheelDown => self.move_cursor(0, 3 * self.zoom as i32),
                     MouseKind::Press(button) => {
-                        if m.x < mw && m.y < mh {
+                        let (padx, pady) = self.view_pad();
+                        if m.x < mw && m.y < mh && m.x >= padx && m.y >= pady {
                             let z = self.zoom;
-                            let cx = self.view.0 + m.x * z + z / 2;
-                            let cy = self.view.1 + m.y * z + z / 2;
+                            let cx = self.view.0 + (m.x - padx) * z + z / 2;
+                            let cy = self.view.1 + (m.y - pady) * z + z / 2;
                             if cx < self.world.terrain.w && cy < self.world.terrain.h {
                                 let same = self.cursor == (cx, cy);
                                 self.cursor = (cx, cy);
