@@ -31,7 +31,10 @@ impl World {
         };
         let dev = cs.owner.map(|p| self.polities[p].dev).unwrap_or(0.0);
         let aff = self.affinity(race, i);
-        let mut cap = self.terrain.fertility[i] * 5.0 * (0.15 + aff) * (1.0 + dev * 0.7);
+        let mut cap = self.terrain.fertility[i]
+            * self.tuning.cell_capacity_factor
+            * (0.15 + aff)
+            * (1.0 + dev * self.tuning.cell_capacity_dev_weight);
         if cs.city.is_some() {
             cap *= 1.5;
         }
@@ -45,6 +48,7 @@ impl World {
 pub fn grow_and_migrate(w: &mut World) {
     let n = w.cells.len();
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let mut delta = vec![0f32; n];
     let mut new_culture: Vec<(usize, usize)> = Vec::new();
     for i in 0..n {
@@ -59,18 +63,19 @@ pub fn grow_and_migrate(w: &mut World) {
         let race = w.cultures[culture].race;
         let cap = w.cell_capacity(i);
         let fecund = w.races[race].fecund;
-        let r = 0.04 * (0.6 + fecund * 0.8);
+        let r =
+            tn.pop_growth_rate * (tn.pop_growth_fecund_base + fecund * tn.pop_growth_fecund_weight);
         let growth = if cap <= 0.01 {
-            -cs.pop * 0.08
+            -cs.pop * tn.pop_starve_rate
         } else if cs.pop > cap {
-            -(cs.pop - cap) * 0.15
+            -(cs.pop - cap) * tn.pop_overshoot_rate
         } else {
             cs.pop * r * (1.0 - cs.pop / cap)
         };
         delta[i] += growth;
         // Migration pressure.
         let pressure = if cap > 0.01 { cs.pop / cap } else { 2.0 };
-        if pressure > 0.55 && cs.pop > 0.25 {
+        if pressure > tn.migration_pressure && cs.pop > tn.migration_min_pop {
             let nbs: Vec<usize> = w.terrain.neighbors8(i).collect();
             let nb = nbs[rng.below(nbs.len())];
             let b = w.terrain.biome[nb];
@@ -88,14 +93,14 @@ pub fn grow_and_migrate(w: &mut World) {
             let tcap = if target.culture.is_some() {
                 w.cell_capacity(nb)
             } else {
-                w.terrain.fertility[nb] * 5.0 * (0.15 + aff)
+                w.terrain.fertility[nb] * tn.cell_capacity_factor * (0.15 + aff)
             };
             if tcap < 0.15 {
                 continue;
             }
             let tfill = target.pop / tcap;
-            if tfill < pressure * 0.7 {
-                let amount = cs.pop * 0.08 * (pressure - tfill).min(1.0);
+            if tfill < pressure * tn.migration_fill_ratio {
+                let amount = cs.pop * tn.migration_share * (pressure - tfill).min(1.0);
                 if amount > 0.01 {
                     delta[i] -= amount;
                     delta[nb] += amount;
@@ -133,8 +138,11 @@ pub fn grow_and_migrate(w: &mut World) {
         }
         local += w.terrain.fertility[cell] * 2.0;
         let city = &mut w.cities[c];
-        let mut cap =
-            local * 1.6 * (1.0 + dev * 1.2) * (0.6 + city.prosperity) * (0.7 + stab * 0.5);
+        let mut cap = local
+            * tn.city_capacity_factor
+            * (1.0 + dev * tn.city_capacity_dev_weight)
+            * (0.6 + city.prosperity)
+            * (0.7 + stab * 0.5);
         if w.terrain.coast[cell] {
             cap *= 1.25;
         }
@@ -144,11 +152,11 @@ pub fn grow_and_migrate(w: &mut World) {
         if w.cells[cell].plague > 0 {
             cap *= 0.5;
         }
-        let r = 0.03;
+        let r = tn.city_growth_rate;
         if city.pop < cap {
             city.pop += city.pop * r * (1.0 - city.pop / cap) + 0.02;
         } else {
-            city.pop -= (city.pop - cap) * 0.1;
+            city.pop -= (city.pop - cap) * tn.city_overshoot_rate;
         }
         city.pop = city.pop.max(0.1);
         if city.pop > city.peak_pop {
@@ -159,6 +167,7 @@ pub fn grow_and_migrate(w: &mut World) {
 
 pub fn culture_drift(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let n = w.cells.len();
     // Assimilation toward the ruling polity's culture.
     for i in 0..n {
@@ -179,7 +188,8 @@ pub fn culture_drift(w: &mut World) {
             _ => 1.0,
         };
         let tenure_mult = (0.3 + tenure / 60.0).min(1.6);
-        let mut p_assim = 0.004 * tenure_mult * kind_mult * if same_race { 1.6 } else { 0.5 };
+        let mut p_assim =
+            tn.assimilation_rate * tenure_mult * kind_mult * if same_race { 1.6 } else { 0.5 };
         if cs.city.is_some() {
             p_assim *= 1.8;
         }
@@ -207,7 +217,7 @@ pub fn culture_drift(w: &mut World) {
     // Polities whose territory has become mostly foreign shift their own culture.
     for p in w.living_polities() {
         let pol = &w.polities[p];
-        if pol.foreign_share > 0.7 && pol.cells > 20 && rng.chance(0.03) {
+        if pol.foreign_share > 0.7 && pol.cells > 20 && rng.chance(tn.culture_shift_chance) {
             // Find the dominant culture in the territory.
             let mut counts: std::collections::BTreeMap<usize, u32> =
                 std::collections::BTreeMap::new();
@@ -268,6 +278,7 @@ pub fn culture_drift(w: &mut World) {
 
 fn divergence(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     let n = w.cells.len();
     let ncult = w.cultures.len();
     for c in 0..ncult {
@@ -308,9 +319,9 @@ fn divergence(w: &mut World) {
             let d = w.terrain.dist(center, home);
             let home_owner = w.cells[home].owner;
             let other_owner = w.cells[center].owner;
-            let mut p = 0.15 + (d as f64 / 60.0).min(0.35);
+            let mut p = tn.divergence_chance + (d as f64 / 60.0).min(0.35);
             if home_owner != other_owner {
-                p += 0.2;
+                p += tn.divergence_foreign_ruler;
             }
             if !rng.chance(p) {
                 continue;
