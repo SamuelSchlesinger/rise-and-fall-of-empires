@@ -8,6 +8,7 @@ pub mod magic;
 pub mod people;
 pub mod politics;
 pub mod stories;
+pub mod tuning;
 pub mod war;
 
 use crate::geo::{self, FeatureKind, Terrain, GROUP_COUNT};
@@ -16,6 +17,7 @@ use crate::rng::Rng;
 use crate::term::Rgb;
 use chronicle::{Chronicle, Event, EventKind, Ref};
 use std::collections::{BTreeMap, BTreeSet};
+use tuning::Tuning;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Detail {
@@ -247,11 +249,14 @@ impl Polity {
     pub fn at_war(&self) -> bool {
         !self.wars.is_empty()
     }
-    pub fn admin_capacity(&self) -> f32 {
-        16.0 + self.kind.admin_bonus() + self.dev * 45.0 + self.cities.len() as f32 * 8.0
+    pub fn admin_capacity(&self, t: &Tuning) -> f32 {
+        t.admin_capacity_base
+            + self.kind.admin_bonus()
+            + self.dev * t.admin_capacity_dev_weight
+            + self.cities.len() as f32 * t.admin_capacity_city_weight
     }
-    pub fn overextension(&self) -> f32 {
-        (self.cells as f32 / self.admin_capacity()).max(0.0)
+    pub fn overextension(&self, t: &Tuning) -> f32 {
+        (self.cells as f32 / self.admin_capacity(t)).max(0.0)
     }
 }
 
@@ -611,6 +616,7 @@ pub struct World {
     pub rng: Rng,
     pub year: i32,
     pub detail: Detail,
+    pub tuning: Tuning,
     pub terrain: Terrain,
     pub cells: Vec<CellState>,
     pub races: Vec<Race>,
@@ -642,6 +648,7 @@ impl World {
             rng: Rng::new(0),
             year: 0,
             detail: Detail::Medium,
+            tuning: Tuning::default(),
             terrain: Terrain::empty(),
             cells: Vec::new(),
             races: Vec::new(),
@@ -697,6 +704,7 @@ impl World {
             rng,
             year: 0,
             detail,
+            tuning: Tuning::default(),
             terrain,
             cells: vec![CellState::default(); n],
             races: Vec::new(),

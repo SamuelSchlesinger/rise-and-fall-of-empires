@@ -19,6 +19,8 @@ pub struct Config {
     pub follow: Option<bool>,
     pub zoom: Option<usize>,
     pub maps: Vec<(Key, Key)>,
+    /// `tune.<field> = <number>` overrides for `sim::tuning::Tuning`.
+    pub tunes: Vec<(String, f64)>,
     pub errors: Vec<String>,
 }
 
@@ -114,7 +116,17 @@ impl Config {
             "log" => self.log = Some(v.parse().map_err(|_| "log must be 0-3")?),
             "follow" => self.follow = Some(parse_bool(v).ok_or("follow must be on or off")?),
             "zoom" => self.zoom = Some(v.parse().map_err(|_| "zoom must be 1-4")?),
-            _ => return Err(format!("unknown setting '{}'", k)),
+            _ => match k.strip_prefix("tune.") {
+                Some(field) => {
+                    let value: f64 = v
+                        .parse()
+                        .map_err(|_| format!("tune.{} must be a number", field))?;
+                    // Check the name now so mistakes are reported where they are made.
+                    crate::sim::tuning::Tuning::default().set(field, value)?;
+                    self.tunes.push((field.to_string(), value));
+                }
+                None => return Err(format!("unknown setting '{}'", k)),
+            },
         }
         Ok(())
     }
@@ -227,7 +239,7 @@ pub fn key_name(k: Key) -> String {
     }
 }
 
-pub const TEMPLATE: &str = "# Rise and Fall of Empires configuration\n# Settings take `key = value`; keys can be remapped vim-style with `map <from> <to>`.\n\n# detail = medium        # low | medium | high\n# speed = 5              # years per second at start (0.5 1 2 5 10 25 50 100)\n# theme = default        # default | phosphor | amber | paper | dusk\n# mouse = on\n# ascii = off\n# autosave = 100         # years between autosaves when a save file is set (0 = off)\n# width = 160\n# height = 64\n# log = 1                # minimum importance shown in the event log (0-3)\n# follow = on            # jump the cursor to major events\n# zoom = 1               # 1-4, how many world cells per character\n\n# map w k                # examples: map <S-Up> K, map <C-p> :, map ; :\n";
+pub const TEMPLATE: &str = "# Rise and Fall of Empires configuration\n# Settings take `key = value`; keys can be remapped vim-style with `map <from> <to>`.\n\n# detail = medium        # low | medium | high\n# speed = 5              # years per second at start (0.5 1 2 5 10 25 50 100)\n# theme = default        # default | phosphor | amber | paper | dusk\n# mouse = on\n# ascii = off\n# autosave = 100         # years between autosaves when a save file is set (0 = off)\n# width = 160\n# height = 64\n# log = 1                # minimum importance shown in the event log (0-3)\n# follow = on            # jump the cursor to major events\n# zoom = 1               # 1-4, how many world cells per character\n\n# tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning\n\n# map w k                # examples: map <S-Up> K, map <C-p> :, map ; :\n";
 
 pub fn write_template() -> Result<PathBuf, String> {
     let path = config_path();

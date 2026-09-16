@@ -22,6 +22,7 @@ const PLAGUE_NOUN: &[&str] = &[
 
 pub fn disasters(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     // Ongoing plagues.
     let mut i = 0;
     while i < w.plagues.len() {
@@ -30,7 +31,7 @@ pub fn disasters(w: &mut World) {
         for c in 0..w.cells.len() {
             if let Some(p) = w.cells[c].owner {
                 if polities.contains(&p) {
-                    let d = w.cells[c].pop * 0.12;
+                    let d = w.cells[c].pop * tn.plague_cell_deaths;
                     w.cells[c].pop -= d;
                     deaths += d as f64;
                     w.cells[c].plague = 2;
@@ -44,7 +45,7 @@ pub fn disasters(w: &mut World) {
                     .map(|p| polities.contains(&p))
                     .unwrap_or(false)
             {
-                let d = w.cities[c].pop * 0.15;
+                let d = w.cities[c].pop * tn.plague_city_deaths;
                 w.cities[c].pop -= d;
                 deaths += d as f64;
             }
@@ -60,7 +61,7 @@ pub fn disasters(w: &mut World) {
                 if !polities.contains(&q)
                     && !spread.contains(&q)
                     && w.polities[q].alive()
-                    && rng.chance(0.25)
+                    && rng.chance(tn.plague_spread_chance)
                 {
                     spread.push(q);
                 }
@@ -102,7 +103,7 @@ pub fn disasters(w: &mut World) {
         .collect();
     if !big_cities.is_empty()
         && w.plagues.len() < 2
-        && rng.chance(0.0035 * (big_cities.len() as f64).sqrt())
+        && rng.chance(tn.plague_chance * (big_cities.len() as f64).sqrt())
     {
         let c = big_cities[rng.below(big_cities.len())];
         let p = w.cities[c].polity.unwrap();
@@ -132,13 +133,13 @@ pub fn disasters(w: &mut World) {
         if pol.cells < 5 {
             continue;
         }
-        if rng.chance(0.006 * (1.2 - pol.avg_fertility as f64).max(0.1)) {
+        if rng.chance(tn.famine_chance * (1.2 - pol.avg_fertility as f64).max(0.1)) {
             let cells = w.cells_of(p);
             for &c in &cells {
-                w.cells[c].pop *= 0.88;
+                w.cells[c].pop *= tn.famine_cell_survival;
             }
             for c in pol.cities.clone() {
-                w.cities[c].pop *= 0.9;
+                w.cities[c].pop *= tn.famine_city_survival;
             }
             w.polities[p].stability = (w.polities[p].stability - 0.08).max(0.0);
             let cause = match rng.below(4) {
@@ -163,7 +164,7 @@ pub fn disasters(w: &mut World) {
         if w.cities[c].destroyed.is_some() || w.cities[c].pop < 2.0 {
             continue;
         }
-        if !rng.chance(0.0025) {
+        if !rng.chance(tn.city_disaster_chance) {
             continue;
         }
         let cell = w.cities[c].cell;
@@ -181,7 +182,7 @@ pub fn disasters(w: &mut World) {
         } else {
             "fire"
         };
-        w.cities[c].pop *= 0.8;
+        w.cities[c].pop *= tn.city_disaster_survival;
         let lost = if !w.cities[c].wonders.is_empty() && rng.chance(0.3) {
             Some(w.cities[c].wonders.remove(0))
         } else {
@@ -211,7 +212,7 @@ pub fn disasters(w: &mut World) {
         w.log(1, EventKind::Disaster, &refs, Some(cell), text);
     }
     // Omens.
-    if rng.chance(0.006) {
+    if rng.chance(tn.omen_chance) {
         let text = match rng.below(4) {
             0 => "A comet with a tail like a sword hung in the sky for forty nights. Priests everywhere read it as they pleased.".to_string(),
             1 => "The sun went dark at noon and the birds fell silent.".to_string(),
@@ -228,12 +229,13 @@ pub fn notables(w: &mut World) {
         return;
     }
     let rng = w.rng.clone();
+    let tn = w.tuning;
     for p in w.living_polities() {
         let pol = &w.polities[p];
         if pol.cells < 6 {
             continue;
         }
-        if !rng.chance(0.02 * rate) {
+        if !rng.chance(tn.notable_chance * rate) {
             continue;
         }
         let at_war = pol.at_war();
@@ -523,7 +525,7 @@ pub fn notables(w: &mut World) {
         }
         let age = (w.year - per.born) as f32;
         let rel = age / w.races[per.race].lifespan;
-        let p_die = 0.004 + 0.08 * rel.powi(6);
+        let p_die = tn.notable_death_base + tn.notable_death_age_weight * rel.powi(6);
         if rng.chance(p_die as f64) {
             let role = per.role;
             let name = per.full_name();
@@ -543,7 +545,7 @@ pub fn notables(w: &mut World) {
                 if w.polities[p].alive()
                     && w.polities[p].stability < 0.4
                     && per.renown >= 3.0
-                    && rng.chance(0.06)
+                    && rng.chance(tn.general_usurp_chance)
                 {
                     let old = w.polities[p].ruler;
                     if let Some(r) = old {
@@ -606,19 +608,20 @@ const WONDER_KIND: &[&str] = &[
 
 pub fn wonders(w: &mut World) {
     let rng = w.rng.clone();
+    let tn = w.tuning;
     for p in w.living_polities() {
         let pol = &w.polities[p];
-        if pol.treasury < 120.0 || pol.stability < 0.5 || pol.at_war() {
+        if pol.treasury < tn.wonder_min_treasury || pol.stability < 0.5 || pol.at_war() {
             continue;
         }
         let cap = match pol.capital {
             Some(c) => c,
             None => continue,
         };
-        if !rng.chance(0.03) {
+        if !rng.chance(tn.wonder_chance) {
             continue;
         }
-        let cost = 100.0;
+        let cost = tn.wonder_cost;
         let name = format!(
             "the {} {} of {}",
             rng.pick(WONDER_ADJ),
