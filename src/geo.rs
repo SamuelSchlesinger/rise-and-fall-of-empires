@@ -524,6 +524,8 @@ pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
     for y in 0..h {
         let lat = ((y as f32 + 0.5) / h as f32 - 0.5).abs() * 2.0;
         // Trade winds blow east->west in the tropics, westerlies west->east.
+        // Negating Range::contains would also include NaN; keep ordered comparisons.
+        #[allow(clippy::manual_range_contains)]
         let east_to_west = lat < 0.33 || lat > 0.8;
         let mut carry = 0.45f32;
         let mut prev_h = 0.0f32;

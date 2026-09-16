@@ -227,12 +227,27 @@ impl Ui {
         // Folded to this terminal's width, then scrolled: the page is both
         // wider and taller than a small window, and the last row says where
         // in it the reader is rather than letting the text simply stop.
-        let lines = detail::help_lines(sw.saturating_sub(3));
+        let guide = self.mode == Mode::Guide;
+        let lines = if guide {
+            learn::guide_lines(sw.saturating_sub(3))
+        } else {
+            detail::help_lines(sw.saturating_sub(3))
+        };
+        let scroll = if guide {
+            &mut self.guide_scroll
+        } else {
+            &mut self.help_scroll
+        };
         let more = sh.saturating_sub(1).max(1);
-        let top = self.help_scroll.min(lines.len().saturating_sub(more));
-        self.help_scroll = top;
+        let top = (*scroll).min(lines.len().saturating_sub(more));
+        *scroll = top;
         for (k, l) in lines.iter().skip(top).enumerate().take(more) {
-            let (c, a) = if l.starts_with("  ") || l.is_empty() {
+            let body = if guide {
+                l.chars().any(char::is_lowercase)
+            } else {
+                l.starts_with("  ")
+            };
+            let (c, a) = if body || l.is_empty() {
                 (fg, 0)
             } else {
                 (Rgb(230, 200, 120), BOLD)
@@ -243,13 +258,13 @@ impl Ui {
         let shown = top + more.min(lines.len().saturating_sub(top));
         let note = if lines.len() > more {
             format!(
-                "-- {}-{} of {} · j k Ctrl-d Ctrl-u scroll · any other key returns --",
+                "-- {}-{} of {} · j k Ctrl-d Ctrl-u scroll · Esc back --",
                 top + 1,
                 shown,
                 lines.len()
             )
         } else {
-            "-- any key returns --".to_string()
+            "-- Esc back --".to_string()
         };
         self.screen.text_clip(
             2,
@@ -346,7 +361,11 @@ impl Ui {
             .unwrap_or(40)
             .min(sw.saturating_sub(6));
         let w = (inner + 6).min(sw);
-        let h = (TOUR.len() + 4).min(sh);
+        let lines: Vec<_> = TOUR
+            .iter()
+            .flat_map(|line| term::wrap(line, inner.max(4)))
+            .collect();
+        let h = (lines.len() + 4).min(sh);
         let x = (sw.saturating_sub(w)) / 2;
         let y = (sh.saturating_sub(h)) / 2;
         let bg = Rgb(26, 26, 38);
@@ -358,13 +377,13 @@ impl Ui {
             "Rise and Fall of Empires",
             Style::new(Rgb(240, 210, 130), bg),
         );
-        for (k, l) in TOUR.iter().enumerate() {
-            if y + 2 + k >= y + h - 1 {
+        for (k, l) in lines.iter().enumerate() {
+            if y + 2 + k >= y + h.saturating_sub(2) {
                 break;
             }
             let (c, a) = if k == 0 {
                 (Rgb(255, 230, 170), BOLD)
-            } else if k + 1 == TOUR.len() {
+            } else if k + 1 == lines.len() {
                 (Rgb(160, 210, 160), 0)
             } else {
                 (fg, 0)
@@ -377,6 +396,13 @@ impl Ui {
                 Style::attr(c, bg, a),
             );
         }
+        self.screen.text_clip(
+            x + 1,
+            y + h.saturating_sub(2),
+            "t tutorial p guide",
+            w.saturating_sub(2),
+            Style::new(Rgb(160, 210, 160), bg),
+        );
     }
 
     pub(super) fn render_fate(&mut self) {

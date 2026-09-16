@@ -10,6 +10,32 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [0.1.1] - 2026-09-16
+
+### Added
+
+- macOS support on Apple Silicon and Intel, including native release archives.
+- An in-app player guide (`:guide`, or `p` from help) and an optional interactive
+  tutorial (`:tutorial`, or `t` from help or the welcome card). Practice time,
+  movement, map layers, zoom and browsing; skip with Esc or Ctrl-g.
+- CI builds and interface tests on both Mac architectures, plus terminal tests
+  for raw mode, resizing and restoration after normal exit or a signal.
+
+### Fixed
+
+- Linux-only libc bindings prevented macOS builds. The terminal backend now
+  selects the correct termios layout, constants, signal set, poll signature
+  and errno accessor for each platform.
+- Match the C read/write pointer types to keep builds warning-free on newer
+  Rust toolchains, and report failure when entering raw mode fails.
+
+### Changed
+
+- Shorten the README and replace its dense options paragraph with tables.
+  The complete controls, configuration and simulation guide live in
+  `docs/GUIDE.md` and are included in release archives.
+- Simulation rules and save-file format are unchanged.
+
 ## [0.1.0] - 2026-09-16
 
 The first release. Everything below is the work that led to it.

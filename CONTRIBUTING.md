@@ -29,7 +29,8 @@ This rules out dev-dependencies and build-dependencies too: the tests are
 `#[cfg(test)]` modules under `src/`, driven by plain `assert!`.
 
 The only concession is libc, reached through hand-written FFI declarations in
-`src/term.rs`, which documents the platform assumptions it makes.
+`src/term/sys.rs`, which documents the Linux and macOS ABI assumptions.
+Input decoding and rendering are shared in `src/term.rs`.
 
 ### 2. Determinism
 
@@ -90,6 +91,7 @@ Beyond `cargo test`:
 # Drive the real interface in a pseudo-terminal: a few hundred keystrokes,
 # every mode, mouse events, save and load. Exits non-zero on a panic.
 python3 tools/ptytest.py                       # defaults to target/release/empires
+python3 tools/termtest.py                      # raw mode, resize and signal cleanup
 
 # One rendered frame to <path>.txt and <path>.html, without a terminal.
 ./target/release/empires --seed 3 --headless 300 --snapshot /tmp/frame --layer political
@@ -110,7 +112,8 @@ To check determinism by hand, run the same seed twice and diff:
 diff /tmp/a /tmp/b
 ```
 
-CI runs all of the above on every push.
+CI checks builds, tests, determinism and the terminal on Linux and both Mac
+architectures on every push. Linux also checks musl, packaging and the MSRV.
 
 ## Minimum supported Rust version
 

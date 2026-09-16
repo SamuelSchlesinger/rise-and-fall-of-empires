@@ -1745,6 +1745,9 @@ pub fn help_lines(width: usize) -> Vec<String> {
 pub const HELP: &[&str] = &[
     "RISE AND FALL OF EMPIRES",
     "",
+    "Learn        p player guide   t interactive tutorial   Esc back",
+    "             Reopen these any time with :guide or :tutorial. Ctrl-g skips a tutorial.",
+    "",
     "  A passive world simulator. Leave it running; peoples, realms, faiths and magical orders",
     "  rise and fall on their own. Look closer whenever you like. Keys work like vim: a number",
     "  before a motion repeats it (12j, 3], 5.).",

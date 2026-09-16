@@ -15,7 +15,8 @@ sizes the window to 160x45, and sends a few hundred keystrokes through every
 mode — motions and counts, zoom and layers, search, the `:` commands, lists and
 detail pages and their links, the chronicle, help, the Hand of Fate, mouse
 clicks, wheel and drag, a bracketed paste, a save and load round trip, `:new`,
-and finally an interrupted `ZZ` followed by the two `q`s that really quit.
+the in-app guide and tutorial, and finally an interrupted `ZZ` followed by
+the two `q`s that really quit.
 
 ```sh
 cargo build --release
@@ -39,6 +40,19 @@ The directory is removed afterwards unless you pass `--keep`.
 When adding a key or a `:` command, add it to `KEYS` near the feature it
 belongs with. Keys that would quit belong in `QUIT_KEYS` at the end, otherwise
 the run stops early and the test reports it.
+
+## `termtest.py` — check native terminal behaviour
+
+```sh
+python3 tools/termtest.py                  # target/release/empires by default
+python3 tools/termtest.py path/to/empires
+```
+
+Checks the libc bindings against a real pseudo-terminal on Linux and macOS:
+raw-mode flags and control characters, window resizing, input without Enter,
+and exact restoration of the original settings after normal exit, SIGHUP,
+SIGINT and SIGTERM. Configuration and data stay in a temporary directory.
+CI runs this on Linux, Apple Silicon and Intel Macs.
 
 ## `screenshot.sh` — regenerate `docs/screenshot.png`
 

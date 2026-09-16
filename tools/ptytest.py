@@ -53,6 +53,10 @@ KEYS = [
     # the chronicle, help
     b'c', b'/', b'w', b'a', b'r', b'\r', b'k', b'k', b'\x1b', b'\x1b',
     b'?', b'\x1b',
+    # the embedded guide and a complete tutorial through the real controls
+    b'?', b'p', b'j', b'\x06', b'G', b'g', b'\x1b',
+    b'?', b't', b' ', b' ', b'h', b'l', b'\t', b'z', b'o', b'e', b'\x1b', b'\r',
+    *b':guide\r', b'\x1b', *b':tutorial\r', b'\x07',
     # the mouse: click, double click, wheel, right click
     b'\x1b[<0;40;10M', b'\x1b[<0;40;10m', b'\x1b[<0;40;10M', b'\x1b[<0;40;10m',
     b'\x1b', b'\x1b[<64;40;10M', b'\x1b[<65;40;10M',

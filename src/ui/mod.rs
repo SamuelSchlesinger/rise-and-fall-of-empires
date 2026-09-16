@@ -6,6 +6,7 @@
 mod commands;
 mod detail;
 mod input;
+mod learn;
 mod recap;
 mod render;
 mod words;
@@ -27,6 +28,7 @@ pub enum Mode {
     Detail,
     Chronicle,
     Help,
+    Guide,
     Fate,
     Recap,
 }
@@ -117,6 +119,8 @@ pub struct Ui {
     /// How far down the help page the reader has scrolled. It is longer than
     /// a small terminal, so it has to be able to move.
     pub help_scroll: usize,
+    guide_scroll: usize,
+    tutorial: Option<learn::Tutorial>,
     pub chron_min: u8,
     pub log_min: u8,
     pub ascii: bool,
@@ -157,7 +161,7 @@ pub struct Ui {
     story_rows: Vec<(usize, Ref)>,
     /// The one-line key under the map (`:legend` toggles it).
     pub show_legend: bool,
-    /// The first-run card, dismissed by any key.
+    /// The first-run card, offering a tutorial, guide or immediate play.
     tour: bool,
     recap_years: i32,
     recap_scroll: usize,
@@ -193,21 +197,18 @@ fn mark_tour_seen() {
     let _ = std::fs::write(dir.join(".tour-seen"), b"seen\n");
 }
 
-/// The card a first-time viewer sees, until any key dismisses it.
+/// The card a first-time viewer sees, with optional help before watching.
 pub const TOUR: &[&str] = &[
-    "This is a world, and it is already running.",
+    "A world that rises and falls on its own.",
     "",
-    "The map is the whole of it: each realm is a patch of colour ruled off",
-    "from its neighbours, @ is a capital, # a city, × ruins and ! a recent",
-    "event. The line under the map says what the colours and marks mean; the",
-    "panel on the right names the realms on screen and says what the cursor",
-    "is sitting on.",
+    "Watch history unfold, or pause and explore.",
+    "The map legend explains its symbols; the sidebar describes each place.",
     "",
-    "Space  pause time             Enter  open whatever is under the cursor",
-    "h j k l  move the cursor      r      a recap of the last fifty years",
-    "Tab    another map layer      ?      help: every other key",
+    "t  Start a short, skippable interface tutorial",
+    "p  Read the player guide",
+    "Space pauses time. Arrows move. Enter inspects. ? opens help.",
     "",
-    "Nothing here needs you. Press any key and watch.",
+    "Any other key: watch the world.",
 ];
 
 pub fn run(
@@ -339,6 +340,8 @@ pub fn snapshot(
             ui.chron_min = 2;
         }
         "help" => ui.mode = Mode::Help,
+        "guide" => ui.mode = Mode::Guide,
+        "tutorial" => ui.start_tutorial(),
         "fate" => ui.mode = Mode::Fate,
         "zoom2" => ui.set_zoom(2),
         "zoom3" => ui.set_zoom(3),
@@ -421,6 +424,8 @@ impl Ui {
             detail_scroll: 0,
             chron_scroll: 0,
             help_scroll: 0,
+            guide_scroll: 0,
+            tutorial: None,
             chron_min: 1,
             // Level 2, the notable: about a line a year, which is a feed a
             // reader can follow at five years a second. Level 1 is roughly
@@ -1184,12 +1189,13 @@ mod tests {
         s
     }
 
-    const MODES: [Mode; 6] = [
+    const MODES: [Mode; 7] = [
         Mode::Map,
         Mode::List,
         Mode::Detail,
         Mode::Chronicle,
         Mode::Help,
+        Mode::Guide,
         Mode::Recap,
     ];
 

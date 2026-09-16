@@ -15,16 +15,23 @@ env:
 jobs:
   build:
     name: ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
           - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
             apt: musl-tools
           - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
             apt: gcc-aarch64-linux-gnu
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
     env:
       # Used only by the aarch64 target; harmless for the others.
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -48,15 +55,23 @@ jobs:
 
       - run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Test the Mac build
+        if: runner.os == 'macOS'
+        run: |
+          cargo test --target ${{ matrix.target }}
+          python3 tools/termtest.py target/${{ matrix.target }}/release/empires
+          python3 tools/ptytest.py target/${{ matrix.target }}/release/empires
+
       - name: Tarball
         run: |
           tag=${{ github.event.inputs.tag || github.ref_name }}
           name=empires-$tag-${{ matrix.target }}
           mkdir "$name"
           cp target/${{ matrix.target }}/release/empires "$name"/
-          cp README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "$name"/
+          cp README.md CHANGELOG.md CONTRIBUTING.md LICENSE-MIT LICENSE-APACHE "$name"/
+          cp -R docs tools "$name"/
           tar czf "$name.tar.gz" "$name"
-          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
           ls -l "$name.tar.gz"
 
       - uses: actions/upload-artifact@v4

@@ -18,29 +18,45 @@ impl Ui {
     }
 
     pub(super) fn handle_key(&mut self, k: Key) -> bool {
+        // This escape stays available even if a user remaps every lesson key.
+        if self.tutorial.is_some() && k == Key::Ctrl('g') {
+            self.stop_tutorial();
+            return true;
+        }
         let k = if self.prompt == Prompt::None {
             self.remap(k)
         } else {
             k
         };
-        if let Key::Mouse(m) = k {
-            self.handle_mouse(m);
-            return true;
+        if self.tutorial.is_some() {
+            return self.tutorial_key(k);
         }
+        self.handle_key_normal(k)
+    }
+
+    pub(super) fn handle_key_normal(&mut self, k: Key) -> bool {
         if k == Key::Ctrl('c') {
             return false;
         }
-        // The first-run card goes away at a touch, and never comes back.
+        // A first-run invitation: lessons are optional and can be reopened.
         if self.tour {
             self.tour = false;
             mark_tour_seen();
-            self.say("? for keys   : for commands   r for a recap   :q to quit");
+            match k {
+                Key::Char('t') => self.start_tutorial(),
+                Key::Char('p') => self.open_guide(),
+                _ => self.say("? for help   :guide to read   :tutorial to practice   :q to quit"),
+            }
+            return true;
+        }
+        if let Key::Mouse(m) = k {
+            self.handle_mouse(m);
             return true;
         }
         if self.prompt != Prompt::None {
             return self.key_prompt(k);
         }
-        if self.mode == Mode::Help {
+        if matches!(self.mode, Mode::Help | Mode::Guide) {
             self.key_help(&k);
             return true;
         }
@@ -186,7 +202,7 @@ impl Ui {
             Mode::Detail => self.key_detail(&k),
             Mode::Chronicle => self.key_chronicle(&k),
             Mode::Recap => self.key_recap(&k),
-            Mode::Help | Mode::Fate => {}
+            Mode::Help | Mode::Guide | Mode::Fate => {}
         }
         self.count = None;
         true
@@ -396,23 +412,44 @@ impl Ui {
     }
 
     /// The help page scrolls, because it is longer than a small terminal.
-    /// Anything that is not a way of moving through it closes it again,
-    /// which keeps the old "any key returns" reflex working.
+    /// Reader navigation and the guide/tutorial shortcuts. Other keys close
+    /// the reader, preserving the old "any key returns" behaviour.
     fn key_help(&mut self, k: &Key) {
-        let page = self.screen.h.saturating_sub(2).max(1);
         match k {
-            Key::Down | Key::Char('j') => self.help_scroll += 1,
-            Key::Up | Key::Char('k') => self.help_scroll = self.help_scroll.saturating_sub(1),
-            Key::PageDown | Key::Ctrl('f') | Key::Char(' ') => self.help_scroll += page,
-            Key::PageUp | Key::Ctrl('b') => {
-                self.help_scroll = self.help_scroll.saturating_sub(page);
+            Key::Char('p') if self.mode == Mode::Help => {
+                self.open_guide();
+                return;
             }
-            Key::Ctrl('d') => self.help_scroll += page / 2,
-            Key::Ctrl('u') => self.help_scroll = self.help_scroll.saturating_sub(page / 2),
-            Key::Home | Key::Char('g') => self.help_scroll = 0,
-            Key::End | Key::Char('G') => self.help_scroll = usize::MAX / 2,
-            _ => {
+            Key::Char('?') | Key::F(1) if self.mode == Mode::Guide => {
+                self.mode = Mode::Help;
                 self.help_scroll = 0;
+                return;
+            }
+            Key::Char('t') => {
+                self.start_tutorial();
+                return;
+            }
+            _ => {}
+        }
+        let page = self.screen.h.saturating_sub(2).max(1);
+        let scroll = if self.mode == Mode::Guide {
+            &mut self.guide_scroll
+        } else {
+            &mut self.help_scroll
+        };
+        match k {
+            Key::Down | Key::Char('j') => *scroll += 1,
+            Key::Up | Key::Char('k') => *scroll = scroll.saturating_sub(1),
+            Key::PageDown | Key::Ctrl('f') | Key::Char(' ') => *scroll += page,
+            Key::PageUp | Key::Ctrl('b') => {
+                *scroll = scroll.saturating_sub(page);
+            }
+            Key::Ctrl('d') => *scroll += page / 2,
+            Key::Ctrl('u') => *scroll = scroll.saturating_sub(page / 2),
+            Key::Home | Key::Char('g') => *scroll = 0,
+            Key::End | Key::Char('G') => *scroll = usize::MAX / 2,
+            _ => {
+                *scroll = 0;
                 self.mode = self.prev_mode;
             }
         }
@@ -669,9 +706,17 @@ impl Ui {
             return;
         }
         match self.mode {
-            Mode::Help => {
-                if let MouseKind::Press(_) = m.kind {
-                    self.mode = self.prev_mode;
+            Mode::Help | Mode::Guide => {
+                let scroll = if self.mode == Mode::Guide {
+                    &mut self.guide_scroll
+                } else {
+                    &mut self.help_scroll
+                };
+                match m.kind {
+                    MouseKind::WheelUp => *scroll = scroll.saturating_sub(3),
+                    MouseKind::WheelDown => *scroll += 3,
+                    MouseKind::Press(_) => self.mode = self.prev_mode,
+                    _ => {}
                 }
             }
             Mode::Recap => match m.kind {

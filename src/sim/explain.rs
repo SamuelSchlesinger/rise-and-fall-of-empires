@@ -284,6 +284,8 @@ pub fn war_view(w: &World, wid: usize) -> WarView {
 
     let (an, dn) = (w.polities[a].short.clone(), w.polities[d].short.clone());
     let ratio = sa / sd.max(0.001);
+    // Negating Range::contains would also include NaN; keep ordered comparisons.
+    #[allow(clippy::manual_range_contains)]
     if ratio > 1.2 || ratio < 0.83 {
         let (big, small, big_s, small_s) = if ratio > 1.0 {
             (&an, &dn, sa, sd)

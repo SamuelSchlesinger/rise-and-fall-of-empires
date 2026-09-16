@@ -509,18 +509,18 @@ mod tests {
         assert!(seen > 10, "only {} template lines were checked", seen);
     }
 
-    /// The README reproduces the template. It has drifted from it before —
+    /// The player guide reproduces the template. It has drifted from it before —
     /// showing settings uncommented, and ranges the parser did not enforce —
     /// so the two are checked against each other rather than by eye.
     #[test]
-    fn the_readme_quotes_the_template_it_has() {
-        let readme = include_str!("../README.md");
+    fn the_guide_quotes_the_template_it_has() {
+        let guide = include_str!("../docs/GUIDE.md");
         let mut checked = 0;
         for l in TEMPLATE.lines() {
             let l = l.trim_end();
             let body = l.trim_start_matches('#').trim_start();
             // Only the settings themselves and the remap example; the file's
-            // own header prose is the README's to word as it likes.
+            // own header prose is the guide's to word as it likes.
             let names_a_setting = body.split_once('=').is_some_and(|(k, _)| {
                 let k = k.trim();
                 !k.is_empty()
@@ -532,8 +532,8 @@ mod tests {
             }
             checked += 1;
             assert!(
-                readme.contains(l),
-                "README.md does not show this line of the config template:\n  {}",
+                guide.contains(l),
+                "docs/GUIDE.md does not show this line of the config template:\n  {}",
                 l
             );
         }

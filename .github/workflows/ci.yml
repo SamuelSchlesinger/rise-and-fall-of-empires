@@ -13,8 +13,12 @@ env:
 
 jobs:
   check:
-    name: fmt, clippy, tests, docs
-    runs-on: ubuntu-latest
+    name: fmt, clippy, tests, docs (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
 
@@ -54,8 +58,12 @@ jobs:
         run: ./target/x86_64-unknown-linux-musl/release/empires --seed 1 --headless 50 | tail -3
 
   behaviour:
-    name: determinism and the interface
-    runs-on: ubuntu-latest
+    name: determinism and the interface (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
 
@@ -81,6 +89,9 @@ jobs:
       # or a terminal left on the alternate screen.
       - name: Drive the interface
         run: python3 tools/ptytest.py target/release/empires
+
+      - name: Terminal ABI and restoration
+        run: python3 tools/termtest.py target/release/empires
 
   msrv:
     name: minimum supported Rust version

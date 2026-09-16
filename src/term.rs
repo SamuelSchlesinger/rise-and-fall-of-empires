@@ -1,23 +1,16 @@
-//! Minimal raw-mode terminal layer for Linux using libc FFI (no crates):
+//! Minimal raw-mode terminal layer for Linux and macOS using libc FFI (no crates):
 //! termios raw mode, window size, polled key input, bracketed paste and a
 //! diff-rendered cell buffer emitting 24-bit ANSI colour.
 //!
 //! # Platform assumptions
 //!
-//! The FFI structs below are hand-written copies of the Linux definitions for
-//! the architectures this game is built for, `x86_64` and aarch64, where glibc
-//! and musl agree: `struct termios` is four `u32` flag words, `c_line`, 32
-//! control characters and two `u32` speeds, `ioctl` takes its request as an
-//! `unsigned long`, and `TIOCGWINSZ` is `0x5413`. Other architectures (mips,
-//! sparc, alpha, powerpc ...) reorder those fields or number the ioctls
-//! differently, so the build is refused there rather than quietly writing
-//! nonsense into the caller's terminal settings.
+//! [`sys`] owns the platform-specific libc layouts, constants and symbols.
+//! It rejects unsupported targets so an ABI mismatch cannot silently corrupt
+//! the caller's terminal settings. Input decoding and rendering are shared.
 
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-compile_error!(
-    "src/term.rs hard-codes the Linux x86_64/aarch64 termios layout and TIOCGWINSZ; \
-     port the FFI structs and constants in this file before building for this architecture"
-);
+mod sys;
+
+use sys::*;
 
 use std::cell::UnsafeCell;
 use std::io::{self, Write};
@@ -25,101 +18,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct Termios {
-    c_iflag: u32,
-    c_oflag: u32,
-    c_cflag: u32,
-    c_lflag: u32,
-    c_line: u8,
-    c_cc: [u8; 32],
-    c_ispeed: u32,
-    c_ospeed: u32,
-}
-
-#[repr(C)]
-struct Winsize {
-    ws_row: u16,
-    ws_col: u16,
-    ws_xpixel: u16,
-    ws_ypixel: u16,
-}
-
-#[repr(C)]
-struct PollFd {
-    fd: i32,
-    events: i16,
-    revents: i16,
-}
-
-/// A `sigset_t`: an opaque bag of bits that only libc ever fills in. 128
-/// bytes is the size glibc and musl use on every architecture we build for,
-/// and an over-long buffer would be harmless anyway.
-#[repr(C)]
-struct SigSet([u64; 16]);
-
-extern "C" {
-    fn tcgetattr(fd: i32, t: *mut Termios) -> i32;
-    fn tcsetattr(fd: i32, opt: i32, t: *const Termios) -> i32;
-    fn ioctl(fd: i32, req: u64, ...) -> i32;
-    fn poll(fds: *mut PollFd, nfds: u64, timeout: i32) -> i32;
-    fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
-    fn write(fd: i32, buf: *const u8, count: usize) -> isize;
-    fn isatty(fd: i32) -> i32;
-    /// `signal(2)`; the handler is passed as a plain address so that no
-    /// function-pointer type has to be spelled out at the call sites.
-    fn signal(sig: i32, handler: usize) -> usize;
-    fn raise(sig: i32) -> i32;
-    fn sigemptyset(set: *mut SigSet) -> i32;
-    fn sigaddset(set: *mut SigSet, sig: i32) -> i32;
-    fn sigprocmask(how: i32, set: *const SigSet, old: *mut SigSet) -> i32;
-    fn _exit(code: i32) -> !;
-    fn __errno_location() -> *mut i32;
-}
-
-const ISIG: u32 = 0o000001;
-const ICANON: u32 = 0o000002;
-const ECHO: u32 = 0o000010;
-const IEXTEN: u32 = 0o100000;
-const IXON: u32 = 0o002000;
-const ICRNL: u32 = 0o000400;
-const BRKINT: u32 = 0o000002;
-const INPCK: u32 = 0o000020;
-const ISTRIP: u32 = 0o000040;
-const OPOST: u32 = 0o000001;
-const VTIME: usize = 5;
-const VMIN: usize = 6;
-const TCSAFLUSH: i32 = 2;
-const TIOCGWINSZ: u64 = 0x5413;
-const POLLIN: i16 = 0x001;
-const POLLERR: i16 = 0x008;
-const POLLHUP: i16 = 0x010;
-const POLLNVAL: i16 = 0x020;
-const EINTR: i32 = 4;
-const SIG_DFL: usize = 0;
-const SIG_UNBLOCK: i32 = 1;
-const SIG_IGN: usize = 1;
-const SIGHUP: i32 = 1;
-const SIGINT: i32 = 2;
-const SIGTERM: i32 = 15;
-
 /// Everything `enter` switched on, switched off again: bracketed paste, mouse
 /// reporting, attributes, the cursor and the alternate screen.
 const RESET: &[u8] = b"\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[2J\x1b[H\x1b[?1049l";
-
-impl Termios {
-    const ZERO: Termios = Termios {
-        c_iflag: 0,
-        c_oflag: 0,
-        c_cflag: 0,
-        c_lflag: 0,
-        c_line: 0,
-        c_cc: [0; 32],
-        c_ispeed: 0,
-        c_ospeed: 0,
-    };
-}
 
 /// The terminal settings as we found them, for the ordinary `leave()` path.
 /// Reading a `OnceLock` neither allocates nor blocks, so the panic hook may
@@ -146,9 +47,9 @@ static ORIG_RAW_SET: AtomicBool = AtomicBool::new(false);
 static HANDLERS: AtomicBool = AtomicBool::new(false);
 
 fn errno() -> i32 {
-    // SAFETY: `__errno_location` always returns a valid, suitably aligned
+    // SAFETY: the platform's errno accessor returns a valid, suitably aligned
     // pointer to this thread's `errno`, which lives for as long as the thread.
-    unsafe { *__errno_location() }
+    unsafe { *errno_location() }
 }
 
 /// Put the terminal back using nothing but raw syscalls: no allocation, no
@@ -165,7 +66,7 @@ unsafe fn restore_raw() {
         // SAFETY: `off < RESET.len()`, so `add(off)` stays inside `RESET` and
         // the length passed is exactly the bytes left in it. `write` only
         // reads from that buffer, and `RESET` is a `'static` constant.
-        let n = unsafe { write(1, RESET.as_ptr().add(off), RESET.len() - off) };
+        let n = unsafe { write(1, RESET.as_ptr().add(off).cast(), RESET.len() - off) };
         if n > 0 {
             off += n as usize;
         } else if n < 0 && errno() == EINTR {
@@ -188,7 +89,7 @@ extern "C" fn on_signal(sig: i32) {
     // SAFETY: every call below is async-signal-safe, so it is legal from a
     // handler. `restore_raw` only writes fd 1 and resets fd 0, which is what
     // this handler exists to do. `sig` was handed to us by the kernel, so it
-    // is a real signal number, and the two `SigSet`s are local, initialised
+    // is a real signal number, and the `SigSet` is local, initialised
     // and only ever passed as `&mut`/`&`, so the pointers are valid and
     // unaliased for the length of each call.
     unsafe {
@@ -198,7 +99,7 @@ extern "C" fn on_signal(sig: i32) {
         // sees an ordinary death by signal. `_exit` covers the case where
         // something still swallows it.
         signal(sig, SIG_DFL);
-        let mut set = SigSet([0; 16]);
+        let mut set = EMPTY_SIGSET;
         if sigemptyset(&mut set) == 0 && sigaddset(&mut set, sig) == 0 {
             sigprocmask(SIG_UNBLOCK, &set, std::ptr::null_mut());
         }
@@ -297,7 +198,9 @@ pub fn enter(mouse: bool) -> bool {
         raw.c_lflag &= !(ECHO | ICANON | IEXTEN | ISIG);
         raw.c_cc[VMIN] = 0;
         raw.c_cc[VTIME] = 0;
-        tcsetattr(0, TCSAFLUSH, &raw);
+        if tcsetattr(0, TCSAFLUSH, &raw) != 0 {
+            return false;
+        }
     }
     let mut out = io::stdout();
     // Alternate screen, hide cursor, clear, bracketed paste on.
@@ -387,7 +290,7 @@ fn read_bytes(buf: &mut Vec<u8>) -> bool {
     loop {
         // SAFETY: `tmp` is a live, uniquely borrowed buffer and the count is
         // its true length, so `read` writes at most that many bytes into it.
-        let n = unsafe { read(0, tmp.as_mut_ptr(), tmp.len()) };
+        let n = unsafe { read(0, tmp.as_mut_ptr().cast(), tmp.len()) };
         if n > 0 {
             buf.extend_from_slice(&tmp[..n as usize]);
             return true;

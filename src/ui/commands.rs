@@ -299,6 +299,8 @@ impl Ui {
                 self.prev_mode = self.mode;
                 self.mode = Mode::Help;
             }
+            "guide" => self.open_guide(),
+            "tutorial" => self.start_tutorial(),
             "recap" | "digest" | "lately" => {
                 let years = arg.parse::<i32>().ok();
                 self.open_recap(years);

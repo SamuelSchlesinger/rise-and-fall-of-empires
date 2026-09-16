@@ -71,12 +71,15 @@ impl Ui {
             Mode::List => self.render_list(),
             Mode::Detail => self.render_detail(),
             Mode::Chronicle => self.render_chronicle(),
-            Mode::Help => self.render_help(),
+            Mode::Help | Mode::Guide => self.render_help(),
             Mode::Recap => self.render_recap(),
         }
         self.render_status();
         if self.tour {
             self.render_tour();
+        }
+        if self.tutorial.is_some() {
+            self.render_tutorial();
         }
         if !self.theme.is_identity() {
             let t = self.theme;
@@ -107,6 +110,31 @@ impl Ui {
         let key = Rgb(255, 220, 120);
         self.screen
             .fill(Rect::new(0, y, sw, 1), ' ', Style::new(fg, bg));
+        if matches!(self.mode, Mode::Help | Mode::Guide) {
+            let hint = if self.mode == Mode::Guide {
+                "Esc back | j/k scroll | ? keys | t tutorial"
+            } else {
+                "Esc back | j/k scroll | p guide | t tutorial"
+            };
+            self.screen
+                .text_clip(1, y, hint, sw.saturating_sub(2), Style::new(key, bg));
+            return;
+        }
+        if self.tutorial.is_some() {
+            let state = if self.paused {
+                "paused"
+            } else {
+                "time running"
+            };
+            self.screen.text_clip(
+                1,
+                y,
+                &format!("Ctrl-g skip | {}", state),
+                sw.saturating_sub(2),
+                Style::new(key, bg),
+            );
+            return;
+        }
         // A prompt takes over the whole line, as in vim.
         if self.prompt != Prompt::None {
             let lead = if self.prompt == Prompt::Command {
@@ -187,7 +215,8 @@ impl Ui {
             Mode::List => "Tab tabs  j/k  Enter open  m map  / filter  x fate  Esc back",
             Mode::Detail => "j/k scroll  letters follow links  m map  Backspace back  ] [ realms  Esc back",
             Mode::Chronicle => "j/k scroll  f importance  / filter  click a line to jump  Esc back",
-            Mode::Help => "j/k scroll  any other key returns",
+            Mode::Help => "j/k scroll  p guide  t tutorial  Esc back",
+            Mode::Guide => "j/k scroll  ? keys  t tutorial  Esc back",
             Mode::Fate => "1-6 choose  Esc cancel",
             Mode::Recap => "j/k scroll  :recap N for a longer look  Esc back",
         };
