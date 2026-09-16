@@ -5,8 +5,8 @@
 use crate::lang::Language;
 use crate::noise::Noise;
 use crate::rng::Rng;
-use std::collections::BinaryHeap;
 use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[repr(u8)]
@@ -69,7 +69,10 @@ impl BiomeGroup {
 
 impl Biome {
     pub fn is_water(self) -> bool {
-        matches!(self, Biome::DeepOcean | Biome::Ocean | Biome::Shallows | Biome::Lake)
+        matches!(
+            self,
+            Biome::DeepOcean | Biome::Ocean | Biome::Shallows | Biome::Lake
+        )
     }
     pub fn is_sea(self) -> bool {
         matches!(self, Biome::DeepOcean | Biome::Ocean | Biome::Shallows)
@@ -240,7 +243,16 @@ pub struct Terrain {
     pub land_count: usize,
 }
 
-const NB8: [(i32, i32); 8] = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)];
+const NB8: [(i32, i32); 8] = [
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (-1, 0),
+    (1, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
+];
 const NB4: [(i32, i32); 4] = [(0, -1), (-1, 0), (1, 0), (0, 1)];
 
 impl Terrain {
@@ -309,7 +321,9 @@ impl Terrain {
     pub fn dist(&self, a: usize, b: usize) -> usize {
         let (ax, ay) = self.xy(a);
         let (bx, by) = self.xy(b);
-        (ax as i32 - bx as i32).unsigned_abs().max((ay as i32 - by as i32).unsigned_abs()) as usize
+        (ax as i32 - bx as i32)
+            .unsigned_abs()
+            .max((ay as i32 - by as i32).unsigned_abs()) as usize
     }
     pub fn height_norm(&self, i: usize) -> f32 {
         ((self.elev[i] - self.sea) / (1.0 - self.sea)).clamp(0.0, 1.0)
@@ -763,7 +777,11 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
     let water_total = n - t.land_count;
     let mut features: Vec<Feature> = Vec::new();
     let mut region = vec![0u16; n];
-    let push = |features: &mut Vec<Feature>, region: &mut Vec<u16>, kind: FeatureKind, cells: Vec<usize>, t: &Terrain| {
+    let push = |features: &mut Vec<Feature>,
+                region: &mut Vec<u16>,
+                kind: FeatureKind,
+                cells: Vec<usize>,
+                t: &Terrain| {
         let id = features.len() + 1;
         for &c in &cells {
             if region[c] == 0 {
@@ -771,7 +789,13 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
             }
         }
         let center = centroid(t, &cells);
-        features.push(Feature { kind, name: None, named_by: None, cells, center });
+        features.push(Feature {
+            kind,
+            name: None,
+            named_by: None,
+            cells,
+            center,
+        });
     };
 
     // Seas and oceans.
@@ -807,7 +831,13 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
             let cells = comp.clone();
             let id = features.len() + 1;
             let center = centroid(t, &cells);
-            features.push(Feature { kind, name: None, named_by: None, cells, center });
+            features.push(Feature {
+                kind,
+                name: None,
+                named_by: None,
+                cells,
+                center,
+            });
             // Islands label their cells as a region; continents only when nothing finer applies.
             if kind == FeatureKind::Island {
                 for &c in &comp {
@@ -819,12 +849,36 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
     t.landmass = landmass;
     // Ranges, forests, deserts, marshes, steppes.
     let specs: Vec<(FeatureKind, Box<dyn Fn(usize, &Terrain) -> bool>, usize)> = vec![
-        (FeatureKind::Range, Box::new(|i, t| matches!(t.biome[i], Biome::Mountain | Biome::Peak)), 6),
-        (FeatureKind::Jungle, Box::new(|i, t| t.biome[i] == Biome::Jungle), 18),
-        (FeatureKind::Forest, Box::new(|i, t| matches!(t.biome[i], Biome::Forest | Biome::Taiga)), 18),
-        (FeatureKind::Desert, Box::new(|i, t| t.biome[i] == Biome::Desert), 16),
-        (FeatureKind::Marsh, Box::new(|i, t| t.biome[i] == Biome::Swamp), 6),
-        (FeatureKind::Steppe, Box::new(|i, t| matches!(t.biome[i], Biome::Steppe | Biome::Savanna)), 30),
+        (
+            FeatureKind::Range,
+            Box::new(|i, t| matches!(t.biome[i], Biome::Mountain | Biome::Peak)),
+            6,
+        ),
+        (
+            FeatureKind::Jungle,
+            Box::new(|i, t| t.biome[i] == Biome::Jungle),
+            18,
+        ),
+        (
+            FeatureKind::Forest,
+            Box::new(|i, t| matches!(t.biome[i], Biome::Forest | Biome::Taiga)),
+            18,
+        ),
+        (
+            FeatureKind::Desert,
+            Box::new(|i, t| t.biome[i] == Biome::Desert),
+            16,
+        ),
+        (
+            FeatureKind::Marsh,
+            Box::new(|i, t| t.biome[i] == Biome::Swamp),
+            6,
+        ),
+        (
+            FeatureKind::Steppe,
+            Box::new(|i, t| matches!(t.biome[i], Biome::Steppe | Biome::Savanna)),
+            30,
+        ),
     ];
     for (kind, pred, min) in specs {
         for comp in components(t, &|i| pred(i, t), false) {
@@ -850,7 +904,11 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
             let mut best: Option<usize> = None;
             let mut best_flow = 0u32;
             for nb in t.neighbors8(cur) {
-                if dir[nb] == Some(cur) && t.river[nb] >= 1 && river_feat[nb] == 0 && t.flow[nb] > best_flow {
+                if dir[nb] == Some(cur)
+                    && t.river[nb] >= 1
+                    && river_feat[nb] == 0
+                    && t.flow[nb] > best_flow
+                {
                     best_flow = t.flow[nb];
                     best = Some(nb);
                 }
@@ -869,7 +927,13 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
                 river_feat[c] = id as u16;
             }
             let center = t.xy(cells[cells.len() / 2]);
-            features.push(Feature { kind: FeatureKind::River, name: None, named_by: None, cells, center });
+            features.push(Feature {
+                kind: FeatureKind::River,
+                name: None,
+                named_by: None,
+                cells,
+                center,
+            });
         }
     }
     // Ley nexus points (the strongest mana cells near each nexus centre).
@@ -894,7 +958,13 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
         }
         if t.is_land(best) {
             let center = t.xy(best);
-            features.push(Feature { kind: FeatureKind::Nexus, name: None, named_by: None, cells: vec![best], center });
+            features.push(Feature {
+                kind: FeatureKind::Nexus,
+                name: None,
+                named_by: None,
+                cells: vec![best],
+                center,
+            });
         }
     }
     t.features = features;
@@ -908,17 +978,68 @@ pub fn name_feature(kind: FeatureKind, lang: &Language, rng: &Rng) -> String {
     let pick = |opts: &[&str]| -> String { rng.pick(opts).replace("{}", &w) };
     match kind {
         FeatureKind::Ocean => pick(&["the {} Ocean", "the Great {} Sea", "the {} Deep"]),
-        FeatureKind::Sea => pick(&["the Sea of {}", "the {} Sea", "the {} Gulf", "the Bay of {}"]),
+        FeatureKind::Sea => pick(&[
+            "the Sea of {}",
+            "the {} Sea",
+            "the {} Gulf",
+            "the Bay of {}",
+        ]),
         FeatureKind::Lake => pick(&["Lake {}", "the {} Mere", "{} Lake", "the Waters of {}"]),
-        FeatureKind::Range => pick(&["the {} Mountains", "the {} Peaks", "the {} Spine", "the {} Teeth", "the {} Heights", "the Wall of {}"]),
-        FeatureKind::Forest => pick(&["the {} Forest", "the {} Wood", "the {}wood", "the Wilds of {}", "the {} Deepwood"]),
-        FeatureKind::Jungle => pick(&["the {} Jungle", "the Green {}", "the {} Tangle", "the Jungles of {}"]),
-        FeatureKind::Desert => pick(&["the {} Desert", "the {} Sands", "the {} Waste", "the Red {}", "the {} Emptiness"]),
-        FeatureKind::Marsh => pick(&["the {} Marsh", "the {} Fens", "the {} Mire", "the Drowned {}"]),
-        FeatureKind::Steppe => pick(&["the {} Steppe", "the {} Plain", "the Plains of {}", "the {} Reach"]),
+        FeatureKind::Range => pick(&[
+            "the {} Mountains",
+            "the {} Peaks",
+            "the {} Spine",
+            "the {} Teeth",
+            "the {} Heights",
+            "the Wall of {}",
+        ]),
+        FeatureKind::Forest => pick(&[
+            "the {} Forest",
+            "the {} Wood",
+            "the {}wood",
+            "the Wilds of {}",
+            "the {} Deepwood",
+        ]),
+        FeatureKind::Jungle => pick(&[
+            "the {} Jungle",
+            "the Green {}",
+            "the {} Tangle",
+            "the Jungles of {}",
+        ]),
+        FeatureKind::Desert => pick(&[
+            "the {} Desert",
+            "the {} Sands",
+            "the {} Waste",
+            "the Red {}",
+            "the {} Emptiness",
+        ]),
+        FeatureKind::Marsh => pick(&[
+            "the {} Marsh",
+            "the {} Fens",
+            "the {} Mire",
+            "the Drowned {}",
+        ]),
+        FeatureKind::Steppe => pick(&[
+            "the {} Steppe",
+            "the {} Plain",
+            "the Plains of {}",
+            "the {} Reach",
+        ]),
         FeatureKind::Island => pick(&["the Isle of {}", "{} Island", "{}", "the {} Isle"]),
         FeatureKind::Continent => pick(&["{}", "{}", "Greater {}", "the {} Land"]),
-        FeatureKind::River => pick(&["the {}", "the River {}", "the {} River", "the {}water", "the {}flow"]),
-        FeatureKind::Nexus => pick(&["the {} Stone", "the Eye of {}", "the {} Well", "the {} Font", "the Wound of {}"]),
+        FeatureKind::River => pick(&[
+            "the {}",
+            "the River {}",
+            "the {} River",
+            "the {}water",
+            "the {}flow",
+        ]),
+        FeatureKind::Nexus => pick(&[
+            "the {} Stone",
+            "the Eye of {}",
+            "the {} Well",
+            "the {} Font",
+            "the Wound of {}",
+        ]),
     }
 }

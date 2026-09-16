@@ -189,7 +189,10 @@ fn vec_u16<S: Io>(s: &mut S, v: &mut Vec<u16>) {
     let mut b: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
     s.bytes(&mut b);
     if s.reading() {
-        *v = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        *v = b
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
     }
 }
 fn vec_u32<S: Io>(s: &mut S, v: &mut Vec<u32>) {
@@ -203,13 +206,22 @@ fn vec_bool<S: Io>(s: &mut S, v: &mut Vec<bool>) {
     }
 }
 
-fn map<S: Io, V: Default + Copy>(s: &mut S, m: &mut BTreeMap<usize, V>, f: impl Fn(&mut S, &mut V)) {
+fn map<S: Io, V: Default + Copy>(
+    s: &mut S,
+    m: &mut BTreeMap<usize, V>,
+    f: impl Fn(&mut S, &mut V),
+) {
     let mut pairs: Vec<(usize, V)> = m.iter().map(|(&k, &v)| (k, v)).collect();
     pairs.sort_by_key(|p| p.0);
-    seq(s, &mut pairs, || (0, V::default()), |s, (k, v)| {
-        s.usize(k);
-        f(s, v);
-    });
+    seq(
+        s,
+        &mut pairs,
+        || (0, V::default()),
+        |s, (k, v)| {
+            s.usize(k);
+            f(s, v);
+        },
+    );
     if s.reading() {
         *m = pairs.into_iter().collect();
     }
@@ -258,11 +270,41 @@ const FEATURE_KINDS: [FeatureKind; 13] = [
     FeatureKind::River,
     FeatureKind::Nexus,
 ];
-const POLITY_KINDS: [PolityKind; 8] = [PolityKind::Tribe, PolityKind::Chiefdom, PolityKind::Kingdom, PolityKind::Empire, PolityKind::Republic, PolityKind::Theocracy, PolityKind::Magocracy, PolityKind::Horde];
-const ROLES: [Role; 9] = [Role::Ruler, Role::General, Role::Mage, Role::Prophet, Role::Philosopher, Role::Poet, Role::Rebel, Role::Explorer, Role::Martyr];
+const POLITY_KINDS: [PolityKind; 8] = [
+    PolityKind::Tribe,
+    PolityKind::Chiefdom,
+    PolityKind::Kingdom,
+    PolityKind::Empire,
+    PolityKind::Republic,
+    PolityKind::Theocracy,
+    PolityKind::Magocracy,
+    PolityKind::Horde,
+];
+const ROLES: [Role; 9] = [
+    Role::Ruler,
+    Role::General,
+    Role::Mage,
+    Role::Prophet,
+    Role::Philosopher,
+    Role::Poet,
+    Role::Rebel,
+    Role::Explorer,
+    Role::Martyr,
+];
 const GENDERS: [Gender; 3] = [Gender::F, Gender::M, Gender::N];
-const SCHOOL_KINDS: [SchoolKind; 3] = [SchoolKind::Arcane, SchoolKind::Divine, SchoolKind::Philosophical];
-const WAR_KINDS: [WarKind; 6] = [WarKind::Conquest, WarKind::Rebellion, WarKind::CivilWar, WarKind::Holy, WarKind::Raid, WarKind::Succession];
+const SCHOOL_KINDS: [SchoolKind; 3] = [
+    SchoolKind::Arcane,
+    SchoolKind::Divine,
+    SchoolKind::Philosophical,
+];
+const WAR_KINDS: [WarKind; 6] = [
+    WarKind::Conquest,
+    WarKind::Rebellion,
+    WarKind::CivilWar,
+    WarKind::Holy,
+    WarKind::Raid,
+    WarKind::Succession,
+];
 const EVENT_KINDS: [EventKind; 14] = [
     EventKind::Genesis,
     EventKind::Founding,
@@ -345,7 +387,12 @@ fn terrain<S: Io>(s: &mut S, t: &mut Terrain) {
     s.f32(&mut t.sea);
     vec_f32(s, &mut t.temp);
     vec_f32(s, &mut t.moist);
-    seq(s, &mut t.biome, || Biome::Ocean, |s, b| enum8(s, b, &BIOMES));
+    seq(
+        s,
+        &mut t.biome,
+        || Biome::Ocean,
+        |s, b| enum8(s, b, &BIOMES),
+    );
     vec_u8(s, &mut t.river);
     vec_u32(s, &mut t.flow);
     vec_f32(s, &mut t.fertility);
@@ -358,7 +405,13 @@ fn terrain<S: Io>(s: &mut S, t: &mut Terrain) {
     seq(
         s,
         &mut t.features,
-        || Feature { kind: FeatureKind::Sea, name: None, named_by: None, cells: Vec::new(), center: (0, 0) },
+        || Feature {
+            kind: FeatureKind::Sea,
+            name: None,
+            named_by: None,
+            cells: Vec::new(),
+            center: (0, 0),
+        },
         |s, f| {
             enum8(s, &mut f.kind, &FEATURE_KINDS);
             opt_string(s, &mut f.name);
@@ -389,10 +442,23 @@ fn traits<S: Io>(s: &mut S, t: &mut Traits) {
 }
 
 fn blank_values() -> Values {
-    Values { militarism: 0.5, mysticism: 0.5, mercantilism: 0.5, tradition: 0.5, openness: 0.5 }
+    Values {
+        militarism: 0.5,
+        mysticism: 0.5,
+        mercantilism: 0.5,
+        tradition: 0.5,
+        openness: 0.5,
+    }
 }
 fn blank_traits() -> Traits {
-    Traits { ambition: 0.5, valor: 0.5, wisdom: 0.5, piety: 0.5, cruelty: 0.5, charisma: 0.5 }
+    Traits {
+        ambition: 0.5,
+        valor: 0.5,
+        wisdom: 0.5,
+        piety: 0.5,
+        cruelty: 0.5,
+        charisma: 0.5,
+    }
 }
 
 fn race<S: Io>(s: &mut S, r: &mut Race) {
@@ -491,7 +557,22 @@ fn city<S: Io>(s: &mut S, c: &mut City) {
 }
 
 fn blank_city() -> City {
-    City { id: 0, name: String::new(), cell: 0, founded: 0, culture: 0, polity: None, pop: 0.0, prosperity: 0.0, walls: 0.0, destroyed: None, wonders: Vec::new(), times_sacked: 0, founder: None, peak_pop: 0.0 }
+    City {
+        id: 0,
+        name: String::new(),
+        cell: 0,
+        founded: 0,
+        culture: 0,
+        polity: None,
+        pop: 0.0,
+        prosperity: 0.0,
+        walls: 0.0,
+        destroyed: None,
+        wonders: Vec::new(),
+        times_sacked: 0,
+        founder: None,
+        peak_pop: 0.0,
+    }
 }
 
 fn polity<S: Io>(s: &mut S, p: &mut Polity) {
@@ -525,10 +606,15 @@ fn polity<S: Io>(s: &mut S, p: &mut Polity) {
     opt_usize(s, &mut p.school);
     vec_usize(s, &mut p.wars);
     map(s, &mut p.tension, |s, v| s.f32(v));
-    seq(s, &mut p.neighbors, || (0, 0), |s, (q, l)| {
-        s.usize(q);
-        s.u32(l);
-    });
+    seq(
+        s,
+        &mut p.neighbors,
+        || (0, 0),
+        |s, (q, l)| {
+            s.usize(q);
+            s.u32(l);
+        },
+    );
     s.u32(&mut p.conquered);
     s.i32(&mut p.reign_start);
     s.i32(&mut p.reign_gained);
@@ -699,7 +785,20 @@ fn war<S: Io>(s: &mut S, x: &mut War) {
 }
 
 fn blank_war() -> War {
-    War { id: 0, attacker: 0, defender: 0, started: 0, ended: None, cause: String::new(), name: String::new(), score: 0.0, battles: 0, result: String::new(), cells_taken: 0, kind: WarKind::Conquest }
+    War {
+        id: 0,
+        attacker: 0,
+        defender: 0,
+        started: 0,
+        ended: None,
+        cause: String::new(),
+        name: String::new(),
+        score: 0.0,
+        battles: 0,
+        result: String::new(),
+        cells_taken: 0,
+        kind: WarKind::Conquest,
+    }
 }
 
 fn cell<S: Io>(s: &mut S, c: &mut CellState) {
@@ -758,7 +857,19 @@ fn artifact<S: Io>(s: &mut S, a: &mut Artifact) {
 }
 
 fn blank_artifact() -> Artifact {
-    Artifact { id: 0, name: String::new(), kind: ArtifactKind::Crown, made: 0, maker: None, origin: None, holder: Holder::Lost, power: 0.0, description: String::new(), lost_at: None, hands: 0 }
+    Artifact {
+        id: 0,
+        name: String::new(),
+        kind: ArtifactKind::Crown,
+        made: 0,
+        maker: None,
+        origin: None,
+        holder: Holder::Lost,
+        power: 0.0,
+        description: String::new(),
+        lost_at: None,
+        hands: 0,
+    }
 }
 
 fn prophecy_kind<S: Io>(s: &mut S, k: &mut ProphecyKind) {
@@ -797,7 +908,16 @@ fn prophecy<S: Io>(s: &mut S, p: &mut Prophecy) {
 }
 
 fn blank_prophecy() -> Prophecy {
-    Prophecy { id: 0, seer: 0, year: 0, deadline: 0, kind: ProphecyKind::RealmFalls(0), what: String::new(), outcome: None, resolved: None }
+    Prophecy {
+        id: 0,
+        seer: 0,
+        year: 0,
+        deadline: 0,
+        kind: ProphecyKind::RealmFalls(0),
+        what: String::new(),
+        outcome: None,
+        resolved: None,
+    }
 }
 
 fn event<S: Io>(s: &mut S, e: &mut Event) {
@@ -810,7 +930,14 @@ fn event<S: Io>(s: &mut S, e: &mut Event) {
 }
 
 fn blank_event() -> Event {
-    Event { year: 0, importance: 0, kind: EventKind::Genesis, refs: Vec::new(), loc: None, text: String::new() }
+    Event {
+        year: 0,
+        importance: 0,
+        kind: EventKind::Genesis,
+        refs: Vec::new(),
+        loc: None,
+        text: String::new(),
+    }
 }
 
 /// Visit every persistent field of the world.
@@ -834,20 +961,43 @@ fn world<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.persons, blank_person, person);
     seq(s, &mut w.schools, blank_school, school);
     seq(s, &mut w.wars, blank_war, war);
-    seq(s, &mut w.eras, || Era { start: 0, name: String::new(), description: String::new() }, |s, e| {
-        s.i32(&mut e.start);
-        s.string(&mut e.name);
-        s.string(&mut e.description);
-    });
-    seq(s, &mut w.plagues, || Plague { name: String::new(), years_left: 0, polities: Vec::new(), deaths: 0.0 }, |s, p| {
-        s.string(&mut p.name);
-        s.i32(&mut p.years_left);
-        vec_usize(s, &mut p.polities);
-        s.f64(&mut p.deaths);
-    });
+    seq(
+        s,
+        &mut w.eras,
+        || Era {
+            start: 0,
+            name: String::new(),
+            description: String::new(),
+        },
+        |s, e| {
+            s.i32(&mut e.start);
+            s.string(&mut e.name);
+            s.string(&mut e.description);
+        },
+    );
+    seq(
+        s,
+        &mut w.plagues,
+        || Plague {
+            name: String::new(),
+            years_left: 0,
+            polities: Vec::new(),
+            deaths: 0.0,
+        },
+        |s, p| {
+            s.string(&mut p.name);
+            s.i32(&mut p.years_left);
+            vec_usize(s, &mut p.polities);
+            s.f64(&mut p.deaths);
+        },
+    );
     seq(s, &mut w.artifacts, blank_artifact, artifact);
     seq(s, &mut w.prophecies, blank_prophecy, prophecy);
-    let mut events: Vec<Event> = if s.reading() { Vec::new() } else { w.chronicle.events.clone() };
+    let mut events: Vec<Event> = if s.reading() {
+        Vec::new()
+    } else {
+        w.chronicle.events.clone()
+    };
     seq(s, &mut events, blank_event, event);
     if s.reading() {
         w.chronicle = Chronicle::from_events(events);
@@ -858,19 +1008,30 @@ fn world<S: Io>(s: &mut S, w: &mut World) {
     s.u32(&mut w.century_schools);
     s.u32(&mut w.century_polities_born);
     s.f64(&mut w.century_pop_start);
-    let mut names: Vec<(usize, String)> = w.battlefield_names.iter().map(|(&k, v)| (k, v.clone())).collect();
+    let mut names: Vec<(usize, String)> = w
+        .battlefield_names
+        .iter()
+        .map(|(&k, v)| (k, v.clone()))
+        .collect();
     names.sort_by_key(|x| x.0);
-    seq(s, &mut names, || (0, String::new()), |s, (k, v)| {
-        s.usize(k);
-        s.string(v);
-    });
+    seq(
+        s,
+        &mut names,
+        || (0, String::new()),
+        |s, (k, v)| {
+            s.usize(k);
+            s.string(v);
+        },
+    );
     if s.reading() {
         w.battlefield_names = names.into_iter().collect();
     }
 }
 
 pub fn save(w: &mut World) -> Vec<u8> {
-    let mut wr = Writer { buf: Vec::with_capacity(1 << 20) };
+    let mut wr = Writer {
+        buf: Vec::with_capacity(1 << 20),
+    };
     wr.buf.extend_from_slice(MAGIC);
     let mut v = VERSION;
     wr.u32(&mut v);
@@ -882,11 +1043,18 @@ pub fn load(bytes: &[u8]) -> Result<World, String> {
     if bytes.len() < 8 || &bytes[..4] != MAGIC {
         return Err("not a Rise and Fall of Empires save file".into());
     }
-    let mut rd = Reader { buf: bytes, pos: 4, err: false };
+    let mut rd = Reader {
+        buf: bytes,
+        pos: 4,
+        err: false,
+    };
     let mut v = 0u32;
     rd.u32(&mut v);
     if v != VERSION {
-        return Err(format!("save file version {} is not supported (this build reads version {})", v, VERSION));
+        return Err(format!(
+            "save file version {} is not supported (this build reads version {})",
+            v, VERSION
+        ));
     }
     let mut w = World::blank();
     world(&mut rd, &mut w);

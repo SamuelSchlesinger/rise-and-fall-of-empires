@@ -15,7 +15,13 @@ pub enum Theme {
 
 impl Theme {
     pub fn all() -> [Theme; 5] {
-        [Theme::Default, Theme::Phosphor, Theme::Amber, Theme::Paper, Theme::Dusk]
+        [
+            Theme::Default,
+            Theme::Phosphor,
+            Theme::Amber,
+            Theme::Paper,
+            Theme::Dusk,
+        ]
     }
     pub fn name(self) -> &'static str {
         match self {
@@ -55,7 +61,8 @@ impl Theme {
                         cream.scale(0.9 + v * 0.1)
                     } else {
                         // Coloured cells become pastels that keep their hue.
-                        Rgb::from_hsv(h, (sat * 0.45).min(0.5), 0.9 + (1.0 - v) * 0.06).mix(cream, 0.2)
+                        Rgb::from_hsv(h, (sat * 0.45).min(0.5), 0.9 + (1.0 - v) * 0.06)
+                            .mix(cream, 0.2)
                     }
                 } else if sat < 0.15 {
                     ink.mix(Rgb(120, 110, 100), (1.0 - v) * 0.8)

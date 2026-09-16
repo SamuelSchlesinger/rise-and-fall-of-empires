@@ -3,20 +3,40 @@
 use crate::sim::{PolityKind, World};
 
 pub fn run(world: &mut World, years: i32) {
-    println!("{:>5} {:>6} {:>5} {:>4} {:>5} {:>4} {:>6} {:>5} {:>5} {:>5} {:>5}", "year", "pop_k", "realm", "emp", "wars", "sch", "cities", "cult", "relic", "proph", "top%");
+    println!(
+        "{:>5} {:>6} {:>5} {:>4} {:>5} {:>4} {:>6} {:>5} {:>5} {:>5} {:>5}",
+        "year", "pop_k", "realm", "emp", "wars", "sch", "cities", "cult", "relic", "proph", "top%"
+    );
     let mut wars_at_last = 0usize;
     for _ in 0..years {
         world.tick();
         if world.year % 100 == 0 {
             let alive = world.living_polities();
-            let empires = alive.iter().filter(|&&p| world.polities[p].kind == PolityKind::Empire).count();
+            let empires = alive
+                .iter()
+                .filter(|&&p| world.polities[p].kind == PolityKind::Empire)
+                .count();
             let wars_total = world.wars.len();
             let wars_century = wars_total - wars_at_last;
             wars_at_last = wars_total;
             let owned = world.stats.owned_cells.max(1);
-            let top = alive.iter().map(|&p| world.polities[p].cells).max().unwrap_or(0) as f32 / owned as f32 * 100.0;
-            let relics = world.artifacts.iter().filter(|a| !matches!(a.holder, crate::sim::Holder::Lost)).count();
-            let proph = world.prophecies.iter().filter(|p| p.outcome.is_none()).count();
+            let top = alive
+                .iter()
+                .map(|&p| world.polities[p].cells)
+                .max()
+                .unwrap_or(0) as f32
+                / owned as f32
+                * 100.0;
+            let relics = world
+                .artifacts
+                .iter()
+                .filter(|a| !matches!(a.holder, crate::sim::Holder::Lost))
+                .count();
+            let proph = world
+                .prophecies
+                .iter()
+                .filter(|p| p.outcome.is_none())
+                .count();
             println!(
                 "{:>5} {:>6.0} {:>5} {:>4} {:>5} {:>4} {:>6} {:>5} {:>5} {:>5} {:>5.0}",
                 world.year,
@@ -46,18 +66,61 @@ pub fn run(world: &mut World, years: i32) {
             empire_spans.push(span);
         }
     }
-    let avg = |v: &[i32]| if v.is_empty() { 0.0 } else { v.iter().sum::<i32>() as f64 / v.len() as f64 };
+    let avg = |v: &[i32]| {
+        if v.is_empty() {
+            0.0
+        } else {
+            v.iter().sum::<i32>() as f64 / v.len() as f64
+        }
+    };
     let median = |v: &mut Vec<i32>| {
         v.sort();
-        if v.is_empty() { 0 } else { v[v.len() / 2] }
+        if v.is_empty() {
+            0
+        } else {
+            v[v.len() / 2]
+        }
     };
     let mut rs = realm_spans.clone();
     let mut es = empire_spans.clone();
-    println!("realms >=20 lands: {} (avg life {:.0}y, median {}y)", realm_spans.len(), avg(&realm_spans), median(&mut rs));
-    println!("great powers >=150 lands: {} (avg life {:.0}y, median {}y)", empire_spans.len(), avg(&empire_spans), median(&mut es));
-    let fulfilled = world.prophecies.iter().filter(|p| p.outcome == Some(true)).count();
-    let failed = world.prophecies.iter().filter(|p| p.outcome == Some(false)).count();
-    println!("prophecies: {} uttered, {} came true, {} failed", world.prophecies.len(), fulfilled, failed);
-    let wars: Vec<i32> = world.wars.iter().filter_map(|w| w.ended.map(|e| e - w.started)).collect();
-    println!("wars: {} (avg length {:.1}y); events {}; {:.2} ms/year", world.wars.len(), avg(&wars), world.chronicle.len(), world.ticks_ms);
+    println!(
+        "realms >=20 lands: {} (avg life {:.0}y, median {}y)",
+        realm_spans.len(),
+        avg(&realm_spans),
+        median(&mut rs)
+    );
+    println!(
+        "great powers >=150 lands: {} (avg life {:.0}y, median {}y)",
+        empire_spans.len(),
+        avg(&empire_spans),
+        median(&mut es)
+    );
+    let fulfilled = world
+        .prophecies
+        .iter()
+        .filter(|p| p.outcome == Some(true))
+        .count();
+    let failed = world
+        .prophecies
+        .iter()
+        .filter(|p| p.outcome == Some(false))
+        .count();
+    println!(
+        "prophecies: {} uttered, {} came true, {} failed",
+        world.prophecies.len(),
+        fulfilled,
+        failed
+    );
+    let wars: Vec<i32> = world
+        .wars
+        .iter()
+        .filter_map(|w| w.ended.map(|e| e - w.started))
+        .collect();
+    println!(
+        "wars: {} (avg length {:.1}y); events {}; {:.2} ms/year",
+        world.wars.len(),
+        avg(&wars),
+        world.chronicle.len(),
+        world.ticks_ms
+    );
 }

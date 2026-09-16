@@ -9,14 +9,26 @@ use std::collections::BTreeMap;
 // Naming
 // ---------------------------------------------------------------------------
 
-pub fn make_name(w: &World, kind: PolityKind, short: &str, culture: usize, capital_name: Option<&str>) -> String {
+pub fn make_name(
+    w: &World,
+    kind: PolityKind,
+    short: &str,
+    culture: usize,
+    capital_name: Option<&str>,
+) -> String {
     let lang = &w.cultures[culture].lang;
     let adj = lang.adjective(short);
     let rng = &w.rng;
     let cap = capital_name.unwrap_or(short);
     match kind {
         PolityKind::Tribe => format!("the {}", lang.demonym(short)),
-        PolityKind::Chiefdom => rng.pick(&[format!("the {} Chiefdom", adj), format!("the {} Clans", adj), format!("the Chiefdom of {}", cap)]).clone(),
+        PolityKind::Chiefdom => rng
+            .pick(&[
+                format!("the {} Chiefdom", adj),
+                format!("the {} Clans", adj),
+                format!("the Chiefdom of {}", cap),
+            ])
+            .clone(),
         PolityKind::Kingdom => rng
             .pick(&[
                 format!("the Kingdom of {}", short),
@@ -27,18 +39,44 @@ pub fn make_name(w: &World, kind: PolityKind, short: &str, culture: usize, capit
             ])
             .clone(),
         PolityKind::Empire => rng
-            .pick(&[format!("the {} Empire", adj), format!("the Empire of {}", short), format!("the {} Dominion", adj), format!("the {} Imperium", adj)])
+            .pick(&[
+                format!("the {} Empire", adj),
+                format!("the Empire of {}", short),
+                format!("the {} Dominion", adj),
+                format!("the {} Imperium", adj),
+            ])
             .clone(),
         PolityKind::Republic => rng
-            .pick(&[format!("the Republic of {}", cap), format!("the {} League", adj), format!("the Free Cities of {}", short), format!("the {} Commonwealth", adj)])
+            .pick(&[
+                format!("the Republic of {}", cap),
+                format!("the {} League", adj),
+                format!("the Free Cities of {}", short),
+                format!("the {} Commonwealth", adj),
+            ])
             .clone(),
         PolityKind::Theocracy => rng
-            .pick(&[format!("the Holy {} Realm", adj), format!("the {} Theocracy", adj), format!("the See of {}", cap), format!("the Blessed Land of {}", short)])
+            .pick(&[
+                format!("the Holy {} Realm", adj),
+                format!("the {} Theocracy", adj),
+                format!("the See of {}", cap),
+                format!("the Blessed Land of {}", short),
+            ])
             .clone(),
         PolityKind::Magocracy => rng
-            .pick(&[format!("the {} Conclave", adj), format!("the Magisterium of {}", short), format!("the {} Covenant", adj), format!("the Towers of {}", cap)])
+            .pick(&[
+                format!("the {} Conclave", adj),
+                format!("the Magisterium of {}", short),
+                format!("the {} Covenant", adj),
+                format!("the Towers of {}", cap),
+            ])
             .clone(),
-        PolityKind::Horde => rng.pick(&[format!("the {} Horde", adj), format!("the Horde of {}", short), format!("the {} Riders", adj)]).clone(),
+        PolityKind::Horde => rng
+            .pick(&[
+                format!("the {} Horde", adj),
+                format!("the Horde of {}", short),
+                format!("the {} Riders", adj),
+            ])
+            .clone(),
     }
 }
 
@@ -110,17 +148,35 @@ pub fn claim(w: &mut World, p: usize, cell: usize) {
 }
 
 /// Create a polity from a set of cells with a seat at `seat`.
-pub fn found_polity(w: &mut World, culture: usize, seat: usize, kind: PolityKind, parent: Option<usize>, cells: &[usize], leader: Option<usize>) -> usize {
+pub fn found_polity(
+    w: &mut World,
+    culture: usize,
+    seat: usize,
+    kind: PolityKind,
+    parent: Option<usize>,
+    cells: &[usize],
+    leader: Option<usize>,
+) -> usize {
     let id = w.polities.len();
     let short = w.cultures[culture].lang.name(&w.rng);
     let color = w.polity_color(id);
     let ruler = match leader {
         Some(l) => l,
-        None => w.new_person(culture, Role::Ruler, Some(id), w.year - w.rng.int(22, 45), None),
+        None => w.new_person(
+            culture,
+            Role::Ruler,
+            Some(id),
+            w.year - w.rng.int(22, 45),
+            None,
+        ),
     };
     w.persons[ruler].polity = Some(id);
     w.persons[ruler].role = Role::Ruler;
-    let dynasty = if kind.has_dynasty() { dynasty_name(w, culture, &w.persons[ruler].name.clone()) } else { String::new() };
+    let dynasty = if kind.has_dynasty() {
+        dynasty_name(w, culture, &w.persons[ruler].name.clone())
+    } else {
+        String::new()
+    };
     let adj = w.cultures[culture].lang.adjective(&short);
     w.polities.push(Polity {
         id,
@@ -220,7 +276,10 @@ pub fn form_polities(w: &mut World) {
                 if cx < 0 || cy < 0 || cx >= w.terrain.w as i32 || cy >= w.terrain.h as i32 {
                     continue;
                 }
-                if w.cells[w.terrain.idx(cx as usize, cy as usize)].owner.is_some() {
+                if w.cells[w.terrain.idx(cx as usize, cy as usize)]
+                    .owner
+                    .is_some()
+                {
                     near_state = true;
                     break 'scan;
                 }
@@ -243,7 +302,11 @@ pub fn form_polities(w: &mut World) {
                     continue;
                 }
                 let j = w.terrain.idx(cx as usize, cy as usize);
-                if w.cells[j].owner.is_none() && w.terrain.is_land(j) && w.terrain.biome[j].move_cost().is_some() && w.cells[j].culture == Some(culture) {
+                if w.cells[j].owner.is_none()
+                    && w.terrain.is_land(j)
+                    && w.terrain.biome[j].move_cost().is_some()
+                    && w.cells[j].culture == Some(culture)
+                {
                     cells.push(j);
                 }
             }
@@ -251,7 +314,13 @@ pub fn form_polities(w: &mut World) {
         if cells.len() < 3 {
             continue;
         }
-        let kind = if w.cultures[culture].values.militarism > 0.8 && matches!(w.terrain.biome[i], crate::geo::Biome::Steppe | crate::geo::Biome::Savanna) && rng.chance(0.5) {
+        let kind = if w.cultures[culture].values.militarism > 0.8
+            && matches!(
+                w.terrain.biome[i],
+                crate::geo::Biome::Steppe | crate::geo::Biome::Savanna
+            )
+            && rng.chance(0.5)
+        {
             PolityKind::Horde
         } else {
             PolityKind::Tribe
@@ -259,12 +328,27 @@ pub fn form_polities(w: &mut World) {
         let p = found_polity(w, culture, i, kind, None, &cells, None);
         founded += 1;
         let place = w.place_phrase(i, Some(p));
-        let (pname, cname, ruler, plural) = (w.polities[p].name.clone(), w.cities[w.polities[p].capital.unwrap()].name.clone(), w.ruler_short(p), w.cultures[culture].plural.clone());
+        let (pname, cname, ruler, plural) = (
+            w.polities[p].name.clone(),
+            w.cities[w.polities[p].capital.unwrap()].name.clone(),
+            w.ruler_short(p),
+            w.cultures[culture].plural.clone(),
+        );
         let text = match kind {
             PolityKind::Horde => format!("{} gathered the {} riders into a single host: {}, with its camps at {} {}.", ruler, plural, pname, cname, place),
             _ => format!("The {} living {} raised {} as their chief and built the settlement of {}. Thus began {}.", plural, place, ruler, cname, pname),
         };
-        w.log(1, EventKind::Founding, &[Ref::Polity(p), Ref::Culture(culture), Ref::City(w.polities[p].capital.unwrap())], Some(i), text);
+        w.log(
+            1,
+            EventKind::Founding,
+            &[
+                Ref::Polity(p),
+                Ref::Culture(culture),
+                Ref::City(w.polities[p].capital.unwrap()),
+            ],
+            Some(i),
+            text,
+        );
     }
 }
 
@@ -324,7 +408,9 @@ pub fn expand(w: &mut World) {
                             continue;
                         }
                         seen.push(p);
-                        if let Some((s, c)) = score_cell(w, p, i, capitals[p], base_cost + 4.0, &rng) {
+                        if let Some((s, c)) =
+                            score_cell(w, p, i, capitals[p], base_cost + 4.0, &rng)
+                        {
                             cand[p].push((s - 0.5, i, c));
                         }
                     }
@@ -337,11 +423,19 @@ pub fn expand(w: &mut World) {
             continue;
         }
         let pol = &w.polities[p];
-        let ambition = pol.ruler.map(|r| w.persons[r].traits.ambition).unwrap_or(0.5);
+        let ambition = pol
+            .ruler
+            .map(|r| w.persons[r].traits.ambition)
+            .unwrap_or(0.5);
         let over = pol.overextension();
         let over_pen = if over > 1.0 { 1.0 / (over * over) } else { 1.0 };
         let war_pen = if pol.at_war() { 0.5 } else { 1.0 };
-        let mut budget = (0.7 + (pol.pop as f32).sqrt() * 0.14) * pol.kind.expansion_mult() * (0.5 + ambition) * (0.4 + pol.stability) * over_pen * war_pen;
+        let mut budget = (0.7 + (pol.pop as f32).sqrt() * 0.14)
+            * pol.kind.expansion_mult()
+            * (0.5 + ambition)
+            * (0.4 + pol.stability)
+            * over_pen
+            * war_pen;
         let list = &mut cand[p];
         list.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         let mut taken = 0;
@@ -375,21 +469,38 @@ pub fn expand(w: &mut World) {
     }
 }
 
-fn score_cell(w: &World, p: usize, i: usize, capital: Option<usize>, base_cost: f32, rng: &crate::rng::Rng) -> Option<(f32, f32)> {
+fn score_cell(
+    w: &World,
+    p: usize,
+    i: usize,
+    capital: Option<usize>,
+    base_cost: f32,
+    rng: &crate::rng::Rng,
+) -> Option<(f32, f32)> {
     let pol = &w.polities[p];
     let t = &w.terrain;
     let f = t.fertility[i];
     let river = t.river[i] as f32 * 0.25;
-    let coast = if t.coast[i] { 0.25 + if pol.seafaring { 0.2 } else { 0.0 } } else { 0.0 };
+    let coast = if t.coast[i] {
+        0.25 + if pol.seafaring { 0.2 } else { 0.0 }
+    } else {
+        0.0
+    };
     let minerals = t.minerals[i] * 0.35;
     let cs = &w.cells[i];
     let pop = cs.pop * 0.25;
-    let reach = 9.0 + pol.dev * 14.0 + if pol.seafaring { 5.0 } else { 0.0 } + match pol.kind {
-        PolityKind::Empire => 12.0,
-        PolityKind::Horde => 14.0,
-        PolityKind::Kingdom | PolityKind::Republic | PolityKind::Theocracy | PolityKind::Magocracy => 5.0,
-        _ => 0.0,
-    };
+    let reach = 9.0
+        + pol.dev * 14.0
+        + if pol.seafaring { 5.0 } else { 0.0 }
+        + match pol.kind {
+            PolityKind::Empire => 12.0,
+            PolityKind::Horde => 14.0,
+            PolityKind::Kingdom
+            | PolityKind::Republic
+            | PolityKind::Theocracy
+            | PolityKind::Magocracy => 5.0,
+            _ => 0.0,
+        };
     let d = capital.map(|c| t.dist(c, i)).unwrap_or(5) as f32;
     let dist_pen = (d / reach).powi(2) * 1.5;
     let culture_bonus = match cs.culture {
@@ -405,7 +516,10 @@ fn score_cell(w: &World, p: usize, i: usize, capital: Option<usize>, base_cost: 
     };
     let race = w.cultures[pol.culture].race;
     let aff = w.affinity(race, i);
-    let score = f * 1.4 + river + coast + minerals + pop + culture_bonus + aff * 0.6 - base_cost * 0.35 - dist_pen + rng.range32(-0.2, 0.2);
+    let score = f * 1.4 + river + coast + minerals + pop + culture_bonus + aff * 0.6
+        - base_cost * 0.35
+        - dist_pen
+        + rng.range32(-0.2, 0.2);
     let cost = base_cost * (1.0 + dist_pen * 0.5);
     Some((score, cost))
 }
@@ -424,7 +538,12 @@ pub fn found_cities(w: &mut World) {
             by_owner[p].push(i);
         }
     }
-    let city_cells: Vec<usize> = w.cities.iter().filter(|c| c.destroyed.is_none()).map(|c| c.cell).collect();
+    let city_cells: Vec<usize> = w
+        .cities
+        .iter()
+        .filter(|c| c.destroyed.is_none())
+        .map(|c| c.cell)
+        .collect();
     for p in 0..np {
         if !w.polities[p].alive() || by_owner[p].is_empty() {
             continue;
@@ -447,15 +566,22 @@ pub fn found_cities(w: &mut World) {
                 continue;
             }
             let (x, y) = w.terrain.xy(i);
-            let too_close = city_cells.iter().chain(w.polities[p].cities.iter().map(|&c| &w.cities[c].cell)).any(|&cc| {
-                let (cx, cy) = w.terrain.xy(cc);
-                (cx as i32 - x as i32).abs() <= 5 && (cy as i32 - y as i32).abs() <= 3
-            });
+            let too_close = city_cells
+                .iter()
+                .chain(w.polities[p].cities.iter().map(|&c| &w.cities[c].cell))
+                .any(|&cc| {
+                    let (cx, cy) = w.terrain.xy(cc);
+                    (cx as i32 - x as i32).abs() <= 5 && (cy as i32 - y as i32).abs() <= 3
+                });
             if too_close {
                 continue;
             }
             let t = &w.terrain;
-            let s = t.fertility[i] + t.river[i] as f32 * 0.3 + if t.coast[i] { 0.5 } else { 0.0 } + w.cells[i].pop * 0.3 + t.minerals[i] * 0.3;
+            let s = t.fertility[i]
+                + t.river[i] as f32 * 0.3
+                + if t.coast[i] { 0.5 } else { 0.0 }
+                + w.cells[i].pop * 0.3
+                + t.minerals[i] * 0.3;
             if s > best_s {
                 best_s = s;
                 best = Some(i);
@@ -467,11 +593,25 @@ pub fn found_cities(w: &mut World) {
             w.polities[p].reign_cities += 1;
             let place = w.place_phrase(i, Some(p));
             let text = if rng.chance(0.5) {
-                format!("{} founded the town of {} {}.", w.ruler_title(p), w.cities[c].name, place)
+                format!(
+                    "{} founded the town of {} {}.",
+                    w.ruler_title(p),
+                    w.cities[c].name,
+                    place
+                )
             } else {
-                format!("Settlers from {} raised the town of {} {}.", w.polities[p].short, w.cities[c].name, place)
+                format!(
+                    "Settlers from {} raised the town of {} {}.",
+                    w.polities[p].short, w.cities[c].name, place
+                )
             };
-            w.log(1, EventKind::Founding, &[Ref::City(c), Ref::Polity(p)], Some(i), text);
+            w.log(
+                1,
+                EventKind::Founding,
+                &[Ref::City(c), Ref::Polity(p)],
+                Some(i),
+                text,
+            );
         }
     }
 }
@@ -484,7 +624,13 @@ pub fn economy(w: &mut World) {
     let rng = w.rng.clone();
     let np = w.polities.len();
     let neighbor_dev: Vec<f32> = (0..np)
-        .map(|p| w.polities[p].neighbors.iter().map(|&(q, _)| w.polities[q].dev).fold(0.0, f32::max))
+        .map(|p| {
+            w.polities[p]
+                .neighbors
+                .iter()
+                .map(|&(q, _)| w.polities[q].dev)
+                .fold(0.0, f32::max)
+        })
         .collect();
     for p in 0..np {
         if !w.polities[p].alive() {
@@ -495,7 +641,17 @@ pub fn economy(w: &mut World) {
         let culture = w.polities[p].culture;
         let vals = w.cultures[culture].values;
         let at_war = w.polities[p].at_war();
-        let peace_neighbors = w.polities[p].neighbors.iter().filter(|&&(q, _)| !w.wars.iter().any(|wr| wr.alive() && ((wr.attacker == p && wr.defender == q) || (wr.attacker == q && wr.defender == p)))).count() as f32;
+        let peace_neighbors = w.polities[p]
+            .neighbors
+            .iter()
+            .filter(|&&(q, _)| {
+                !w.wars.iter().any(|wr| {
+                    wr.alive()
+                        && ((wr.attacker == p && wr.defender == q)
+                            || (wr.attacker == q && wr.defender == p))
+                })
+            })
+            .count() as f32;
         // Cities.
         let cities = w.polities[p].cities.clone();
         let mut prosp_sum = 0.0;
@@ -510,7 +666,16 @@ pub fn economy(w: &mut World) {
                 minerals += t.minerals[nb];
             }
             minerals /= 8.0;
-            let mut target = 0.3 + if t.coast[cell] { 0.25 * (0.5 + vals.mercantilism) } else { 0.0 } + t.river[cell] as f32 * 0.07 + minerals * 0.25 + dev * 0.3 + (peace_neighbors * 0.04).min(0.2) + prosp_bonus;
+            let mut target =
+                0.3 + if t.coast[cell] {
+                    0.25 * (0.5 + vals.mercantilism)
+                } else {
+                    0.0
+                } + t.river[cell] as f32 * 0.07
+                    + minerals * 0.25
+                    + dev * 0.3
+                    + (peace_neighbors * 0.04).min(0.2)
+                    + prosp_bonus;
             if is_capital == Some(c) {
                 target += 0.1;
             }
@@ -525,7 +690,11 @@ pub fn economy(w: &mut World) {
             prosp_sum += city.prosperity;
             income += city.pop * city.prosperity * 0.08;
         }
-        let avg_prosp = if cities.is_empty() { 0.3 } else { prosp_sum / cities.len() as f32 };
+        let avg_prosp = if cities.is_empty() {
+            0.3
+        } else {
+            prosp_sum / cities.len() as f32
+        };
         let pol = &mut w.polities[p];
         income += pol.cells as f32 * 0.012 * (1.0 + pol.dev);
         let upkeep = pol.army * 0.05 + pol.cells as f32 * 0.004;
@@ -539,7 +708,12 @@ pub fn economy(w: &mut World) {
             PolityKind::Magocracy => 0.8,
             _ => 1.0,
         };
-        let target_army = pol.pop as f32 * (0.015 + vals.militarism * 0.04) * kind_mult * (1.0 + pol.dev * 0.5) * army_mult * art_mult;
+        let target_army = pol.pop as f32
+            * (0.015 + vals.militarism * 0.04)
+            * kind_mult
+            * (1.0 + pol.dev * 0.5)
+            * army_mult
+            * art_mult;
         let rate = if at_war { 0.25 } else { 0.12 };
         pol.army += (target_army - pol.army) * rate;
         if pol.treasury < 0.0 {
@@ -562,7 +736,10 @@ pub fn economy(w: &mut World) {
             let sea = w.races[w.cultures[culture].race].seafaring;
             if coastal_city && rng.chance(0.01 * (sea as f64 + pol.dev as f64 * 0.5)) {
                 pol.seafaring = true;
-                let text = format!("The shipwrights of {} learned to build vessels fit for the open sea.", pol.short);
+                let text = format!(
+                    "The shipwrights of {} learned to build vessels fit for the open sea.",
+                    pol.short
+                );
                 w.log(1, EventKind::Discovery, &[Ref::Polity(p)], None, text);
             }
         }
@@ -570,7 +747,10 @@ pub fn economy(w: &mut World) {
         // Prestige.
         pol.prestige = pol.prestige * 0.985 + pol.cells as f32 * 0.002 + cities.len() as f32 * 0.01;
         // Stability.
-        let (wisdom, charisma) = pol.ruler.map(|r| (w.persons[r].traits.wisdom, w.persons[r].traits.charisma)).unwrap_or((0.3, 0.3));
+        let (wisdom, charisma) = pol
+            .ruler
+            .map(|r| (w.persons[r].traits.wisdom, w.persons[r].traits.charisma))
+            .unwrap_or((0.3, 0.3));
         let over = pol.overextension();
         let kind_stab = match pol.kind {
             PolityKind::Kingdom | PolityKind::Republic => 0.05,
@@ -579,7 +759,14 @@ pub fn economy(w: &mut World) {
             PolityKind::Theocracy => 0.03,
             _ => 0.0,
         };
-        let target = 0.5 + wisdom * 0.2 + charisma * 0.1 + stab_bonus + kind_stab - (over - 1.0).max(0.0) * 0.25 - pol.foreign_share * 0.2 - pol.exhaustion * 0.3 - pol.decadence * 0.35 + (avg_prosp - 0.4) * 0.15 + vals.tradition * 0.05 + (pol.treasury / 600.0).max(-0.2) * 0.2;
+        let target = 0.5 + wisdom * 0.2 + charisma * 0.1 + stab_bonus + kind_stab
+            - (over - 1.0).max(0.0) * 0.25
+            - pol.foreign_share * 0.2
+            - pol.exhaustion * 0.3
+            - pol.decadence * 0.35
+            + (avg_prosp - 0.4) * 0.15
+            + vals.tradition * 0.05
+            + (pol.treasury / 600.0).max(-0.2) * 0.2;
         pol.stability += (target - pol.stability) * 0.1 + rng.range32(-0.02, 0.02);
         pol.stability = pol.stability.clamp(0.0, 1.0);
         // Exhaustion and decadence.
@@ -589,7 +776,11 @@ pub fn economy(w: &mut World) {
             pol.exhaustion = (pol.exhaustion - 0.03).max(0.0);
         }
         if pol.kind.rank() >= 2 && w.year - pol.founded > 70 {
-            let kind_mult = if pol.kind == PolityKind::Empire { 1.6 } else { 1.0 };
+            let kind_mult = if pol.kind == PolityKind::Empire {
+                1.6
+            } else {
+                1.0
+            };
             pol.decadence += (0.0045 * (1.0 + over) - wisdom * 0.002) * kind_mult;
             pol.decadence = pol.decadence.clamp(0.0, 1.0);
         }
@@ -648,7 +839,18 @@ fn epithet_for(w: &World, p: usize, r: usize) -> Option<String> {
     }
     if opts.is_empty() {
         if rng.chance(0.3) {
-            opts.extend(["the Red", "the Quiet", "Fairhair", "Longshanks", "the Fat", "the Pale", "One-Eye", "the Stammerer", "the Grey", "the Hunter"]);
+            opts.extend([
+                "the Red",
+                "the Quiet",
+                "Fairhair",
+                "Longshanks",
+                "the Fat",
+                "the Pale",
+                "One-Eye",
+                "the Stammerer",
+                "the Grey",
+                "the Hunter",
+            ]);
         } else {
             return None;
         }
@@ -671,16 +873,36 @@ pub fn ruler_dies(w: &mut World, p: usize, cause: String, importance: u8) {
     if w.high_detail() {
         let g = w.persons[r].gender;
         let flourish = match w.rng.below(6) {
-            0 => format!(" {} had reigned {} years.", crate::lang::capitalize(g.they()), length),
-            1 => format!(" The people of {} mourned for many days.", w.polities[p].short),
-            2 => format!(" {} was laid in the tombs of {}.", crate::lang::capitalize(g.they()), w.polities[p].capital.map(|c| w.cities[c].name.clone()).unwrap_or_else(|| w.polities[p].short.clone())),
+            0 => format!(
+                " {} had reigned {} years.",
+                crate::lang::capitalize(g.they()),
+                length
+            ),
+            1 => format!(
+                " The people of {} mourned for many days.",
+                w.polities[p].short
+            ),
+            2 => format!(
+                " {} was laid in the tombs of {}.",
+                crate::lang::capitalize(g.they()),
+                w.polities[p]
+                    .capital
+                    .map(|c| w.cities[c].name.clone())
+                    .unwrap_or_else(|| w.polities[p].short.clone())
+            ),
             3 => " Few wept.".to_string(),
             4 => format!(" Songs were sung of {} reign for a generation.", g.their()),
             _ => String::new(),
         };
         text.push_str(&flourish);
     }
-    w.log(importance, EventKind::Death, &[Ref::Person(r), Ref::Polity(p)], w.capital_cell(p), text);
+    w.log(
+        importance,
+        EventKind::Death,
+        &[Ref::Person(r), Ref::Polity(p)],
+        w.capital_cell(p),
+        text,
+    );
     super::stories::artifacts_on_ruler_death(w, p, r);
     w.polities[p].ruler = None;
     succession(w, p, r);
@@ -695,36 +917,84 @@ fn succession(w: &mut World, p: usize, old: usize) {
     let old_traits = w.persons[old].traits;
     let dynasty = pol.dynasty.clone();
     if !kind.has_dynasty() {
-        let heir = w.new_person(culture, Role::Ruler, Some(p), w.year - rng.int(25, 50), None);
+        let heir = w.new_person(
+            culture,
+            Role::Ruler,
+            Some(p),
+            w.year - rng.int(25, 50),
+            None,
+        );
         install_ruler(w, p, heir);
         let text = match kind {
-            PolityKind::Republic => format!("The assemblies of {} elected {} as consul.", w.polities[p].short, w.persons[heir].name),
-            PolityKind::Magocracy => format!("The towers of {} chose {} as their archmage.", w.polities[p].short, w.persons[heir].name),
-            PolityKind::Theocracy => format!("The priests of {} raised {} to the hierarchy.", w.polities[p].short, w.persons[heir].name),
-            _ => format!("The {} chose {} to lead them.", w.cultures[culture].plural, w.persons[heir].name),
+            PolityKind::Republic => format!(
+                "The assemblies of {} elected {} as consul.",
+                w.polities[p].short, w.persons[heir].name
+            ),
+            PolityKind::Magocracy => format!(
+                "The towers of {} chose {} as their archmage.",
+                w.polities[p].short, w.persons[heir].name
+            ),
+            PolityKind::Theocracy => format!(
+                "The priests of {} raised {} to the hierarchy.",
+                w.polities[p].short, w.persons[heir].name
+            ),
+            _ => format!(
+                "The {} chose {} to lead them.",
+                w.cultures[culture].plural, w.persons[heir].name
+            ),
         };
-        w.log(1, EventKind::Politics, &[Ref::Person(heir), Ref::Polity(p)], w.capital_cell(p), text);
+        w.log(
+            1,
+            EventKind::Politics,
+            &[Ref::Person(heir), Ref::Polity(p)],
+            w.capital_cell(p),
+            text,
+        );
         return;
     }
     let p_smooth = 0.6 + stability as f64 * 0.35;
     if rng.chance(p_smooth) {
-        let heir = w.new_person(culture, Role::Ruler, Some(p), w.year - rng.int(16, 40), Some(old_traits.inherit(&rng)));
+        let heir = w.new_person(
+            culture,
+            Role::Ruler,
+            Some(p),
+            w.year - rng.int(16, 40),
+            Some(old_traits.inherit(&rng)),
+        );
         w.persons[heir].parent = Some(old);
         install_ruler(w, p, heir);
         let hon = w.honorific(p, w.persons[heir].gender);
         let text = if rng.chance(0.5) {
-            format!("{} {} succeeded to the throne of {}, of {}.", hon, w.persons[heir].name, w.polities[p].short, dynasty)
+            format!(
+                "{} {} succeeded to the throne of {}, of {}.",
+                hon, w.persons[heir].name, w.polities[p].short, dynasty
+            )
         } else {
-            format!("The crown of {} passed to {} {}.", w.polities[p].short, hon, w.persons[heir].name)
+            format!(
+                "The crown of {} passed to {} {}.",
+                w.polities[p].short, hon, w.persons[heir].name
+            )
         };
-        w.log(1, EventKind::Politics, &[Ref::Person(heir), Ref::Polity(p)], w.capital_cell(p), text);
+        w.log(
+            1,
+            EventKind::Politics,
+            &[Ref::Person(heir), Ref::Polity(p)],
+            w.capital_cell(p),
+            text,
+        );
         return;
     }
     // Crisis.
     let roll = rng.f64();
     if roll < 0.4 || w.polities[p].cells < 25 {
         // Usurper founds a new dynasty.
-        let usurper = w.new_person(culture, Role::Ruler, Some(p), w.year - rng.int(25, 50), None);
+        let usurper = w.new_person(
+            culture,
+            Role::Ruler,
+            Some(p),
+            w.year - rng.int(25, 50),
+            None,
+        );
         w.persons[usurper].traits.ambition = (w.persons[usurper].traits.ambition + 0.3).min(1.0);
         let dyn_name = dynasty_name(w, culture, &w.persons[usurper].name.clone());
         w.polities[p].dynasty = dyn_name.clone();
@@ -733,21 +1003,50 @@ fn succession(w: &mut World, p: usize, old: usize) {
         let hon = w.honorific(p, w.persons[usurper].gender);
         let text = format!(
             "With no clear heir, {} seized the throne of {} and founded {}. {} was ended.",
-            w.persons[usurper].name, w.polities[p].short, dyn_name, crate::lang::capitalize(&dynasty)
+            w.persons[usurper].name,
+            w.polities[p].short,
+            dyn_name,
+            crate::lang::capitalize(&dynasty)
         );
-        w.log(2, EventKind::Politics, &[Ref::Person(usurper), Ref::Polity(p)], w.capital_cell(p), text);
+        w.log(
+            2,
+            EventKind::Politics,
+            &[Ref::Person(usurper), Ref::Polity(p)],
+            w.capital_cell(p),
+            text,
+        );
         let _ = hon;
     } else if roll < 0.75 {
         // Succession war: the realm splits.
-        let claimant_a = w.new_person(culture, Role::Ruler, Some(p), w.year - rng.int(20, 45), Some(old_traits.inherit(&rng)));
+        let claimant_a = w.new_person(
+            culture,
+            Role::Ruler,
+            Some(p),
+            w.year - rng.int(20, 45),
+            Some(old_traits.inherit(&rng)),
+        );
         w.persons[claimant_a].parent = Some(old);
         install_ruler(w, p, claimant_a);
-        let claimant_b = w.new_person(culture, Role::Rebel, None, w.year - rng.int(20, 45), Some(old_traits.inherit(&rng)));
+        let claimant_b = w.new_person(
+            culture,
+            Role::Rebel,
+            None,
+            w.year - rng.int(20, 45),
+            Some(old_traits.inherit(&rng)),
+        );
         w.persons[claimant_b].parent = Some(old);
         let name_a = w.persons[claimant_a].name.clone();
         let name_b = w.persons[claimant_b].name.clone();
         if let Some(rebel) = split_off(w, p, Some(claimant_b), None) {
-            w.wars_start(rebel, p, super::WarKind::Succession, format!("the claim of {} to the throne of {}", name_b, w.polities[p].short));
+            w.wars_start(
+                rebel,
+                p,
+                super::WarKind::Succession,
+                format!(
+                    "the claim of {} to the throne of {}",
+                    name_b, w.polities[p].short
+                ),
+            );
             let text = format!(
                 "Two claimants rose for the throne of {}: {} held {}, while {} raised banners in {}. The realm went to war with itself.",
                 w.polities[p].short,
@@ -756,14 +1055,40 @@ fn succession(w: &mut World, p: usize, old: usize) {
                 name_b,
                 w.polities[rebel].cities.first().map(|&c| w.cities[c].name.clone()).unwrap_or_else(|| "the provinces".into())
             );
-            w.log(2, EventKind::Politics, &[Ref::Polity(p), Ref::Polity(rebel), Ref::Person(claimant_a), Ref::Person(claimant_b)], w.capital_cell(p), text);
+            w.log(
+                2,
+                EventKind::Politics,
+                &[
+                    Ref::Polity(p),
+                    Ref::Polity(rebel),
+                    Ref::Person(claimant_a),
+                    Ref::Person(claimant_b),
+                ],
+                w.capital_cell(p),
+                text,
+            );
         } else {
-            let text = format!("{} took the throne of {} after a bitter dispute.", name_a, w.polities[p].short);
-            w.log(1, EventKind::Politics, &[Ref::Person(claimant_a), Ref::Polity(p)], w.capital_cell(p), text);
+            let text = format!(
+                "{} took the throne of {} after a bitter dispute.",
+                name_a, w.polities[p].short
+            );
+            w.log(
+                1,
+                EventKind::Politics,
+                &[Ref::Person(claimant_a), Ref::Polity(p)],
+                w.capital_cell(p),
+                text,
+            );
         }
     } else {
         // Weak regency.
-        let regent = w.new_person(culture, Role::Ruler, Some(p), w.year - rng.int(8, 14), Some(old_traits.inherit(&rng)));
+        let regent = w.new_person(
+            culture,
+            Role::Ruler,
+            Some(p),
+            w.year - rng.int(8, 14),
+            Some(old_traits.inherit(&rng)),
+        );
         w.persons[regent].parent = Some(old);
         install_ruler(w, p, regent);
         w.polities[p].stability = (w.polities[p].stability - 0.25).max(0.0);
@@ -773,7 +1098,13 @@ fn succession(w: &mut World, p: usize, old: usize) {
             w.polities[p].short,
             w.persons[regent].gender.their()
         );
-        w.log(1, EventKind::Politics, &[Ref::Person(regent), Ref::Polity(p)], w.capital_cell(p), text);
+        w.log(
+            1,
+            EventKind::Politics,
+            &[Ref::Person(regent), Ref::Polity(p)],
+            w.capital_cell(p),
+            text,
+        );
     }
 }
 
@@ -800,7 +1131,13 @@ pub fn rulers(w: &mut World) {
             Some(r) => r,
             None => {
                 let culture = w.polities[p].culture;
-                let heir = w.new_person(culture, Role::Ruler, Some(p), w.year - rng.int(25, 45), None);
+                let heir = w.new_person(
+                    culture,
+                    Role::Ruler,
+                    Some(p),
+                    w.year - rng.int(25, 45),
+                    None,
+                );
                 install_ruler(w, p, heir);
                 continue;
             }
@@ -811,7 +1148,8 @@ pub fn rulers(w: &mut World) {
         let rel = age / lifespan;
         let p_nat = 0.0015 + 0.09 * rel.powi(6);
         let stability = w.polities[p].stability;
-        let p_assassin = 0.002 * (1.0 + per.traits.cruelty * 3.0) + (0.5 - stability).max(0.0) * 0.02;
+        let p_assassin =
+            0.002 * (1.0 + per.traits.cruelty * 3.0) + (0.5 - stability).max(0.0) * 0.02;
         let roll = rng.f64();
         if roll < p_nat as f64 {
             let cause = match rng.below(7) {
@@ -846,7 +1184,12 @@ pub fn rulers(w: &mut World) {
 // ---------------------------------------------------------------------------
 
 /// Carve a province off `p` into a new polity. Returns the new polity id.
-pub fn split_off(w: &mut World, p: usize, leader: Option<usize>, prefer_culture: Option<usize>) -> Option<usize> {
+pub fn split_off(
+    w: &mut World,
+    p: usize,
+    leader: Option<usize>,
+    prefer_culture: Option<usize>,
+) -> Option<usize> {
     let rng = w.rng.clone();
     let cells = w.cells_of(p);
     if cells.len() < 8 {
@@ -910,9 +1253,17 @@ pub fn split_off(w: &mut World, p: usize, leader: Option<usize>, prefer_culture:
     if region.len() < 4 {
         return None;
     }
-    let kind = if region.len() >= 25 { PolityKind::Kingdom } else { PolityKind::Chiefdom };
+    let kind = if region.len() >= 25 {
+        PolityKind::Kingdom
+    } else {
+        PolityKind::Chiefdom
+    };
     // Seat: a city within the region if any, else the seed.
-    let seat = region.iter().copied().find(|&i| w.cells[i].city.is_some()).unwrap_or(seed);
+    let seat = region
+        .iter()
+        .copied()
+        .find(|&i| w.cells[i].city.is_some())
+        .unwrap_or(seed);
     let leader = leader.map(|l| {
         w.persons[l].culture = seed_culture;
         l
@@ -922,7 +1273,13 @@ pub fn split_off(w: &mut World, p: usize, leader: Option<usize>, prefer_culture:
     Some(np)
 }
 
-pub fn fall(w: &mut World, p: usize, cause: String, absorbed_by: Option<usize>, importance_floor: u8) {
+pub fn fall(
+    w: &mut World,
+    p: usize,
+    cause: String,
+    absorbed_by: Option<usize>,
+    importance_floor: u8,
+) {
     if !w.polities[p].alive() {
         return;
     }
@@ -938,7 +1295,11 @@ pub fn fall(w: &mut World, p: usize, cause: String, absorbed_by: Option<usize>, 
     }
     let wars = w.polities[p].wars.clone();
     for wid in wars {
-        w.end_war(wid, format!("ended when {} ceased to exist", w.polities[p].name), false);
+        w.end_war(
+            wid,
+            format!("ended when {} ceased to exist", w.polities[p].name),
+            false,
+        );
     }
     if let Some(r) = w.polities[p].ruler {
         if w.persons[r].alive() {
@@ -949,14 +1310,25 @@ pub fn fall(w: &mut World, p: usize, cause: String, absorbed_by: Option<usize>, 
     pol.fell = Some(w.year);
     pol.fall_cause = cause.clone();
     let peak = pol.peak_cells;
-    let imp = if peak > 150 { 3 } else if peak > 40 { 2 } else { 1 }.max(importance_floor);
+    let imp = if peak > 150 {
+        3
+    } else if peak > 40 {
+        2
+    } else {
+        1
+    }
+    .max(importance_floor);
     let mut text = format!("{} {}", crate::lang::capitalize(&w.polities[p].name), cause);
     if peak > 40 {
         text.push_str(&format!(
             " At its height in year {} it had ruled {} lands and {} cities.",
             w.polities[p].peak_year,
             peak,
-            w.cities.iter().filter(|c| c.founder == Some(p)).count().max(w.polities[p].cities.len())
+            w.cities
+                .iter()
+                .filter(|c| c.founder == Some(p))
+                .count()
+                .max(w.polities[p].cities.len())
         ));
     }
     let mut refs = vec![Ref::Polity(p)];
@@ -972,7 +1344,11 @@ pub fn unrest(w: &mut World) {
     for p in w.living_polities() {
         let pol = &w.polities[p];
         if pol.cells == 0 && pol.founded < w.year {
-            let cause = if pol.wars.is_empty() { "faded away, its last lands abandoned.".to_string() } else { "was overrun and destroyed.".to_string() };
+            let cause = if pol.wars.is_empty() {
+                "faded away, its last lands abandoned.".to_string()
+            } else {
+                "was overrun and destroyed.".to_string()
+            };
             fall(w, p, cause, None, 1);
             continue;
         }
@@ -988,11 +1364,24 @@ pub fn unrest(w: &mut World) {
                 p_rev *= 1.4;
             }
             if rng.chance(p_rev) {
-                let cruelty = pol.ruler.map(|r| w.persons[r].traits.cruelty).unwrap_or(0.5);
-                let leader = w.new_person(pol.culture, Role::Rebel, None, w.year - rng.int(22, 45), None);
+                let cruelty = pol
+                    .ruler
+                    .map(|r| w.persons[r].traits.cruelty)
+                    .unwrap_or(0.5);
+                let leader = w.new_person(
+                    pol.culture,
+                    Role::Rebel,
+                    None,
+                    w.year - rng.int(22, 45),
+                    None,
+                );
                 if let Some(rebel) = split_off(w, p, Some(leader), None) {
                     let rc = w.polities[rebel].culture;
-                    let kind = if rc == w.polities[p].culture { super::WarKind::CivilWar } else { super::WarKind::Rebellion };
+                    let kind = if rc == w.polities[p].culture {
+                        super::WarKind::CivilWar
+                    } else {
+                        super::WarKind::Rebellion
+                    };
                     let cause = if kind == super::WarKind::CivilWar {
                         if cruelty > 0.6 {
                             format!("the cruelty of {}", w.ruler_short(p))
@@ -1000,7 +1389,10 @@ pub fn unrest(w: &mut World) {
                             format!("the misrule of {}", w.ruler_short(p))
                         }
                     } else {
-                        format!("the {} yearning for freedom from {}", w.cultures[rc].adj, w.polities[p].short)
+                        format!(
+                            "the {} yearning for freedom from {}",
+                            w.cultures[rc].adj, w.polities[p].short
+                        )
                     };
                     w.wars_start(rebel, p, kind, cause.clone());
                     let seat = w.cities[w.polities[rebel].capital.unwrap()].name.clone();
@@ -1012,7 +1404,13 @@ pub fn unrest(w: &mut World) {
                         cause,
                         w.polities[rebel].name
                     );
-                    w.log(2, EventKind::War, &[Ref::Polity(rebel), Ref::Polity(p), Ref::Person(leader)], w.capital_cell(rebel), text);
+                    w.log(
+                        2,
+                        EventKind::War,
+                        &[Ref::Polity(rebel), Ref::Polity(p), Ref::Person(leader)],
+                        w.capital_cell(rebel),
+                        text,
+                    );
                     w.polities[p].stability = (w.polities[p].stability + 0.1).min(1.0);
                     continue;
                 }
@@ -1045,7 +1443,13 @@ fn kind_changes(w: &mut World, p: usize) {
         PolityKind::Chiefdom => {
             if (pol.cells >= 35 && (pol.dev > 0.2 || pol.cities.len() >= 2)) || pol.cells >= 70 {
                 new = PolityKind::Kingdom;
-                if vals.mercantilism > 0.65 && pol.capital.map(|c| w.terrain.coast[w.cities[c].cell]).unwrap_or(false) && rng.chance(0.5) {
+                if vals.mercantilism > 0.65
+                    && pol
+                        .capital
+                        .map(|c| w.terrain.coast[w.cities[c].cell])
+                        .unwrap_or(false)
+                    && rng.chance(0.5)
+                {
                     new = PolityKind::Republic;
                 }
             }
@@ -1055,17 +1459,31 @@ fn kind_changes(w: &mut World, p: usize) {
                 new = PolityKind::Kingdom;
             }
         }
-        PolityKind::Kingdom | PolityKind::Republic | PolityKind::Theocracy | PolityKind::Magocracy => {
+        PolityKind::Kingdom
+        | PolityKind::Republic
+        | PolityKind::Theocracy
+        | PolityKind::Magocracy => {
             let empire_cells = 180.max(w.stats.owned_cells / 8);
-            if pol.cells >= empire_cells && (pol.conquered >= 2 || pol.cultures_within >= 3) && pol.stability > 0.4 {
+            if pol.cells >= empire_cells
+                && (pol.conquered >= 2 || pol.cultures_within >= 3)
+                && pol.stability > 0.4
+            {
                 new = PolityKind::Empire;
             } else if old == PolityKind::Kingdom {
                 if let Some(s) = pol.school {
                     let infl = w.schools[s].influence.get(&p).copied().unwrap_or(0.0);
                     let piety = pol.ruler.map(|r| w.persons[r].traits.piety).unwrap_or(0.3);
-                    if w.schools[s].kind == super::SchoolKind::Divine && infl > 0.8 && piety > 0.75 && rng.chance(0.03) {
+                    if w.schools[s].kind == super::SchoolKind::Divine
+                        && infl > 0.8
+                        && piety > 0.75
+                        && rng.chance(0.03)
+                    {
                         new = PolityKind::Theocracy;
-                    } else if w.schools[s].kind == super::SchoolKind::Arcane && infl > 0.85 && vals.mysticism > 0.6 && rng.chance(0.03) {
+                    } else if w.schools[s].kind == super::SchoolKind::Arcane
+                        && infl > 0.85
+                        && vals.mysticism > 0.6
+                        && rng.chance(0.03)
+                    {
                         new = PolityKind::Magocracy;
                     }
                 }
@@ -1106,7 +1524,13 @@ fn kind_changes(w: &mut World, p: usize) {
         PolityKind::Magocracy => (2, format!("The mages who counselled the throne of {} dispensed with the throne. {} was now {}.", short, oldname, name)),
         _ => (1, format!("{} became {}.", oldname, name)),
     };
-    w.log(imp, EventKind::Politics, &[Ref::Polity(p)], w.capital_cell(p), text);
+    w.log(
+        imp,
+        EventKind::Politics,
+        &[Ref::Polity(p)],
+        w.capital_cell(p),
+        text,
+    );
 }
 
 fn fragment(w: &mut World, p: usize) {
@@ -1115,13 +1539,24 @@ fn fragment(w: &mut World, p: usize) {
         Some(c) => c,
         None => return,
     };
-    let mut cities: Vec<usize> = w.polities[p].cities.iter().copied().filter(|&c| c != capital).collect();
+    let mut cities: Vec<usize> = w.polities[p]
+        .cities
+        .iter()
+        .copied()
+        .filter(|&c| c != capital)
+        .collect();
     cities.sort_by(|&a, &b| w.cities[b].pop.partial_cmp(&w.cities[a].pop).unwrap());
     let k = (2 + rng.below(3)).min(cities.len());
     if k < 1 {
         // No cities to seed successors: the state simply collapses.
         let name = w.polities[p].name.clone();
-        fall(w, p, "collapsed into lawlessness, its lords each seizing what they could.".to_string(), None, 2);
+        fall(
+            w,
+            p,
+            "collapsed into lawlessness, its lords each seizing what they could.".to_string(),
+            None,
+            2,
+        );
         let _ = name;
         return;
     }
@@ -1152,7 +1587,11 @@ fn fragment(w: &mut World, p: usize) {
         }
         let seat = seeds[s];
         let culture = w.cells[seat].culture.unwrap_or(w.polities[p].culture);
-        let kind = if region.len() >= 25 { PolityKind::Kingdom } else { PolityKind::Chiefdom };
+        let kind = if region.len() >= 25 {
+            PolityKind::Kingdom
+        } else {
+            PolityKind::Chiefdom
+        };
         let np = found_polity(w, culture, seat, kind, Some(p), region, None);
         successors.push(np);
     }
@@ -1169,7 +1608,10 @@ fn fragment(w: &mut World, p: usize) {
         let name = make_name(w, PolityKind::Kingdom, &short, culture, Some(&cap_name));
         w.polities[p].name = name;
     }
-    let names: Vec<String> = successors.iter().map(|&s| w.polities[s].name.clone()).collect();
+    let names: Vec<String> = successors
+        .iter()
+        .map(|&s| w.polities[s].name.clone())
+        .collect();
     let text = format!(
         "{} shattered. Its governors and generals each crowned themselves, and from its ruin rose {}. What remained of the old realm, now {}, held only the lands about {}.",
         crate::lang::capitalize(&oldname),
@@ -1189,17 +1631,24 @@ pub fn join_names(names: &[String]) -> String {
         0 => String::new(),
         1 => names[0].clone(),
         2 => format!("{} and {}", names[0], names[1]),
-        _ => format!("{}, and {}", names[..names.len() - 1].join(", "), names[names.len() - 1]),
+        _ => format!(
+            "{}, and {}",
+            names[..names.len() - 1].join(", "),
+            names[names.len() - 1]
+        ),
     }
 }
 
 pub fn traits_of(w: &World, p: usize) -> Traits {
-    w.polities[p].ruler.map(|r| w.persons[r].traits).unwrap_or(Traits {
-        ambition: 0.4,
-        valor: 0.4,
-        wisdom: 0.4,
-        piety: 0.4,
-        cruelty: 0.4,
-        charisma: 0.4,
-    })
+    w.polities[p]
+        .ruler
+        .map(|r| w.persons[r].traits)
+        .unwrap_or(Traits {
+            ambition: 0.4,
+            valor: 0.4,
+            wisdom: 0.4,
+            piety: 0.4,
+            cruelty: 0.4,
+            charisma: 0.4,
+        })
 }

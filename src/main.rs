@@ -34,7 +34,10 @@ struct Args {
 
 fn parse_args(cfg: &config::Config) -> Args {
     let mut a = Args {
-        seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(1),
+        seed: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(1),
         width: cfg.width.unwrap_or(160),
         height: cfg.height.unwrap_or(64),
         detail: cfg.detail.unwrap_or(Detail::Medium),
@@ -59,8 +62,14 @@ fn parse_args(cfg: &config::Config) -> Args {
         };
         match args[i].as_str() {
             "--seed" | "-s" => a.seed = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.seed),
-            "--width" | "-w" => a.width = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.width),
-            "--height" | "-h" => a.height = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.height),
+            "--width" | "-w" => {
+                a.width = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.width)
+            }
+            "--height" | "-h" => {
+                a.height = next(&mut i)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(a.height)
+            }
             "--detail" | "-d" => {
                 a.detail = match next(&mut i).as_deref() {
                     Some("low") => Detail::Low,
@@ -68,8 +77,12 @@ fn parse_args(cfg: &config::Config) -> Args {
                     _ => Detail::Medium,
                 }
             }
-            "--headless" | "--years" => a.headless = Some(next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(500)),
-            "--min-importance" | "-i" => a.min_importance = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(1),
+            "--headless" | "--years" => {
+                a.headless = Some(next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(500))
+            }
+            "--min-importance" | "-i" => {
+                a.min_importance = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(1)
+            }
             "--ascii" => a.ascii = true,
             "--stats" => a.stats = true,
             "--load" | "-l" => a.load = next(&mut i),
@@ -121,7 +134,15 @@ fn main() {
         }
     }
     if let Some(path) = args.snapshot {
-        ui::snapshot(world, args.ascii, args.cols, args.rows, args.headless.unwrap_or(300), &args.layer, &path);
+        ui::snapshot(
+            world,
+            args.ascii,
+            args.cols,
+            args.rows,
+            args.headless.unwrap_or(300),
+            &args.layer,
+            &path,
+        );
         return;
     }
     if args.stats {
@@ -141,7 +162,15 @@ fn main() {
             let mut out = stdout.lock();
             for e in &world.chronicle.events {
                 if e.importance >= args.min_importance {
-                    if writeln!(out, "[{:>5}] {}{}", e.year, "*".repeat(e.importance as usize), e.text).is_err() {
+                    if writeln!(
+                        out,
+                        "[{:>5}] {}{}",
+                        e.year,
+                        "*".repeat(e.importance as usize),
+                        e.text
+                    )
+                    .is_err()
+                    {
                         return; // downstream closed the pipe (e.g. `| head`)
                     }
                 }

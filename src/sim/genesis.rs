@@ -7,7 +7,16 @@ use crate::geo::{BiomeGroup, FeatureKind};
 use crate::lang::Language;
 use crate::term::Rgb;
 
-const STATURE: &[&str] = &["tall", "small", "lithe", "broad-shouldered", "gaunt", "stout", "long-limbed", "heavy-browed"];
+const STATURE: &[&str] = &[
+    "tall",
+    "small",
+    "lithe",
+    "broad-shouldered",
+    "gaunt",
+    "stout",
+    "long-limbed",
+    "heavy-browed",
+];
 const FEATURE: &[&str] = &[
     "grey-skinned",
     "amber-eyed",
@@ -101,7 +110,10 @@ pub fn populate(w: &mut World) {
     w.eras.push(Era {
         start: 0,
         name: "the Dawn Age".to_string(),
-        description: format!("The first peoples of {} wake and look about them.", world_name),
+        description: format!(
+            "The first peoples of {} wake and look about them.",
+            world_name
+        ),
     });
     w.log(
         3,
@@ -178,11 +190,17 @@ pub fn populate(w: &mut World) {
             }
             let b = w.terrain.biome[i];
             let aff = b.group().map(|g| race.affinity[g as usize]).unwrap_or(0.3);
-            let mut score = w.terrain.fertility[i] * (0.4 + aff) * (1.0 + race.coast_love * if w.terrain.coast[i] { 0.6 } else { 0.0 });
+            let mut score = w.terrain.fertility[i]
+                * (0.4 + aff)
+                * (1.0 + race.coast_love * if w.terrain.coast[i] { 0.6 } else { 0.0 });
             // Neighbourhood fertility matters as much as the cell itself.
             let mut around = 0.0;
             for nb in w.terrain.neighbors8(i) {
-                around += w.terrain.fertility[nb] * w.terrain.biome[nb].group().map(|g| race.affinity[g as usize]).unwrap_or(0.0);
+                around += w.terrain.fertility[nb]
+                    * w.terrain.biome[nb]
+                        .group()
+                        .map(|g| race.affinity[g as usize])
+                        .unwrap_or(0.0);
             }
             score += around * 0.15;
             for &h in &homes {
@@ -221,7 +239,10 @@ pub fn populate(w: &mut World) {
                         continue;
                     }
                     let race = &w.races[ri];
-                    let aff = w.terrain.biome[i].group().map(|g| race.affinity[g as usize]).unwrap_or(0.3);
+                    let aff = w.terrain.biome[i]
+                        .group()
+                        .map(|g| race.affinity[g as usize])
+                        .unwrap_or(0.3);
                     let score = w.terrain.fertility[i] * (0.4 + aff);
                     if score > best_score {
                         best_score = score;
@@ -233,7 +254,11 @@ pub fn populate(w: &mut World) {
                     None => continue,
                 }
             }
-            let lang = if ci == 0 { w.races[ri].lang.mutate(&rng) } else { w.races[ri].lang.mutate(&rng).mutate(&rng) };
+            let lang = if ci == 0 {
+                w.races[ri].lang.mutate(&rng)
+            } else {
+                w.races[ri].lang.mutate(&rng).mutate(&rng)
+            };
             found_culture(w, ri, lang, home_c, None);
         }
     }
@@ -245,14 +270,17 @@ pub fn populate(w: &mut World) {
         if lm == 0 {
             continue;
         }
-        let feat = w
-            .terrain
-            .features
-            .iter()
-            .position(|f| matches!(f.kind, FeatureKind::Continent | FeatureKind::Island) && f.cells.contains(&home));
+        let feat = w.terrain.features.iter().position(|f| {
+            matches!(f.kind, FeatureKind::Continent | FeatureKind::Island)
+                && f.cells.contains(&home)
+        });
         if let Some(f) = feat {
             if w.terrain.features[f].name.is_none() {
-                let name = crate::geo::name_feature(w.terrain.features[f].kind, &w.cultures[ci].lang, &rng);
+                let name = crate::geo::name_feature(
+                    w.terrain.features[f].kind,
+                    &w.cultures[ci].lang,
+                    &rng,
+                );
                 w.terrain.features[f].name = Some(name);
                 w.terrain.features[f].named_by = Some(ci);
             }
@@ -263,13 +291,22 @@ pub fn populate(w: &mut World) {
     for ri in 0..w.races.len() {
         let home = w.races[ri].home;
         let place = w.place_phrase(home, None);
-        let text = format!("The {} are {}. They dwell {}.", w.races[ri].plural, w.races[ri].description, place);
+        let text = format!(
+            "The {} are {}. They dwell {}.",
+            w.races[ri].plural, w.races[ri].description, place
+        );
         w.log(2, EventKind::Genesis, &[Ref::Race(ri)], Some(home), text);
     }
 }
 
 /// Create a culture and seed its people around `home`.
-pub fn found_culture(w: &mut World, race: usize, lang: Language, home: usize, parent: Option<usize>) -> usize {
+pub fn found_culture(
+    w: &mut World,
+    race: usize,
+    lang: Language,
+    home: usize,
+    parent: Option<usize>,
+) -> usize {
     let rng = w.rng.clone();
     let id = w.cultures.len();
     let name = lang.name(&rng);

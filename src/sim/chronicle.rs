@@ -74,7 +74,9 @@ impl EventKind {
     }
     pub fn from_name(s: &str) -> Option<EventKind> {
         let s = s.to_lowercase();
-        EventKind::all().into_iter().find(|k| k.name().starts_with(&s) && !s.is_empty())
+        EventKind::all()
+            .into_iter()
+            .find(|k| k.name().starts_with(&s) && !s.is_empty())
     }
 }
 
@@ -120,5 +122,4 @@ impl Chronicle {
     pub fn len(&self) -> usize {
         self.events.len()
     }
-
 }

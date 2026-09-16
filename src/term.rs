@@ -64,7 +64,12 @@ pub fn is_tty() -> bool {
 }
 
 pub fn size() -> (usize, usize) {
-    let mut ws = Winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
+    let mut ws = Winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
     let r = unsafe { ioctl(1, TIOCGWINSZ, &mut ws as *mut Winsize) };
     if r != 0 || ws.ws_col == 0 || ws.ws_row == 0 {
         (80, 24)
@@ -76,7 +81,11 @@ pub fn size() -> (usize, usize) {
 /// Turn xterm mouse reporting (SGR encoding) on or off.
 pub fn set_mouse(on: bool) {
     let mut out = io::stdout();
-    let _ = out.write_all(if on { b"\x1b[?1000h\x1b[?1006h" } else { b"\x1b[?1006l\x1b[?1000l" });
+    let _ = out.write_all(if on {
+        b"\x1b[?1000h\x1b[?1006h"
+    } else {
+        b"\x1b[?1006l\x1b[?1000l"
+    });
     let _ = out.flush();
 }
 
@@ -85,7 +94,16 @@ pub fn enter(mouse: bool) -> bool {
     if !is_tty() {
         return false;
     }
-    let mut t = Termios { c_iflag: 0, c_oflag: 0, c_cflag: 0, c_lflag: 0, c_line: 0, c_cc: [0; 32], c_ispeed: 0, c_ospeed: 0 };
+    let mut t = Termios {
+        c_iflag: 0,
+        c_oflag: 0,
+        c_cflag: 0,
+        c_lflag: 0,
+        c_line: 0,
+        c_cc: [0; 32],
+        c_ispeed: 0,
+        c_ospeed: 0,
+    };
     unsafe {
         if tcgetattr(0, &mut t) != 0 {
             return false;
@@ -176,7 +194,11 @@ fn read_bytes(buf: &mut Vec<u8>) {
 }
 
 fn wait_input(timeout_ms: i32) -> bool {
-    let mut pfd = PollFd { fd: 0, events: POLLIN, revents: 0 };
+    let mut pfd = PollFd {
+        fd: 0,
+        events: POLLIN,
+        revents: 0,
+    };
     let r = unsafe { poll(&mut pfd, 1, timeout_ms) };
     r > 0 && (pfd.revents & POLLIN) != 0
 }
@@ -259,14 +281,30 @@ impl Input {
                     } else {
                         MouseKind::Press((cb & 3) as u8)
                     };
-                    return Some(Key::Mouse(Mouse { kind, x: cx.saturating_sub(1), y: cy.saturating_sub(1) }));
+                    return Some(Key::Mouse(Mouse {
+                        kind,
+                        x: cx.saturating_sub(1),
+                        y: cy.saturating_sub(1),
+                    }));
                 }
                 let mut fields = params.split(|&b| b == b';');
                 let first = fields.next().unwrap_or(&[]);
-                let modifier = fields.next().and_then(|m| std::str::from_utf8(m).ok()).and_then(|m| m.parse::<u8>().ok()).unwrap_or(1);
+                let modifier = fields
+                    .next()
+                    .and_then(|m| std::str::from_utf8(m).ok())
+                    .and_then(|m| m.parse::<u8>().ok())
+                    .unwrap_or(1);
                 let shift = matches!(modifier, 2 | 4 | 6 | 8);
                 let ctrl = matches!(modifier, 5 | 6 | 7 | 8);
-                let arrow = |plain: Key, s: Key, c: Key| if ctrl { c } else if shift { s } else { plain };
+                let arrow = |plain: Key, s: Key, c: Key| {
+                    if ctrl {
+                        c
+                    } else if shift {
+                        s
+                    } else {
+                        plain
+                    }
+                };
                 let key = match fin {
                     b'A' => arrow(Key::Up, Key::ShiftUp, Key::CtrlUp),
                     b'B' => arrow(Key::Down, Key::ShiftDown, Key::CtrlDown),
@@ -359,7 +397,11 @@ impl Rgb {
             4 => (x, 0.0, c),
             _ => (c, 0.0, x),
         };
-        Rgb(((r + m) * 255.0) as u8, ((g + m) * 255.0) as u8, ((b + m) * 255.0) as u8)
+        Rgb(
+            ((r + m) * 255.0) as u8,
+            ((g + m) * 255.0) as u8,
+            ((b + m) * 255.0) as u8,
+        )
     }
     /// Hue (0-360), saturation and value, all but hue in 0..1.
     pub fn to_hsv(self) -> (f32, f32, f32) {
@@ -403,7 +445,12 @@ pub struct Cell {
 
 impl Cell {
     pub fn blank(bg: Rgb) -> Cell {
-        Cell { ch: ' ', fg: Rgb(200, 200, 200), bg, attr: 0 }
+        Cell {
+            ch: ' ',
+            fg: Rgb(200, 200, 200),
+            bg,
+            attr: 0,
+        }
     }
 }
 
@@ -440,7 +487,6 @@ impl Screen {
         }
     }
 
-
     pub fn clear(&mut self, bg: Rgb) {
         for c in self.cells.iter_mut() {
             *c = Cell::blank(bg);
@@ -450,7 +496,12 @@ impl Screen {
     #[inline]
     pub fn put(&mut self, x: usize, y: usize, ch: char, fg: Rgb, bg: Rgb) {
         if x < self.w && y < self.h {
-            self.cells[y * self.w + x] = Cell { ch, fg, bg, attr: 0 };
+            self.cells[y * self.w + x] = Cell {
+                ch,
+                fg,
+                bg,
+                attr: 0,
+            };
         }
     }
 
@@ -468,7 +519,6 @@ impl Screen {
     pub fn cell(&self, x: usize, y: usize) -> Cell {
         self.cells[y * self.w + x]
     }
-
 
     /// Write text; returns the x position after the last character written.
     pub fn text(&mut self, x: usize, y: usize, s: &str, fg: Rgb, bg: Rgb) -> usize {
@@ -488,7 +538,16 @@ impl Screen {
     }
 
     /// Write text clipped to `max` columns.
-    pub fn text_clip(&mut self, x: usize, y: usize, s: &str, max: usize, fg: Rgb, bg: Rgb, attr: u8) -> usize {
+    pub fn text_clip(
+        &mut self,
+        x: usize,
+        y: usize,
+        s: &str,
+        max: usize,
+        fg: Rgb,
+        bg: Rgb,
+        attr: u8,
+    ) -> usize {
         let mut cx = x;
         for ch in s.chars() {
             if cx >= self.w || cx >= x + max {
@@ -503,7 +562,12 @@ impl Screen {
     pub fn fill(&mut self, x: usize, y: usize, w: usize, h: usize, ch: char, fg: Rgb, bg: Rgb) {
         for yy in y..(y + h).min(self.h) {
             for xx in x..(x + w).min(self.w) {
-                self.cells[yy * self.w + xx] = Cell { ch, fg, bg, attr: 0 };
+                self.cells[yy * self.w + xx] = Cell {
+                    ch,
+                    fg,
+                    bg,
+                    attr: 0,
+                };
             }
         }
     }

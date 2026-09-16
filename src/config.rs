@@ -47,11 +47,16 @@ pub fn load() -> Config {
         if line.is_empty() {
             continue;
         }
-        if let Some(rest) = line.strip_prefix("map ").or_else(|| line.strip_prefix("noremap ")) {
+        if let Some(rest) = line
+            .strip_prefix("map ")
+            .or_else(|| line.strip_prefix("noremap "))
+        {
             let mut it = rest.split_whitespace();
             match (it.next().and_then(parse_key), it.next().and_then(parse_key)) {
                 (Some(a), Some(b)) => c.maps.push((a, b)),
-                _ => c.errors.push(format!("line {}: cannot parse map '{}'", n + 1, rest)),
+                _ => c
+                    .errors
+                    .push(format!("line {}: cannot parse map '{}'", n + 1, rest)),
             }
             continue;
         }
@@ -61,7 +66,8 @@ pub fn load() -> Config {
             None => match line.split_once(' ') {
                 Some((k, v)) => (k.trim().to_lowercase(), v.trim().to_string()),
                 None => {
-                    c.errors.push(format!("line {}: expected 'key = value'", n + 1));
+                    c.errors
+                        .push(format!("line {}: expected 'key = value'", n + 1));
                     continue;
                 }
             },
@@ -97,7 +103,12 @@ impl Config {
             "theme" => self.theme = Some(v.to_lowercase()),
             "mouse" => self.mouse = Some(parse_bool(v).ok_or("mouse must be on or off")?),
             "ascii" => self.ascii = Some(parse_bool(v).ok_or("ascii must be on or off")?),
-            "autosave" => self.autosave = Some(v.parse().map_err(|_| "autosave must be a number of years")?),
+            "autosave" => {
+                self.autosave = Some(
+                    v.parse()
+                        .map_err(|_| "autosave must be a number of years")?,
+                )
+            }
             "width" => self.width = Some(v.parse().map_err(|_| "width must be a number")?),
             "height" => self.height = Some(v.parse().map_err(|_| "height must be a number")?),
             "log" => self.log = Some(v.parse().map_err(|_| "log must be 0-3")?),
@@ -129,14 +140,44 @@ pub fn parse_key(s: &str) -> Option<Key> {
     let shift = lower.starts_with("s-");
     let base = if shift { &lower[2..] } else { lower.as_str() };
     let k = match base {
-        "up" => if shift { Key::ShiftUp } else { Key::Up },
-        "down" => if shift { Key::ShiftDown } else { Key::Down },
-        "left" => if shift { Key::ShiftLeft } else { Key::Left },
-        "right" => if shift { Key::ShiftRight } else { Key::Right },
+        "up" => {
+            if shift {
+                Key::ShiftUp
+            } else {
+                Key::Up
+            }
+        }
+        "down" => {
+            if shift {
+                Key::ShiftDown
+            } else {
+                Key::Down
+            }
+        }
+        "left" => {
+            if shift {
+                Key::ShiftLeft
+            } else {
+                Key::Left
+            }
+        }
+        "right" => {
+            if shift {
+                Key::ShiftRight
+            } else {
+                Key::Right
+            }
+        }
         "c-up" => Key::CtrlUp,
         "enter" | "cr" | "return" => Key::Enter,
         "esc" | "escape" => Key::Esc,
-        "tab" => if shift { Key::BackTab } else { Key::Tab },
+        "tab" => {
+            if shift {
+                Key::BackTab
+            } else {
+                Key::Tab
+            }
+        }
         "space" => Key::Char(' '),
         "bs" | "backspace" => Key::Backspace,
         "del" | "delete" => Key::Delete,

@@ -5,12 +5,12 @@
 
 mod detail;
 
+use crate::config::Config;
 use crate::geo::Biome;
 use crate::sim::chronicle::{EventKind, Ref};
-use crate::config::Config;
 use crate::sim::{Detail, World};
-use crate::theme::Theme;
 use crate::term::{self, Input, Key, Mouse, MouseKind, Rgb, Screen, BOLD, DIM, REVERSE};
+use crate::theme::Theme;
 use std::time::{Duration, Instant};
 
 pub const SPEEDS: [f64; 8] = [0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0];
@@ -47,7 +47,14 @@ impl Layer {
         }
     }
     pub fn all() -> [Layer; 6] {
-        [Layer::Political, Layer::Terrain, Layer::Culture, Layer::Magic, Layer::Population, Layer::Biomes]
+        [
+            Layer::Political,
+            Layer::Terrain,
+            Layer::Culture,
+            Layer::Magic,
+            Layer::Population,
+            Layer::Biomes,
+        ]
     }
     pub fn next(self) -> Layer {
         let all = Layer::all();
@@ -61,7 +68,11 @@ impl Layer {
     }
     pub fn from_name(s: &str) -> Option<Layer> {
         let s = s.to_lowercase();
-        Layer::all().into_iter().find(|l| l.name().starts_with(&s) || (s == "magic" && *l == Layer::Magic) || (s == "pop" && *l == Layer::Population))
+        Layer::all().into_iter().find(|l| {
+            l.name().starts_with(&s)
+                || (s == "magic" && *l == Layer::Magic)
+                || (s == "pop" && *l == Layer::Population)
+        })
     }
 }
 
@@ -160,7 +171,15 @@ pub fn run(world: World, ascii: bool, mouse: bool, save_path: Option<String>, cf
 
 /// Render one frame offscreen after simulating `years`, writing a plain
 /// text dump and a coloured HTML page. Used for testing and screenshots.
-pub fn snapshot(world: World, ascii: bool, cols: usize, rows: usize, years: i32, layer: &str, path: &str) {
+pub fn snapshot(
+    world: World,
+    ascii: bool,
+    cols: usize,
+    rows: usize,
+    years: i32,
+    layer: &str,
+    path: &str,
+) {
     let mut ui = Ui::new(world, ascii, false, cols, rows);
     ui.layer = Layer::from_name(layer).unwrap_or(Layer::Political);
     for _ in 0..years {
@@ -179,15 +198,32 @@ pub fn snapshot(world: World, ascii: bool, cols: usize, rows: usize, years: i32,
     match layer {
         "detail" => ui.mode = Mode::Detail,
         "city" => {
-            let mut cs: Vec<usize> = (0..ui.world.cities.len()).filter(|&c| ui.world.cities[c].destroyed.is_none()).collect();
-            cs.sort_by(|&a, &b| ui.world.cities[b].pop.partial_cmp(&ui.world.cities[a].pop).unwrap());
+            let mut cs: Vec<usize> = (0..ui.world.cities.len())
+                .filter(|&c| ui.world.cities[c].destroyed.is_none())
+                .collect();
+            cs.sort_by(|&a, &b| {
+                ui.world.cities[b]
+                    .pop
+                    .partial_cmp(&ui.world.cities[a].pop)
+                    .unwrap()
+            });
             if let Some(&c) = cs.first() {
                 ui.selected = Some(Ref::City(c));
                 ui.mode = Mode::Detail;
             }
         }
         "school" => {
-            if let Some(s) = ui.world.schools.iter().filter(|s| s.alive()).max_by(|a, b| a.total_influence().partial_cmp(&b.total_influence()).unwrap()) {
+            if let Some(s) = ui
+                .world
+                .schools
+                .iter()
+                .filter(|s| s.alive())
+                .max_by(|a, b| {
+                    a.total_influence()
+                        .partial_cmp(&b.total_influence())
+                        .unwrap()
+                })
+            {
                 ui.selected = Some(Ref::School(s.id));
                 ui.mode = Mode::Detail;
             }
@@ -224,13 +260,30 @@ pub fn snapshot(world: World, ascii: bool, cols: usize, rows: usize, years: i32,
                 }
                 html.push_str(&format!(
                     "<span style=\"color:rgb({},{},{});background:rgb({},{},{}){}{}\">",
-                    c.fg.0, c.fg.1, c.fg.2, c.bg.0, c.bg.1, c.bg.2,
-                    if c.attr & BOLD != 0 { ";font-weight:bold" } else { "" },
-                    if c.attr & REVERSE != 0 { ";outline:2px solid #fff" } else { "" }
+                    c.fg.0,
+                    c.fg.1,
+                    c.fg.2,
+                    c.bg.0,
+                    c.bg.1,
+                    c.bg.2,
+                    if c.attr & BOLD != 0 {
+                        ";font-weight:bold"
+                    } else {
+                        ""
+                    },
+                    if c.attr & REVERSE != 0 {
+                        ";outline:2px solid #fff"
+                    } else {
+                        ""
+                    }
                 ));
                 last = Some(st);
             }
-            let ch = match c.ch { '<' => "&lt;".to_string(), '&' => "&amp;".to_string(), ch => ch.to_string() };
+            let ch = match c.ch {
+                '<' => "&lt;".to_string(),
+                '&' => "&amp;".to_string(),
+                ch => ch.to_string(),
+            };
             html.push_str(&ch);
         }
         txt.push('\n');
@@ -311,7 +364,11 @@ impl Ui {
             self.world.detail = d;
         }
         if let Some(v) = cfg.speed {
-            let (i, _) = SPEEDS.iter().enumerate().min_by(|a, b| (a.1 - v).abs().partial_cmp(&(b.1 - v).abs()).unwrap()).unwrap();
+            let (i, _) = SPEEDS
+                .iter()
+                .enumerate()
+                .min_by(|a, b| (a.1 - v).abs().partial_cmp(&(b.1 - v).abs()).unwrap())
+                .unwrap();
             self.speed_idx = i;
         }
         if let Some(t) = &cfg.theme {
@@ -347,7 +404,11 @@ impl Ui {
     }
 
     fn remap(&self, k: Key) -> Key {
-        self.keymap.iter().find(|(a, _)| *a == k).map(|(_, b)| *b).unwrap_or(k)
+        self.keymap
+            .iter()
+            .find(|(a, _)| *a == k)
+            .map(|(_, b)| *b)
+            .unwrap_or(k)
     }
 
     /// The storyteller: what is worth watching right now.
@@ -357,31 +418,88 @@ impl Ui {
         for x in w.wars.iter().filter(|x| x.alive()) {
             let (a, d) = (x.attacker, x.defender);
             let size = (w.polities[a].cells + w.polities[d].cells) as f32;
-            let lean = if x.score > 0.3 { format!("{} gaining", w.polities[a].short) } else if x.score < -0.3 { format!("{} holding", w.polities[d].short) } else { "in the balance".to_string() };
-            out.push((size * 0.02 + x.battles as f32 * 0.5, format!("{}: {} v {}, {} years, {}", x.name, w.polities[a].short, w.polities[d].short, w.year - x.started, lean), Ref::War(x.id)));
+            let lean = if x.score > 0.3 {
+                format!("{} gaining", w.polities[a].short)
+            } else if x.score < -0.3 {
+                format!("{} holding", w.polities[d].short)
+            } else {
+                "in the balance".to_string()
+            };
+            out.push((
+                size * 0.02 + x.battles as f32 * 0.5,
+                format!(
+                    "{}: {} v {}, {} years, {}",
+                    x.name,
+                    w.polities[a].short,
+                    w.polities[d].short,
+                    w.year - x.started,
+                    lean
+                ),
+                Ref::War(x.id),
+            ));
         }
         for p in w.living_polities() {
             let pol = &w.polities[p];
             if pol.cells > 40 && pol.stability < 0.25 {
-                out.push((pol.cells as f32 * 0.05 + (0.25 - pol.stability) * 40.0, format!("{} teeters: stability {:.0}%, {} at war", pol.name, pol.stability * 100.0, if pol.at_war() { "and" } else { "not" }), Ref::Polity(p)));
+                out.push((
+                    pol.cells as f32 * 0.05 + (0.25 - pol.stability) * 40.0,
+                    format!(
+                        "{} teeters: stability {:.0}%, {} at war",
+                        pol.name,
+                        pol.stability * 100.0,
+                        if pol.at_war() { "and" } else { "not" }
+                    ),
+                    Ref::Polity(p),
+                ));
             }
             if pol.kind == crate::sim::PolityKind::Empire && w.year - pol.last_kind_change < 60 {
-                out.push((6.0 + pol.cells as f32 * 0.01, format!("A new empire: {} under {}", pol.name, w.ruler_short(p)), Ref::Polity(p)));
+                out.push((
+                    6.0 + pol.cells as f32 * 0.01,
+                    format!("A new empire: {} under {}", pol.name, w.ruler_short(p)),
+                    Ref::Polity(p),
+                ));
             }
             if pol.reign_gained > 40 {
-                out.push((pol.reign_gained as f32 * 0.1, format!("{} has won {} lands for {}", w.ruler_short(p), pol.reign_gained, pol.short), Ref::Polity(p)));
+                out.push((
+                    pol.reign_gained as f32 * 0.1,
+                    format!(
+                        "{} has won {} lands for {}",
+                        w.ruler_short(p),
+                        pol.reign_gained,
+                        pol.short
+                    ),
+                    Ref::Polity(p),
+                ));
             }
         }
         for pl in &w.plagues {
-            let names: Vec<&str> = pl.polities.iter().filter(|&&p| w.polities[p].alive()).map(|&p| w.polities[p].short.as_str()).take(3).collect();
+            let names: Vec<&str> = pl
+                .polities
+                .iter()
+                .filter(|&&p| w.polities[p].alive())
+                .map(|&p| w.polities[p].short.as_str())
+                .take(3)
+                .collect();
             if let Some(&p) = pl.polities.first() {
-                out.push((5.0 + pl.deaths as f32 * 0.01, format!("{} ravages {}", pl.name, names.join(", ")), Ref::Polity(p)));
+                out.push((
+                    5.0 + pl.deaths as f32 * 0.01,
+                    format!("{} ravages {}", pl.name, names.join(", ")),
+                    Ref::Polity(p),
+                ));
             }
         }
         for pr in w.prophecies.iter().filter(|pr| pr.outcome.is_none()) {
             let left = pr.deadline - w.year;
             if left < 30 {
-                out.push((4.0 + (30 - left) as f32 * 0.1, format!("{} years left for the prophecy that {}", left.max(0), pr.what), Ref::Person(pr.seer)));
+                out.push((
+                    4.0 + (30 - left) as f32 * 0.1,
+                    format!(
+                        "{} years left for the prophecy that {}",
+                        left.max(0),
+                        pr.what
+                    ),
+                    Ref::Person(pr.seer),
+                ));
             }
         }
         out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
@@ -393,7 +511,13 @@ impl Ui {
         let sw = self.screen.w;
         let sh = self.screen.h;
         let sidebar = if sw >= 100 { 36 } else { 0 };
-        let log_h = if sh >= 34 { 8 } else if sh >= 24 { 5 } else { 3 };
+        let log_h = if sh >= 34 {
+            8
+        } else if sh >= 24 {
+            5
+        } else {
+            3
+        };
         let mw = sw.saturating_sub(sidebar);
         let mh = sh.saturating_sub(log_h + 1);
         (0, 0, mw.max(1), mh.max(1))
@@ -409,8 +533,16 @@ impl Ui {
         let (vw, vh) = self.view_dims();
         let tw = self.world.terrain.w;
         let th = self.world.terrain.h;
-        let ox = self.cursor.0.saturating_sub(vw / 2).min(tw.saturating_sub(vw));
-        let oy = self.cursor.1.saturating_sub(vh / 2).min(th.saturating_sub(vh));
+        let ox = self
+            .cursor
+            .0
+            .saturating_sub(vw / 2)
+            .min(tw.saturating_sub(vw));
+        let oy = self
+            .cursor
+            .1
+            .saturating_sub(vh / 2)
+            .min(th.saturating_sub(vh));
         self.view = (ox, oy);
     }
 
@@ -441,7 +573,11 @@ impl Ui {
     fn set_zoom(&mut self, z: usize) {
         self.zoom = z.clamp(1, 4);
         self.center_view();
-        self.say(&format!("zoom: {} cell{} per character", self.zoom, if self.zoom == 1 { "" } else { "s" }));
+        self.say(&format!(
+            "zoom: {} cell{} per character",
+            self.zoom,
+            if self.zoom == 1 { "" } else { "s" }
+        ));
     }
 
     pub fn say(&mut self, s: &str) {
@@ -515,7 +651,10 @@ impl Ui {
                         }
                     }
                     self.follow_events();
-                    if self.autosave > 0 && self.save_path.is_some() && self.world.year - self.last_autosave >= self.autosave {
+                    if self.autosave > 0
+                        && self.save_path.is_some()
+                        && self.world.year - self.last_autosave >= self.autosave
+                    {
                         let _ = self.save(None);
                     }
                 }
@@ -563,7 +702,11 @@ impl Ui {
     }
 
     fn handle_key(&mut self, k: Key) -> bool {
-        let k = if self.prompt == Prompt::None { self.remap(k) } else { k };
+        let k = if self.prompt == Prompt::None {
+            self.remap(k)
+        } else {
+            k
+        };
         if let Key::Mouse(m) = k {
             self.handle_mouse(m);
             return true;
@@ -593,8 +736,12 @@ impl Ui {
                     self.view.1 = self.cursor.1;
                     self.clamp_view();
                 }
-                ('z', Key::Char('i')) | ('z', Key::Char('+')) => self.set_zoom(self.zoom.saturating_sub(n.max(1))),
-                ('z', Key::Char('o')) | ('z', Key::Char('-')) => self.set_zoom(self.zoom + n.max(1)),
+                ('z', Key::Char('i')) | ('z', Key::Char('+')) => {
+                    self.set_zoom(self.zoom.saturating_sub(n.max(1)))
+                }
+                ('z', Key::Char('o')) | ('z', Key::Char('-')) => {
+                    self.set_zoom(self.zoom + n.max(1))
+                }
                 _ => {}
             }
             return true;
@@ -664,19 +811,33 @@ impl Ui {
                 self.count = None;
                 return true;
             }
-            Key::Char('n') | Key::Char('N') if !matches!(self.mode, Mode::List | Mode::Chronicle) => {
+            Key::Char('n') | Key::Char('N')
+                if !matches!(self.mode, Mode::List | Mode::Chronicle) =>
+            {
                 self.count = None;
-                self.search_step(if k == Key::Char('n') { n as i32 } else { -(n as i32) });
+                self.search_step(if k == Key::Char('n') {
+                    n as i32
+                } else {
+                    -(n as i32)
+                });
                 return true;
             }
             Key::Char(']') | Key::Char('[') if self.mode != Mode::List => {
                 self.count = None;
-                self.cycle_realm(if k == Key::Char(']') { n as i32 } else { -(n as i32) });
+                self.cycle_realm(if k == Key::Char(']') {
+                    n as i32
+                } else {
+                    -(n as i32)
+                });
                 return true;
             }
             Key::Char('}') | Key::Char('{') if self.mode != Mode::List => {
                 self.count = None;
-                self.cycle_city(if k == Key::Char('}') { n as i32 } else { -(n as i32) });
+                self.cycle_city(if k == Key::Char('}') {
+                    n as i32
+                } else {
+                    -(n as i32)
+                });
                 return true;
             }
             Key::Char('G') => {
@@ -800,7 +961,11 @@ impl Ui {
             }
             Key::Char('f') | Key::Char('F') => {
                 self.follow = !self.follow;
-                let m = if self.follow { "following major events" } else { "cursor is free" };
+                let m = if self.follow {
+                    "following major events"
+                } else {
+                    "cursor is free"
+                };
                 self.say(m);
             }
             Key::Char('v') => {
@@ -820,7 +985,11 @@ impl Ui {
                 }
             }
             Key::Char('q') => {
-                if self.quit_armed.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false) {
+                if self
+                    .quit_armed
+                    .map(|t| t.elapsed() < Duration::from_secs(3))
+                    .unwrap_or(false)
+                {
                     return false;
                 }
                 self.quit_armed = Some(Instant::now());
@@ -873,7 +1042,12 @@ impl Ui {
         if let Some(c) = cs.culture {
             return Some(Ref::Culture(c));
         }
-        if let Some(f) = self.world.terrain.river_at(i).or_else(|| self.world.terrain.feature_at(i)) {
+        if let Some(f) = self
+            .world
+            .terrain
+            .river_at(i)
+            .or_else(|| self.world.terrain.feature_at(i))
+        {
             return Some(Ref::Feature(f));
         }
         None
@@ -885,7 +1059,9 @@ impl Ui {
             return rows;
         }
         let f = self.list_filter.to_lowercase();
-        rows.into_iter().filter(|(s, _)| s.to_lowercase().contains(&f)).collect()
+        rows.into_iter()
+            .filter(|(s, _)| s.to_lowercase().contains(&f))
+            .collect()
     }
 
     fn key_list(&mut self, k: Key) {
@@ -908,14 +1084,20 @@ impl Ui {
                 self.list_filter.clear();
             }
             Key::BackTab | Key::Left | Key::Char('h') | Key::Char('[') => {
-                self.list_tab = (self.list_tab + detail::LIST_TABS.len() * n - n % detail::LIST_TABS.len()) % detail::LIST_TABS.len();
+                self.list_tab = (self.list_tab + detail::LIST_TABS.len() * n
+                    - n % detail::LIST_TABS.len())
+                    % detail::LIST_TABS.len();
                 self.list_idx = 0;
                 self.list_scroll = 0;
                 self.list_filter.clear();
             }
-            Key::Up | Key::Char('k') | Key::Char('N') => self.list_idx = self.list_idx.saturating_sub(n),
+            Key::Up | Key::Char('k') | Key::Char('N') => {
+                self.list_idx = self.list_idx.saturating_sub(n)
+            }
             Key::Down | Key::Char('j') | Key::Char('n') => self.list_idx += n,
-            Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => self.list_idx = self.list_idx.saturating_sub(page * n),
+            Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => {
+                self.list_idx = self.list_idx.saturating_sub(page * n)
+            }
             Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => self.list_idx += page * n,
             Key::Ctrl('u') => self.list_idx = self.list_idx.saturating_sub(page / 2 * n),
             Key::Ctrl('d') => self.list_idx += page / 2 * n,
@@ -972,7 +1154,9 @@ impl Ui {
             }
             Key::Up | Key::Char('k') => self.detail_scroll = self.detail_scroll.saturating_sub(n),
             Key::Down | Key::Char('j') => self.detail_scroll += n,
-            Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => self.detail_scroll = self.detail_scroll.saturating_sub(page * n),
+            Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(page * n)
+            }
             Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => self.detail_scroll += page * n,
             Key::Ctrl('u') => self.detail_scroll = self.detail_scroll.saturating_sub(page / 2 * n),
             Key::Ctrl('d') => self.detail_scroll += page / 2 * n,
@@ -1016,7 +1200,9 @@ impl Ui {
             Key::Up | Key::Char('k') => self.chron_scroll += n,
             Key::Down | Key::Char('j') => self.chron_scroll = self.chron_scroll.saturating_sub(n),
             Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => self.chron_scroll += page * n,
-            Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => self.chron_scroll = self.chron_scroll.saturating_sub(page * n),
+            Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => {
+                self.chron_scroll = self.chron_scroll.saturating_sub(page * n)
+            }
             Key::Ctrl('u') => self.chron_scroll += page / 2 * n,
             Key::Ctrl('d') => self.chron_scroll = self.chron_scroll.saturating_sub(page / 2 * n),
             Key::End => self.chron_scroll = 0,
@@ -1037,7 +1223,9 @@ impl Ui {
         };
         match k {
             Key::Esc | Key::Char('x') | Key::Char('q') => self.mode = self.prev_mode,
-            Key::Char(c) if ('1'..='6').contains(&c) => self.choose_fate(p, c as usize - '1' as usize),
+            Key::Char(c) if ('1'..='6').contains(&c) => {
+                self.choose_fate(p, c as usize - '1' as usize)
+            }
             _ => {}
         }
     }
@@ -1127,7 +1315,12 @@ impl Ui {
                     if self.mode == Mode::Detail {
                         self.open_detail(r);
                     }
-                    self.say(&format!("{} of {} matches: {}", 1, self.search_results.len(), detail::entity_name(&self.world, r)));
+                    self.say(&format!(
+                        "{} of {} matches: {}",
+                        1,
+                        self.search_results.len(),
+                        detail::entity_name(&self.world, r)
+                    ));
                 }
             }
         }
@@ -1145,7 +1338,12 @@ impl Ui {
         if self.mode == Mode::Detail {
             self.open_detail(r);
         }
-        self.say(&format!("{} of {} matches: {}", self.search_idx + 1, len, detail::entity_name(&self.world, r)));
+        self.say(&format!(
+            "{} of {} matches: {}",
+            self.search_idx + 1,
+            len,
+            detail::entity_name(&self.world, r)
+        ));
     }
 
     /// Rank every named thing in the world against a query.
@@ -1164,7 +1362,10 @@ impl Ui {
                     100
                 } else if n.starts_with(&q) {
                     60
-                } else if n.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(&q)) {
+                } else if n
+                    .split(|c: char| !c.is_alphanumeric())
+                    .any(|word| word.starts_with(&q))
+                {
                     40
                 } else if n.contains(&q) {
                     20
@@ -1184,7 +1385,12 @@ impl Ui {
             consider(&[&c.name], c.destroyed.is_none(), 4, Ref::City(c.id));
         }
         for c in &w.cultures {
-            consider(&[&c.name, &c.plural, &c.adj], c.extinct.is_none(), 3, Ref::Culture(c.id));
+            consider(
+                &[&c.name, &c.plural, &c.adj],
+                c.extinct.is_none(),
+                3,
+                Ref::Culture(c.id),
+            );
         }
         for s in &w.schools {
             consider(&[&s.name, &s.short], s.alive(), 3, Ref::School(s.id));
@@ -1201,7 +1407,12 @@ impl Ui {
             }
         }
         for a in &w.artifacts {
-            consider(&[&a.name], !matches!(a.holder, crate::sim::Holder::Lost), 3, Ref::Artifact(a.id));
+            consider(
+                &[&a.name],
+                !matches!(a.holder, crate::sim::Holder::Lost),
+                3,
+                Ref::Artifact(a.id),
+            );
         }
         hits.sort_by(|a, b| b.0.cmp(&a.0));
         hits.truncate(60);
@@ -1221,22 +1432,40 @@ impl Ui {
         let len = ps.len() as i32;
         let next = match cur {
             Some(i) => (i + delta).rem_euclid(len),
-            None => if delta > 0 { 0 } else { len - 1 },
+            None => {
+                if delta > 0 {
+                    0
+                } else {
+                    len - 1
+                }
+            }
         };
         let p = ps[next as usize];
         self.goto_ref(Ref::Polity(p));
         if self.mode == Mode::Detail {
             self.open_detail(Ref::Polity(p));
         }
-        self.say(&format!("realm {} of {}: {}", next + 1, len, self.world.polities[p].name));
+        self.say(&format!(
+            "realm {} of {}: {}",
+            next + 1,
+            len,
+            self.world.polities[p].name
+        ));
     }
 
     fn cycle_city(&mut self, delta: i32) {
-        let mut cs: Vec<usize> = (0..self.world.cities.len()).filter(|&c| self.world.cities[c].destroyed.is_none()).collect();
+        let mut cs: Vec<usize> = (0..self.world.cities.len())
+            .filter(|&c| self.world.cities[c].destroyed.is_none())
+            .collect();
         if cs.is_empty() {
             return;
         }
-        cs.sort_by(|&a, &b| self.world.cities[b].pop.partial_cmp(&self.world.cities[a].pop).unwrap());
+        cs.sort_by(|&a, &b| {
+            self.world.cities[b]
+                .pop
+                .partial_cmp(&self.world.cities[a].pop)
+                .unwrap()
+        });
         let cur = match self.selected {
             Some(Ref::City(c)) => cs.iter().position(|&x| x == c).map(|i| i as i32),
             _ => None,
@@ -1244,14 +1473,26 @@ impl Ui {
         let len = cs.len() as i32;
         let next = match cur {
             Some(i) => (i + delta).rem_euclid(len),
-            None => if delta > 0 { 0 } else { len - 1 },
+            None => {
+                if delta > 0 {
+                    0
+                } else {
+                    len - 1
+                }
+            }
         };
         let c = cs[next as usize];
         self.goto_ref(Ref::City(c));
         if self.mode == Mode::Detail {
             self.open_detail(Ref::City(c));
         }
-        self.say(&format!("city {} of {}: {} ({:.0}k)", next + 1, len, self.world.cities[c].name, self.world.cities[c].pop));
+        self.say(&format!(
+            "city {} of {}: {} ({:.0}k)",
+            next + 1,
+            len,
+            self.world.cities[c].name,
+            self.world.cities[c].pop
+        ));
     }
 
     fn default_save_dir() -> std::path::PathBuf {
@@ -1266,7 +1507,9 @@ impl Ui {
 
     fn resolve_save_path(&self, arg: &str) -> std::path::PathBuf {
         if arg.is_empty() {
-            return self.save_path.clone().unwrap_or_else(|| Self::default_save_dir().join(format!("world-{}.rfe", self.world.seed)));
+            return self.save_path.clone().unwrap_or_else(|| {
+                Self::default_save_dir().join(format!("world-{}.rfe", self.world.seed))
+            });
         }
         let p = std::path::PathBuf::from(arg);
         if p.components().count() > 1 || arg.ends_with(".rfe") {
@@ -1311,7 +1554,11 @@ impl Ui {
                 self.mode = Mode::Map;
                 self.paused = true;
                 self.jump_to_selected();
-                self.say(&format!("loaded {} · year {} · paused", path.display(), self.world.year));
+                self.say(&format!(
+                    "loaded {} · year {} · paused",
+                    path.display(),
+                    self.world.year
+                ));
             }
             Err(e) => self.say(&e),
         }
@@ -1330,7 +1577,10 @@ impl Ui {
                 return false;
             }
             "wq" | "x" => {
-                if self.save(if arg.is_empty() { None } else { Some(&arg) }).is_ok() {
+                if self
+                    .save(if arg.is_empty() { None } else { Some(&arg) })
+                    .is_ok()
+                {
                     return false;
                 }
             }
@@ -1350,11 +1600,21 @@ impl Ui {
                     self.autosave = n.max(0);
                     self.say(if n > 0 { "autosave on" } else { "autosave off" });
                 }
-                Err(_) => self.say(&format!("autosave every {} years (0 = off); usage: :autosave N", self.autosave)),
+                Err(_) => self.say(&format!(
+                    "autosave every {} years (0 = off); usage: :autosave N",
+                    self.autosave
+                )),
             },
             "saves" | "ls" => {
                 let dir = Self::default_save_dir();
-                let mut names: Vec<String> = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".rfe")).collect()).unwrap_or_default();
+                let mut names: Vec<String> = std::fs::read_dir(&dir)
+                    .map(|rd| {
+                        rd.filter_map(|e| e.ok())
+                            .map(|e| e.file_name().to_string_lossy().into_owned())
+                            .filter(|n| n.ends_with(".rfe"))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 names.sort();
                 if names.is_empty() {
                     self.say(&format!("no saves in {}", dir.display()));
@@ -1369,7 +1629,11 @@ impl Ui {
             "run" | "go" | "resume" if arg.is_empty() => self.paused = false,
             "speed" | "s" => match arg.parse::<f64>() {
                 Ok(v) => {
-                    let (i, _) = SPEEDS.iter().enumerate().min_by(|a, b| (a.1 - v).abs().partial_cmp(&(b.1 - v).abs()).unwrap()).unwrap();
+                    let (i, _) = SPEEDS
+                        .iter()
+                        .enumerate()
+                        .min_by(|a, b| (a.1 - v).abs().partial_cmp(&(b.1 - v).abs()).unwrap())
+                        .unwrap();
                     self.speed_idx = i;
                     self.paused = false;
                     self.say(&format!("speed: {} years/sec", SPEEDS[i]));
@@ -1406,8 +1670,17 @@ impl Ui {
                 }
             }
             "new" | "world" => {
-                let seed = arg.parse::<u64>().unwrap_or_else(|_| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(1));
-                let (w, h, d) = (self.world.terrain.w, self.world.terrain.h, self.world.detail);
+                let seed = arg.parse::<u64>().unwrap_or_else(|_| {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(1)
+                });
+                let (w, h, d) = (
+                    self.world.terrain.w,
+                    self.world.terrain.h,
+                    self.world.detail,
+                );
                 self.world = World::new(seed, w, h, d);
                 self.save_path = None;
                 self.selected = None;
@@ -1419,14 +1692,21 @@ impl Ui {
                 self.goto_cell(home);
                 self.say(&format!("a new world, seed {}", seed));
             }
-            "seed" => self.say(&format!("seed {} · {}x{} · year {}", self.world.seed, self.world.terrain.w, self.world.terrain.h, self.world.year)),
+            "seed" => self.say(&format!(
+                "seed {} · {}x{} · year {}",
+                self.world.seed, self.world.terrain.w, self.world.terrain.h, self.world.year
+            )),
             "follow" => {
                 self.follow = match arg.to_lowercase().as_str() {
                     "on" | "1" | "yes" => true,
                     "off" | "0" | "no" => false,
                     _ => !self.follow,
                 };
-                self.say(if self.follow { "following major events" } else { "cursor is free" });
+                self.say(if self.follow {
+                    "following major events"
+                } else {
+                    "cursor is free"
+                });
             }
             "log" => match arg.parse::<u8>() {
                 Ok(v) if v <= 3 => self.log_min = v,
@@ -1452,13 +1732,11 @@ impl Ui {
                 self.follow_events();
                 self.say(&format!("advanced {} years", n));
             }
-            "fate" => {
-                match (self.selected, arg.parse::<usize>()) {
-                    (Some(Ref::Polity(p)), Ok(c)) if (1..=6).contains(&c) => self.choose_fate(p, c - 1),
-                    (Some(Ref::Polity(_)), _) => self.open_fate(),
-                    _ => self.say("select a realm first"),
-                }
-            }
+            "fate" => match (self.selected, arg.parse::<usize>()) {
+                (Some(Ref::Polity(p)), Ok(c)) if (1..=6).contains(&c) => self.choose_fate(p, c - 1),
+                (Some(Ref::Polity(_)), _) => self.open_fate(),
+                _ => self.say("select a realm first"),
+            },
             "help" | "h" | "?" => {
                 self.prev_mode = self.mode;
                 self.mode = Mode::Help;
@@ -1466,7 +1744,11 @@ impl Ui {
             "mouse" => {
                 self.mouse = !self.mouse;
                 term::set_mouse(self.mouse);
-                self.say(if self.mouse { "mouse captured" } else { "mouse released to the terminal" });
+                self.say(if self.mouse {
+                    "mouse captured"
+                } else {
+                    "mouse released to the terminal"
+                });
             }
             "ascii" => {
                 self.ascii = !self.ascii;
@@ -1475,7 +1757,9 @@ impl Ui {
             "list" | "lists" => {
                 self.prev_mode = self.mode;
                 self.mode = Mode::List;
-                if let Some(i) = detail::LIST_TABS.iter().position(|t| t.to_lowercase().starts_with(&arg.to_lowercase()) && !arg.is_empty()) {
+                if let Some(i) = detail::LIST_TABS.iter().position(|t| {
+                    t.to_lowercase().starts_with(&arg.to_lowercase()) && !arg.is_empty()
+                }) {
                     self.list_tab = i;
                     self.list_idx = 0;
                 }
@@ -1489,11 +1773,18 @@ impl Ui {
             "map" if arg.is_empty() => self.mode = Mode::Map,
             "map" | "noremap" => {
                 let mut it = arg.split_whitespace();
-                match (it.next().and_then(crate::config::parse_key), it.next().and_then(crate::config::parse_key)) {
+                match (
+                    it.next().and_then(crate::config::parse_key),
+                    it.next().and_then(crate::config::parse_key),
+                ) {
                     (Some(a), Some(b)) => {
                         self.keymap.retain(|(x, _)| *x != a);
                         self.keymap.push((a, b));
-                        self.say(&format!("mapped {} to {}", crate::config::key_name(a), crate::config::key_name(b)));
+                        self.say(&format!(
+                            "mapped {} to {}",
+                            crate::config::key_name(a),
+                            crate::config::key_name(b)
+                        ));
                     }
                     _ => self.say("usage: :map <from> <to>   e.g. :map w k   :map <S-Up> K"),
                 }
@@ -1509,7 +1800,17 @@ impl Ui {
                 if self.keymap.is_empty() {
                     self.say("no key maps");
                 } else {
-                    let list: Vec<String> = self.keymap.iter().map(|(a, b)| format!("{}→{}", crate::config::key_name(*a), crate::config::key_name(*b))).collect();
+                    let list: Vec<String> = self
+                        .keymap
+                        .iter()
+                        .map(|(a, b)| {
+                            format!(
+                                "{}→{}",
+                                crate::config::key_name(*a),
+                                crate::config::key_name(*b)
+                            )
+                        })
+                        .collect();
                     self.say(&list.join("  "));
                 }
             }
@@ -1531,8 +1832,15 @@ impl Ui {
                 }
             }
             "theme" => {
-                self.theme = if arg.is_empty() { self.theme.next() } else { Theme::from_name(&arg).unwrap_or(self.theme) };
-                self.say(&format!("theme: {} (default phosphor amber paper dusk)", self.theme.name()));
+                self.theme = if arg.is_empty() {
+                    self.theme.next()
+                } else {
+                    Theme::from_name(&arg).unwrap_or(self.theme)
+                };
+                self.say(&format!(
+                    "theme: {} (default phosphor amber paper dusk)",
+                    self.theme.name()
+                ));
             }
             "zoom" => match arg.parse::<usize>() {
                 Ok(z) => self.set_zoom(z),
@@ -1632,17 +1940,28 @@ impl Ui {
                                     self.selected = self.entity_at_cursor();
                                 }
                             }
-                        } else if let Some(&(_, p)) = self.power_rows.iter().find(|&&(y, _)| y == m.y).filter(|_| m.x >= mw) {
+                        } else if let Some(&(_, p)) = self
+                            .power_rows
+                            .iter()
+                            .find(|&&(y, _)| y == m.y)
+                            .filter(|_| m.x >= mw)
+                        {
                             self.goto_ref(Ref::Polity(p));
                             if double || button == 2 {
                                 self.open_detail(Ref::Polity(p));
                             }
-                        } else if let Some(&(_, r)) = self.story_rows.iter().find(|&&(y, _)| y == m.y).filter(|_| m.x >= mw) {
+                        } else if let Some(&(_, r)) = self
+                            .story_rows
+                            .iter()
+                            .find(|&&(y, _)| y == m.y)
+                            .filter(|_| m.x >= mw)
+                        {
                             self.goto_ref(r);
                             if double || button == 2 {
                                 self.open_detail(r);
                             }
-                        } else if let Some(&(_, e)) = self.log_rows.iter().find(|&&(y, _)| y == m.y) {
+                        } else if let Some(&(_, e)) = self.log_rows.iter().find(|&&(y, _)| y == m.y)
+                        {
                             self.jump_to_event(e);
                         }
                     }
@@ -1777,8 +2096,13 @@ impl Ui {
         self.screen.fill(0, y0, sw, h, ' ', Rgb(200, 200, 200), bg);
         self.screen.hline(0, y0, sw, Rgb(60, 60, 70), bg);
         let title = format!(" Chronicle (importance ≥{}) ", self.log_min);
-        let title = if self.ascii { title.replace('≥', ">=") } else { title };
-        self.screen.text_attr(2, y0, &title, Rgb(230, 200, 120), bg, BOLD);
+        let title = if self.ascii {
+            title.replace('≥', ">=")
+        } else {
+            title
+        };
+        self.screen
+            .text_attr(2, y0, &title, Rgb(230, 200, 120), bg, BOLD);
         let avail = h - 1;
         let width = sw.saturating_sub(10);
         let mut lines: Vec<(String, Rgb, u8, usize)> = Vec::new();
@@ -1790,7 +2114,11 @@ impl Ui {
             let (color, attr) = event_style(e.kind, e.importance);
             let wrapped = term::wrap(&e.text, width);
             for (k, l) in wrapped.iter().enumerate().rev() {
-                let prefix = if k == 0 { format!("{:>5}  ", e.year) } else { "       ".to_string() };
+                let prefix = if k == 0 {
+                    format!("{:>5}  ", e.year)
+                } else {
+                    "       ".to_string()
+                };
                 lines.push((format!("{}{}", prefix, l), color, attr, idx));
             }
             if lines.len() >= avail {
@@ -1818,8 +2146,19 @@ impl Ui {
         self.screen.fill(0, y, sw, 1, ' ', fg, bg);
         // A prompt takes over the whole line, as in vim.
         if self.prompt != Prompt::None {
-            let lead = if self.prompt == Prompt::Command { ":" } else { "/" };
-            let x = self.screen.text_attr(1, y, &format!("{}{}", lead, self.prompt_text), Rgb(255, 255, 255), bg, BOLD);
+            let lead = if self.prompt == Prompt::Command {
+                ":"
+            } else {
+                "/"
+            };
+            let x = self.screen.text_attr(
+                1,
+                y,
+                &format!("{}{}", lead, self.prompt_text),
+                Rgb(255, 255, 255),
+                bg,
+                BOLD,
+            );
             self.screen.put_attr(x, y, ' ', fg, bg, REVERSE);
             let hint = match (self.prompt, self.mode) {
                 (Prompt::Search, Mode::List) | (Prompt::Search, Mode::Chronicle) => "filtering as you type · Enter keep · Esc clear".to_string(),
@@ -1840,11 +2179,25 @@ impl Ui {
             }
             return;
         }
-        let state = if self.paused { "PAUSED".to_string() } else { format!("{}y/s", SPEEDS[self.speed_idx]) };
-        let left = format!(" {} | {} | detail:{} | seed {} | {:.1}ms/y {}fps", state, self.layer.name(), self.world.detail.name(), self.world.seed, self.world.ticks_ms, self.fps);
+        let state = if self.paused {
+            "PAUSED".to_string()
+        } else {
+            format!("{}y/s", SPEEDS[self.speed_idx])
+        };
+        let left = format!(
+            " {} | {} | detail:{} | seed {} | {:.1}ms/y {}fps",
+            state,
+            self.layer.name(),
+            self.world.detail.name(),
+            self.world.seed,
+            self.world.ticks_ms,
+            self.fps
+        );
         let mut x = self.screen.text_attr(0, y, &left, key, bg, BOLD);
         if Instant::now() < self.msg_until {
-            x = self.screen.text(x + 2, y, &self.msg, Rgb(160, 255, 160), bg);
+            x = self
+                .screen
+                .text(x + 2, y, &self.msg, Rgb(160, 255, 160), bg);
         }
         // showcmd: pending count and prefix, like vim.
         let mut showcmd = String::new();
@@ -1861,7 +2214,9 @@ impl Ui {
             showcmd = format!("/{}", self.chron_filter);
         }
         if !showcmd.is_empty() {
-            x = self.screen.text_attr(x + 2, y, &showcmd, Rgb(255, 255, 255), bg, BOLD);
+            x = self
+                .screen
+                .text_attr(x + 2, y, &showcmd, Rgb(255, 255, 255), bg, BOLD);
         }
         let hints = match self.mode {
             Mode::Map => "Space pause  +/- speed  Tab layer  Enter open  ] [ realms  / search  : cmd  e lists  c chronicle  x fate  ? help",
@@ -1893,15 +2248,27 @@ impl Ui {
         let mut x = 1;
         for (i, t) in detail::LIST_TABS.iter().enumerate() {
             let sel = i == self.list_tab;
-            let (f, b, a) = if sel { (Rgb(10, 10, 10), accent, BOLD) } else { (fg, Rgb(30, 30, 40), 0) };
+            let (f, b, a) = if sel {
+                (Rgb(10, 10, 10), accent, BOLD)
+            } else {
+                (fg, Rgb(30, 30, 40), 0)
+            };
             x = self.screen.text_attr(x, 0, &format!(" {} ", t), f, b, a) + 1;
         }
         let rows = self.list_rows();
         let header = detail::list_header(self.list_tab);
-        self.screen.text_attr(1, 1, header, Rgb(150, 150, 160), bg, BOLD);
+        self.screen
+            .text_attr(1, 1, header, Rgb(150, 150, 160), bg, BOLD);
         if !self.list_filter.is_empty() {
             let f = format!(" {} rows match \"{}\" ", rows.len(), self.list_filter);
-            self.screen.text_attr(sw.saturating_sub(f.chars().count() + 1), 0, &f, Rgb(255, 255, 255), Rgb(60, 60, 80), 0);
+            self.screen.text_attr(
+                sw.saturating_sub(f.chars().count() + 1),
+                0,
+                &f,
+                Rgb(255, 255, 255),
+                Rgb(60, 60, 80),
+                0,
+            );
         }
         self.list_y0 = 2;
         let avail = sh.saturating_sub(3);
@@ -1916,15 +2283,30 @@ impl Ui {
             let y = 2 + k - self.list_scroll;
             let sel = k == self.list_idx;
             let color = detail::ref_color(&self.world, *r);
-            let (f, b, a) = if sel { (Rgb(255, 255, 255), Rgb(50, 50, 70), BOLD) } else { (fg, bg, 0) };
+            let (f, b, a) = if sel {
+                (Rgb(255, 255, 255), Rgb(50, 50, 70), BOLD)
+            } else {
+                (fg, bg, 0)
+            };
             if sel {
                 self.screen.fill(0, y, sw, 1, ' ', f, b);
             }
-            self.screen.put(1, y, if self.ascii { '#' } else { '■' }, color, b);
+            self.screen
+                .put(1, y, if self.ascii { '#' } else { '■' }, color, b);
             self.screen.text_clip(3, y, row, sw - 4, f, b, a);
         }
         if rows.is_empty() {
-            self.screen.text(2, 3, if self.list_filter.is_empty() { "nothing yet" } else { "no rows match" }, Rgb(120, 120, 130), bg);
+            self.screen.text(
+                2,
+                3,
+                if self.list_filter.is_empty() {
+                    "nothing yet"
+                } else {
+                    "no rows match"
+                },
+                Rgb(120, 120, 130),
+                bg,
+            );
         }
     }
 
@@ -2040,7 +2422,11 @@ impl Ui {
                     Layer::Political => {
                         if let Some(p) = cs.owner {
                             let pc = self.world.polities[p].color;
-                            let border = self.world.terrain.neighbors4(i).any(|nb| self.world.cells[nb].owner != Some(p));
+                            let border = self
+                                .world
+                                .terrain
+                                .neighbors4(i)
+                                .any(|nb| self.world.cells[nb].owner != Some(p));
                             let mut k = if border { 0.8 } else { 0.42 };
                             if let Some(sp) = sel_polity {
                                 if sp == p {
@@ -2080,7 +2466,11 @@ impl Ui {
                         if let Some(p) = cs.owner {
                             if let Some(s) = self.world.polities[p].school {
                                 let sc = self.world.schools[s].color;
-                                let infl = self.world.schools[s].influence.get(&p).copied().unwrap_or(0.0);
+                                let infl = self.world.schools[s]
+                                    .influence
+                                    .get(&p)
+                                    .copied()
+                                    .unwrap_or(0.0);
                                 let mut k = 0.15 + infl * 0.35;
                                 if sel_school == Some(s) {
                                     k += 0.3;
@@ -2093,7 +2483,9 @@ impl Ui {
                     Layer::Population => {
                         if !water {
                             let p = (cs.pop / max_pop).clamp(0.0, 1.0);
-                            let heat = Rgb(40, 40, 50).mix(Rgb(255, 210, 60), p.sqrt()).mix(Rgb(255, 60, 40), (p - 0.6).max(0.0) * 2.0);
+                            let heat = Rgb(40, 40, 50)
+                                .mix(Rgb(255, 210, 60), p.sqrt())
+                                .mix(Rgb(255, 60, 40), (p - 0.6).max(0.0) * 2.0);
                             bg = bg.mix(heat, 0.85);
                             fg = bg.scale(1.3);
                         }
@@ -2113,12 +2505,23 @@ impl Ui {
                 if let Some(c) = cs.city {
                     let city = &self.world.cities[c];
                     if city.destroyed.is_none() {
-                        let is_cap = city.polity.map(|p| self.world.polities[p].capital == Some(c)).unwrap_or(false);
+                        let is_cap = city
+                            .polity
+                            .map(|p| self.world.polities[p].capital == Some(c))
+                            .unwrap_or(false);
                         ch = if is_cap { '@' } else { '#' };
-                        fg = if bg.luma() > 0.5 { Rgb(10, 10, 10) } else { Rgb(255, 255, 255) };
+                        fg = if bg.luma() > 0.5 {
+                            Rgb(10, 10, 10)
+                        } else {
+                            Rgb(255, 255, 255)
+                        };
                         attr = BOLD;
                         if self.layer == Layer::Magic {
-                            let is_home = self.world.schools.iter().any(|s| s.alive() && s.home_city == c);
+                            let is_home = self
+                                .world
+                                .schools
+                                .iter()
+                                .any(|s| s.alive() && s.home_city == c);
                             if is_home {
                                 ch = '*';
                                 fg = Rgb(255, 240, 120);
@@ -2135,7 +2538,11 @@ impl Ui {
                 // Event markers.
                 if let Some(imp) = mark {
                     ch = '!';
-                    fg = if imp >= 3 { Rgb(255, 80, 80) } else { Rgb(255, 220, 80) };
+                    fg = if imp >= 3 {
+                        Rgb(255, 80, 80)
+                    } else {
+                        Rgb(255, 220, 80)
+                    };
                     attr = BOLD;
                 }
                 if has_cursor {
@@ -2187,8 +2594,13 @@ impl Ui {
         let tx = width - 3;
         let mut y = 0;
         let w = &self.world;
-        let (era, era_desc) = w.eras.last().map(|e| (e.name.clone(), e.description.clone())).unwrap_or_default();
-        self.screen.text_attr(x, y, &format!("Year {}", w.year), accent, bg, BOLD);
+        let (era, era_desc) = w
+            .eras
+            .last()
+            .map(|e| (e.name.clone(), e.description.clone()))
+            .unwrap_or_default();
+        self.screen
+            .text_attr(x, y, &format!("Year {}", w.year), accent, bg, BOLD);
         y += 1;
         self.screen.text_clip(x, y, &era, tx, dim, bg, 0);
         y += 1;
@@ -2227,7 +2639,8 @@ impl Ui {
                         break;
                     }
                     if k == 0 {
-                        self.screen.put(x, y, if self.ascii { '*' } else { '•' }, color, bg);
+                        self.screen
+                            .put(x, y, if self.ascii { '*' } else { '•' }, color, bg);
                     }
                     self.screen.text_clip(x + 2, y, &l, tx - 2, fg, bg, 0);
                     self.story_rows.push((y, r));
@@ -2254,7 +2667,10 @@ impl Ui {
         if let Some(c) = cs.city {
             let city = &w.cities[c];
             if city.destroyed.is_none() {
-                here.push((format!("{} ({:.0}k)", city.name, city.pop), Rgb(255, 255, 255)));
+                here.push((
+                    format!("{} ({:.0}k)", city.name, city.pop),
+                    Rgb(255, 255, 255),
+                ));
             } else {
                 here.push((format!("ruins of {}", city.name), dim));
             }
@@ -2265,9 +2681,19 @@ impl Ui {
             here.push((w.ruler_short(p), fg));
         }
         if let Some(c) = cs.culture {
-            here.push((format!("{} folk, {:.1}k", w.cultures[c].adj, cs.pop), w.cultures[c].color));
+            here.push((
+                format!("{} folk, {:.1}k", w.cultures[c].adj, cs.pop),
+                w.cultures[c].color,
+            ));
         }
-        here.push((format!("mana {:.0}%  fertility {:.0}%", w.terrain.mana[i] * 100.0, w.terrain.fertility[i] * 100.0), dim));
+        here.push((
+            format!(
+                "mana {:.0}%  fertility {:.0}%",
+                w.terrain.mana[i] * 100.0,
+                w.terrain.fertility[i] * 100.0
+            ),
+            dim,
+        ));
         for (s, c) in here {
             for l in term::wrap(&s, tx) {
                 if y >= mh.saturating_sub(2) {
@@ -2299,7 +2725,8 @@ impl Ui {
         if y + 3 < mh {
             self.screen.hline(x0 + 1, y, width - 1, Rgb(60, 60, 70), bg);
             y += 1;
-            self.screen.text_attr(x, y, "Great powers", accent, bg, BOLD);
+            self.screen
+                .text_attr(x, y, "Great powers", accent, bg, BOLD);
             y += 1;
             let mut ps: Vec<usize> = w.living_polities();
             ps.sort_by_key(|&p| std::cmp::Reverse(w.polities[p].cells));
@@ -2307,10 +2734,19 @@ impl Ui {
             for &p in ps.iter().take(mh.saturating_sub(y + 1)) {
                 let pol = &w.polities[p];
                 self.power_rows.push((y, p));
-                self.screen.put(x, y, if self.ascii { '#' } else { '■' }, pol.color, bg);
+                self.screen
+                    .put(x, y, if self.ascii { '#' } else { '■' }, pol.color, bg);
                 let war = if pol.at_war() { "!" } else { " " };
                 let namew = tx.saturating_sub(9);
-                let name: String = if pol.name.chars().count() > namew { pol.name.chars().take(namew.saturating_sub(1)).chain(std::iter::once('…')).collect() } else { pol.name.clone() };
+                let name: String = if pol.name.chars().count() > namew {
+                    pol.name
+                        .chars()
+                        .take(namew.saturating_sub(1))
+                        .chain(std::iter::once('…'))
+                        .collect()
+                } else {
+                    pol.name.clone()
+                };
                 let s = format!("{} {:<w$} {:>4}", war, name, pol.cells, w = namew);
                 self.screen.text_clip(x + 2, y, &s, tx - 2, fg, bg, 0);
                 y += 1;
@@ -2335,11 +2771,22 @@ impl Ui {
             self.detail_scroll = max_scroll;
         }
         for (k, line) in lines.iter().skip(self.detail_scroll).take(sh).enumerate() {
-            self.screen.text_clip(2, k, &line.text, width, line.fg, bg, line.attr);
+            self.screen
+                .text_clip(2, k, &line.text, width, line.fg, bg, line.attr);
         }
         if lines.len() > sh {
-            let s = format!(" {}/{} ", self.detail_scroll + sh.min(lines.len()), lines.len());
-            self.screen.text(sw.saturating_sub(s.len() + 1), 0, &s, Rgb(120, 120, 130), bg);
+            let s = format!(
+                " {}/{} ",
+                self.detail_scroll + sh.min(lines.len()),
+                lines.len()
+            );
+            self.screen.text(
+                sw.saturating_sub(s.len() + 1),
+                0,
+                &s,
+                Rgb(120, 120, 130),
+                bg,
+            );
         }
     }
 
@@ -2352,12 +2799,24 @@ impl Ui {
         self.chron_rows.clear();
         let filter = self.chron_filter.to_lowercase();
         let title = if filter.is_empty() {
-            format!(" The Chronicle of the World — importance ≥{} ({} entries) ", self.chron_min, self.world.chronicle.len())
+            format!(
+                " The Chronicle of the World — importance ≥{} ({} entries) ",
+                self.chron_min,
+                self.world.chronicle.len()
+            )
         } else {
-            format!(" The Chronicle of the World — importance ≥{} — matching \"{}\" ", self.chron_min, self.chron_filter)
+            format!(
+                " The Chronicle of the World — importance ≥{} — matching \"{}\" ",
+                self.chron_min, self.chron_filter
+            )
         };
-        let title = if self.ascii { title.replace('≥', ">=").replace('—', "-") } else { title };
-        self.screen.text_attr(1, 0, &title, Rgb(230, 200, 120), bg, BOLD);
+        let title = if self.ascii {
+            title.replace('≥', ">=").replace('—', "-")
+        } else {
+            title
+        };
+        self.screen
+            .text_attr(1, 0, &title, Rgb(230, 200, 120), bg, BOLD);
         let width = sw.saturating_sub(10);
         let avail = sh.saturating_sub(1);
         // Build lines from newest, skipping chron_scroll lines from the bottom.
@@ -2374,7 +2833,11 @@ impl Ui {
             let (color, attr) = event_style(e.kind, e.importance);
             let wrapped = term::wrap(&e.text, width);
             for (k, l) in wrapped.iter().enumerate().rev() {
-                let prefix = if k == 0 { format!("{:>5}  ", e.year) } else { "       ".to_string() };
+                let prefix = if k == 0 {
+                    format!("{:>5}  ", e.year)
+                } else {
+                    "       ".to_string()
+                };
                 lines.push((format!("{}{}", prefix, l), color, attr, idx));
             }
             if lines.len() >= need {
@@ -2385,7 +2848,8 @@ impl Ui {
             self.chron_scroll = lines.len().saturating_sub(avail);
         }
         if lines.is_empty() {
-            self.screen.text(2, 2, "nothing matches", Rgb(120, 120, 130), bg);
+            self.screen
+                .text(2, 2, "nothing matches", Rgb(120, 120, 130), bg);
             return;
         }
         let mut y = sh - 1;
@@ -2406,7 +2870,11 @@ impl Ui {
         let fg = Rgb(200, 200, 205);
         self.screen.fill(0, 0, sw, sh, ' ', fg, bg);
         for (k, l) in detail::HELP.iter().enumerate().take(sh) {
-            let (c, a) = if l.starts_with("  ") || l.is_empty() { (fg, 0) } else { (Rgb(230, 200, 120), BOLD) };
+            let (c, a) = if l.starts_with("  ") || l.is_empty() {
+                (fg, 0)
+            } else {
+                (Rgb(230, 200, 120), BOLD)
+            };
             self.screen.text_clip(2, k, l, sw - 3, c, bg, a);
         }
     }
@@ -2426,7 +2894,8 @@ impl Ui {
         let bg = Rgb(30, 24, 40);
         let fg = Rgb(230, 225, 235);
         self.screen.fill(x, y, w, h, ' ', fg, bg);
-        self.screen.frame(x, y, w, h, "The Hand of Fate", Rgb(230, 200, 120), bg);
+        self.screen
+            .frame(x, y, w, h, "The Hand of Fate", Rgb(230, 200, 120), bg);
         for (k, l) in lines.iter().enumerate() {
             let attr = if k == 0 { BOLD } else { 0 };
             self.screen.text_attr(x + 2, y + 1 + k, l, fg, bg, attr);

@@ -15,7 +15,11 @@ impl World {
         }
         let r = &self.races[race];
         let base = b.group().map(|g| r.affinity[g as usize]).unwrap_or(0.4);
-        let coast = if self.terrain.coast[i] { r.coast_love * 0.3 } else { 0.0 };
+        let coast = if self.terrain.coast[i] {
+            r.coast_love * 0.3
+        } else {
+            0.0
+        };
         (base + coast).min(1.2)
     }
 
@@ -129,7 +133,8 @@ pub fn grow_and_migrate(w: &mut World) {
         }
         local += w.terrain.fertility[cell] * 2.0;
         let city = &mut w.cities[c];
-        let mut cap = local * 1.6 * (1.0 + dev * 1.2) * (0.6 + city.prosperity) * (0.7 + stab * 0.5);
+        let mut cap =
+            local * 1.6 * (1.0 + dev * 1.2) * (0.6 + city.prosperity) * (0.7 + stab * 0.5);
         if w.terrain.coast[cell] {
             cap *= 1.25;
         }
@@ -204,7 +209,8 @@ pub fn culture_drift(w: &mut World) {
         let pol = &w.polities[p];
         if pol.foreign_share > 0.7 && pol.cells > 20 && rng.chance(0.03) {
             // Find the dominant culture in the territory.
-            let mut counts: std::collections::BTreeMap<usize, u32> = std::collections::BTreeMap::new();
+            let mut counts: std::collections::BTreeMap<usize, u32> =
+                std::collections::BTreeMap::new();
             for i in 0..n {
                 if w.cells[i].owner == Some(p) {
                     if let Some(c) = w.cells[i].culture {
@@ -220,7 +226,13 @@ pub fn culture_drift(w: &mut World) {
                         pol.name, w.cultures[old].name, w.cultures[c].plural, w.cultures[c].adj
                     );
                     w.polities[p].culture = c;
-                    w.log(1, EventKind::Culture, &[Ref::Polity(p), Ref::Culture(c), Ref::Culture(old)], None, text);
+                    w.log(
+                        1,
+                        EventKind::Culture,
+                        &[Ref::Polity(p), Ref::Culture(c), Ref::Culture(old)],
+                        None,
+                        text,
+                    );
                 }
             }
         }
@@ -238,7 +250,10 @@ pub fn culture_drift(w: &mut World) {
                 continue;
             }
             let has_polity = w.polities.iter().any(|p| p.alive() && p.culture == c);
-            let has_city = w.cities.iter().any(|ci| ci.destroyed.is_none() && ci.culture == c);
+            let has_city = w
+                .cities
+                .iter()
+                .any(|ci| ci.destroyed.is_none() && ci.culture == c);
             if cu.cells == 0 && !has_polity && !has_city && w.year - cu.last_seen > 30 {
                 w.cultures[c].extinct = Some(w.year);
                 let text = format!(
@@ -309,7 +324,10 @@ fn divergence(w: &mut World) {
             // Cities and polities within the region follow.
             let mut polities_changed = Vec::new();
             for city in 0..w.cities.len() {
-                if w.cities[city].destroyed.is_none() && comp.contains(&w.cities[city].cell) && w.cities[city].culture == c {
+                if w.cities[city].destroyed.is_none()
+                    && comp.contains(&w.cities[city].cell)
+                    && w.cities[city].culture == c
+                {
                     w.cities[city].culture = nc;
                 }
             }
@@ -324,13 +342,20 @@ fn divergence(w: &mut World) {
                 }
             }
             let place = w.place_phrase(center, None);
-            let (name, plural, oldname) = (w.cultures[nc].name.clone(), w.cultures[nc].plural.clone(), w.cultures[c].name.clone());
+            let (name, plural, oldname) = (
+                w.cultures[nc].name.clone(),
+                w.cultures[nc].plural.clone(),
+                w.cultures[c].name.clone(),
+            );
             let mut text = format!(
                 "Cut off from their kin, the {} folk living {} drifted in speech and custom until they were a people apart: the {}, who call themselves {}.",
                 oldname, place, plural, name
             );
             if let Some(&pi) = polities_changed.first() {
-                text.push_str(&format!(" {} is now a {} realm.", w.polities[pi].name, w.cultures[nc].adj));
+                text.push_str(&format!(
+                    " {} is now a {} realm.",
+                    w.polities[pi].name, w.cultures[nc].adj
+                ));
             }
             let mut refs = vec![Ref::Culture(nc), Ref::Culture(c)];
             for pi in polities_changed {

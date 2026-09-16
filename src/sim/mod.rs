@@ -153,7 +153,10 @@ impl PolityKind {
             PolityKind::Tribe => 0,
             PolityKind::Chiefdom => 1,
             PolityKind::Horde => 2,
-            PolityKind::Kingdom | PolityKind::Republic | PolityKind::Theocracy | PolityKind::Magocracy => 2,
+            PolityKind::Kingdom
+            | PolityKind::Republic
+            | PolityKind::Theocracy
+            | PolityKind::Magocracy => 2,
             PolityKind::Empire => 3,
         }
     }
@@ -182,7 +185,10 @@ impl PolityKind {
         }
     }
     pub fn has_dynasty(self) -> bool {
-        matches!(self, PolityKind::Kingdom | PolityKind::Empire | PolityKind::Theocracy | PolityKind::Horde)
+        matches!(
+            self,
+            PolityKind::Kingdom | PolityKind::Empire | PolityKind::Theocracy | PolityKind::Horde
+        )
     }
 }
 
@@ -664,17 +670,21 @@ impl World {
         let bytes = crate::ser::save(self);
         if let Some(dir) = path.parent() {
             if !dir.as_os_str().is_empty() {
-                std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {}", dir.display(), e))?;
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("cannot create {}: {}", dir.display(), e))?;
             }
         }
         let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, &bytes).map_err(|e| format!("cannot write {}: {}", tmp.display(), e))?;
-        std::fs::rename(&tmp, path).map_err(|e| format!("cannot rename to {}: {}", path.display(), e))?;
+        std::fs::write(&tmp, &bytes)
+            .map_err(|e| format!("cannot write {}: {}", tmp.display(), e))?;
+        std::fs::rename(&tmp, path)
+            .map_err(|e| format!("cannot rename to {}: {}", path.display(), e))?;
         Ok(bytes.len())
     }
 
     pub fn load_from(path: &std::path::Path) -> Result<World, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
+        let bytes =
+            std::fs::read(path).map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
         crate::ser::load(&bytes)
     }
 
@@ -716,11 +726,25 @@ impl World {
 
     // -- logging ----------------------------------------------------------
 
-    pub fn log(&mut self, importance: u8, kind: EventKind, refs: &[Ref], loc: Option<usize>, text: String) -> Option<usize> {
+    pub fn log(
+        &mut self,
+        importance: u8,
+        kind: EventKind,
+        refs: &[Ref],
+        loc: Option<usize>,
+        text: String,
+    ) -> Option<usize> {
         if importance < self.detail.min_importance() {
             return None;
         }
-        let ev = Event { year: self.year, importance, kind, refs: refs.to_vec(), loc, text };
+        let ev = Event {
+            year: self.year,
+            importance,
+            kind,
+            refs: refs.to_vec(),
+            loc,
+            text,
+        };
         Some(self.chronicle.push(ev))
     }
 
@@ -738,10 +762,6 @@ impl World {
     }
 
     // -- naming helpers -----------------------------------------------------
-
-
-
-
 
     pub fn polity_lang(&self, p: usize) -> &Language {
         &self.cultures[self.polities[p].culture].lang
@@ -795,8 +815,14 @@ impl World {
         }
     }
 
-
-    pub fn new_person(&mut self, culture: usize, role: Role, polity: Option<usize>, born: i32, traits: Option<Traits>) -> usize {
+    pub fn new_person(
+        &mut self,
+        culture: usize,
+        role: Role,
+        polity: Option<usize>,
+        born: i32,
+        traits: Option<Traits>,
+    ) -> usize {
         let id = self.persons.len();
         let race = self.cultures[culture].race;
         let name = self.cultures[culture].lang.person(&self.rng);
@@ -859,12 +885,24 @@ impl World {
             let plural = self.cultures[culture].plural.clone();
             let text = match kind {
                 FeatureKind::River => format!("The {} came to call the river {}.", plural, name),
-                FeatureKind::Sea | FeatureKind::Ocean => format!("Sailors of {} named the waters {}.", self.polities[p].short, name),
-                FeatureKind::Nexus => format!("The {} found a place of terrible power and named it {}.", plural, name),
+                FeatureKind::Sea | FeatureKind::Ocean => format!(
+                    "Sailors of {} named the waters {}.",
+                    self.polities[p].short, name
+                ),
+                FeatureKind::Nexus => format!(
+                    "The {} found a place of terrible power and named it {}.",
+                    plural, name
+                ),
                 FeatureKind::Continent => format!("The {} called their land {}.", plural, name),
                 _ => format!("The {} named the {} {}.", plural, kind.label(), name),
             };
-            self.log(0, EventKind::Discovery, &[Ref::Polity(p), Ref::Feature(f)], None, text);
+            self.log(
+                0,
+                EventKind::Discovery,
+                &[Ref::Polity(p), Ref::Feature(f)],
+                None,
+                text,
+            );
         }
         name
     }
@@ -880,7 +918,10 @@ impl World {
             let t = &self.terrain;
             for nb in t.neighbors8(cell).collect::<Vec<_>>() {
                 if let Some(f) = self.terrain.feature_at(nb) {
-                    if matches!(self.terrain.features[f].kind, FeatureKind::Sea | FeatureKind::Ocean) {
+                    if matches!(
+                        self.terrain.features[f].kind,
+                        FeatureKind::Sea | FeatureKind::Ocean
+                    ) {
                         let n = self.feature_name(f, by_polity);
                         return format!("on the shores of {}", n);
                     }
@@ -1087,17 +1128,20 @@ impl World {
 
     /// Cells owned by polity `p`.
     pub fn cells_of(&self, p: usize) -> Vec<usize> {
-        (0..self.cells.len()).filter(|&i| self.cells[i].owner == Some(p)).collect()
+        (0..self.cells.len())
+            .filter(|&i| self.cells[i].owner == Some(p))
+            .collect()
     }
 
     pub fn living_polities(&self) -> Vec<usize> {
-        self.polities.iter().filter(|p| p.alive()).map(|p| p.id).collect()
+        self.polities
+            .iter()
+            .filter(|p| p.alive())
+            .map(|p| p.id)
+            .collect()
     }
 
     pub fn capital_cell(&self, p: usize) -> Option<usize> {
         self.polities[p].capital.map(|c| self.cities[c].cell)
     }
-
-
-
 }

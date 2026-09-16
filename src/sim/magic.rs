@@ -28,8 +28,27 @@ const ASPECTS: &[(&str, &str)] = &[
     ("Ash", "endings"),
     ("Thread", "fate"),
 ];
-const PRACTICES: &[&str] = &["Binding", "Weaving", "Naming", "Shaping", "Warding", "Summoning", "Reading", "Unmaking"];
-const ORDERS: &[&str] = &["Order", "Circle", "Covenant", "College", "Conclave", "Lodge", "Tower", "Brotherhood", "Sisterhood"];
+const PRACTICES: &[&str] = &[
+    "Binding",
+    "Weaving",
+    "Naming",
+    "Shaping",
+    "Warding",
+    "Summoning",
+    "Reading",
+    "Unmaking",
+];
+const ORDERS: &[&str] = &[
+    "Order",
+    "Circle",
+    "Covenant",
+    "College",
+    "Conclave",
+    "Lodge",
+    "Tower",
+    "Brotherhood",
+    "Sisterhood",
+];
 
 const DEITIES: &[&str] = &[
     "the Twin Moons",
@@ -50,9 +69,33 @@ const DEITIES: &[&str] = &[
     "the Lantern",
     "the Grey Shepherd",
 ];
-const DIVINE_PRACTICE: &[&str] = &["ascetic", "ecstatic", "sacrificial", "monastic", "crusading", "mystery", "prophetic", "penitent"];
+const DIVINE_PRACTICE: &[&str] = &[
+    "ascetic",
+    "ecstatic",
+    "sacrificial",
+    "monastic",
+    "crusading",
+    "mystery",
+    "prophetic",
+    "penitent",
+];
 
-const TENET_WORDS: &[&str] = &["Harmony", "the Will", "Duty", "Doubt", "the Cycle", "Silence", "the Golden Mean", "the Question", "Refusal", "the Ledger", "Kindness", "the Void", "the Garden", "the Road"];
+const TENET_WORDS: &[&str] = &[
+    "Harmony",
+    "the Will",
+    "Duty",
+    "Doubt",
+    "the Cycle",
+    "Silence",
+    "the Golden Mean",
+    "the Question",
+    "Refusal",
+    "the Ledger",
+    "Kindness",
+    "the Void",
+    "the Garden",
+    "the Road",
+];
 const ACADEMIES: &[&str] = &["School", "Academy", "Way", "Path", "Garden", "Society"];
 
 const ARCANE_TENETS: &[&str] = &[
@@ -88,15 +131,23 @@ const PHILO_TENETS: &[&str] = &[
 ];
 
 fn school_color(id: usize, kind: SchoolKind) -> Rgb {
-    let hue = (id as f32 * 71.0 + match kind {
-        SchoolKind::Arcane => 260.0,
-        SchoolKind::Divine => 40.0,
-        SchoolKind::Philosophical => 160.0,
-    }) % 360.0;
+    let hue = (id as f32 * 71.0
+        + match kind {
+            SchoolKind::Arcane => 260.0,
+            SchoolKind::Divine => 40.0,
+            SchoolKind::Philosophical => 160.0,
+        })
+        % 360.0;
     Rgb::from_hsv(hue, 0.6, 0.95)
 }
 
-pub fn found_school(w: &mut World, city: usize, kind: SchoolKind, founder: Option<usize>, parent: Option<usize>) -> usize {
+pub fn found_school(
+    w: &mut World,
+    city: usize,
+    kind: SchoolKind,
+    founder: Option<usize>,
+    parent: Option<usize>,
+) -> usize {
     let rng = w.rng.clone();
     let id = w.schools.len();
     let culture = w.cities[city].culture;
@@ -131,12 +182,28 @@ pub fn found_school(w: &mut World, city: usize, kind: SchoolKind, founder: Optio
             let prac = PRACTICES[practice % PRACTICES.len()];
             let order = *rng.pick(ORDERS);
             let (name, short) = match rng.below(4) {
-                0 => (format!("the {} {}", asp, order), format!("{} {}", asp, order)),
-                1 => (format!("the {}s of {}", prac, asp), format!("{}s of {}", prac, asp)),
-                2 => (format!("the {} School", lang.adjective(&fname)), format!("{} School", lang.adjective(&fname))),
-                _ => (format!("the Order of the {} {}", asp, prac), format!("{} {}", asp, prac)),
+                0 => (
+                    format!("the {} {}", asp, order),
+                    format!("{} {}", asp, order),
+                ),
+                1 => (
+                    format!("the {}s of {}", prac, asp),
+                    format!("{}s of {}", prac, asp),
+                ),
+                2 => (
+                    format!("the {} School", lang.adjective(&fname)),
+                    format!("{} School", lang.adjective(&fname)),
+                ),
+                _ => (
+                    format!("the Order of the {} {}", asp, prac),
+                    format!("{} {}", asp, prac),
+                ),
             };
-            let doctrine = format!("teaches that all magic is the {} of {}", prac.to_lowercase(), desc);
+            let doctrine = format!(
+                "teaches that all magic is the {} of {}",
+                prac.to_lowercase(),
+                desc
+            );
             let mut t: Vec<String> = Vec::new();
             for _ in 0..2 {
                 let x = rng.pick(ARCANE_TENETS).to_string();
@@ -147,13 +214,26 @@ pub fn found_school(w: &mut World, city: usize, kind: SchoolKind, founder: Optio
             (name, short, doctrine, t, rng.range32(0.2, 0.6))
         }
         SchoolKind::Divine => {
-            let deity = if rng.chance(0.5) { rng.pick(DEITIES).to_string() } else { format!("{} of the {}", lang.name(&rng), ASPECTS[aspect].0) };
+            let deity = if rng.chance(0.5) {
+                rng.pick(DEITIES).to_string()
+            } else {
+                format!("{} of the {}", lang.name(&rng), ASPECTS[aspect].0)
+            };
             let prac = DIVINE_PRACTICE[practice % DIVINE_PRACTICE.len()];
             let (name, short) = match rng.below(4) {
                 0 => (format!("the Faith of {}", deity), deity.clone()),
                 1 => (format!("the Church of {}", deity), deity.clone()),
                 2 => (format!("the Way of {}", deity), deity.clone()),
-                _ => (format!("{}ism", fname.trim_end_matches(|c: char| "aeiou".contains(c))), format!("{}ism", fname.trim_end_matches(|c: char| "aeiou".contains(c)))),
+                _ => (
+                    format!(
+                        "{}ism",
+                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
+                    ),
+                    format!(
+                        "{}ism",
+                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
+                    ),
+                ),
             };
             let short = short.trim_start_matches("the ").to_string();
             let doctrine = format!("is a {} faith devoted to {}", prac, deity);
@@ -170,11 +250,29 @@ pub fn found_school(w: &mut World, city: usize, kind: SchoolKind, founder: Optio
             let tenet = TENET_WORDS[aspect % TENET_WORDS.len()];
             let acad = *rng.pick(ACADEMIES);
             let (name, short) = match rng.below(3) {
-                0 => (format!("the {} of {}", acad, tenet), format!("{} of {}", acad, tenet)),
-                1 => (format!("{}ism", fname.trim_end_matches(|c: char| "aeiou".contains(c))), format!("{}ism", fname.trim_end_matches(|c: char| "aeiou".contains(c)))),
-                _ => (format!("the {} {}", lang.adjective(&fname), acad), format!("{} {}", lang.adjective(&fname), acad)),
+                0 => (
+                    format!("the {} of {}", acad, tenet),
+                    format!("{} of {}", acad, tenet),
+                ),
+                1 => (
+                    format!(
+                        "{}ism",
+                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
+                    ),
+                    format!(
+                        "{}ism",
+                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
+                    ),
+                ),
+                _ => (
+                    format!("the {} {}", lang.adjective(&fname), acad),
+                    format!("{} {}", lang.adjective(&fname), acad),
+                ),
             };
-            let doctrine = format!("holds that the good life is found in {}", tenet.to_lowercase());
+            let doctrine = format!(
+                "holds that the good life is found in {}",
+                tenet.to_lowercase()
+            );
             let mut t: Vec<String> = Vec::new();
             for _ in 0..2 {
                 let x = rng.pick(PHILO_TENETS).to_string();
@@ -244,13 +342,25 @@ pub fn tick(w: &mut World) {
         let culture = w.cities[c].culture;
         let vals = w.cultures[culture].values;
         let polity = w.cities[c].polity;
-        let existing = polity.map(|p| w.schools.iter().filter(|s| s.alive() && s.influence.get(&p).copied().unwrap_or(0.0) > 0.2).count()).unwrap_or(0);
-        let base = 0.0015 * (mana as f64 - 0.25).max(0.0) * (0.5 + vals.mysticism as f64 * 2.0) + 0.0004 * (0.5 + vals.openness as f64);
+        let existing = polity
+            .map(|p| {
+                w.schools
+                    .iter()
+                    .filter(|s| s.alive() && s.influence.get(&p).copied().unwrap_or(0.0) > 0.2)
+                    .count()
+            })
+            .unwrap_or(0);
+        let base = 0.0015 * (mana as f64 - 0.25).max(0.0) * (0.5 + vals.mysticism as f64 * 2.0)
+            + 0.0004 * (0.5 + vals.openness as f64);
         let p = base * (w.cities[c].pop as f64 / 3.0).min(2.0) / (1.0 + existing as f64);
         if !rng.chance(p) {
             continue;
         }
-        let weights = [mana as f64 * 2.0 + vals.mysticism as f64, vals.tradition as f64 + 0.6, vals.openness as f64 + vals.mercantilism as f64 * 0.5];
+        let weights = [
+            mana as f64 * 2.0 + vals.mysticism as f64,
+            vals.tradition as f64 + 0.6,
+            vals.openness as f64 + vals.mercantilism as f64 * 0.5,
+        ];
         let kind = match rng.weighted(&weights) {
             0 => SchoolKind::Arcane,
             1 => SchoolKind::Divine,
@@ -289,7 +399,11 @@ pub fn tick(w: &mut World) {
         }
         let kind = w.schools[s].kind;
         let home_polity = w.cities[w.schools[s].home_city].polity;
-        let mut influence: Vec<(usize, f32)> = w.schools[s].influence.iter().map(|(&p, &v)| (p, v)).collect();
+        let mut influence: Vec<(usize, f32)> = w.schools[s]
+            .influence
+            .iter()
+            .map(|(&p, &v)| (p, v))
+            .collect();
         let mut gains: Vec<(usize, f32)> = Vec::new();
         for &(p, v) in &influence {
             if !w.polities[p].alive() {
@@ -334,8 +448,14 @@ pub fn tick(w: &mut World) {
             let e = w.schools[s].influence.entry(p).or_insert(0.0);
             *e = (*e + d).clamp(0.0, 1.0);
         }
-        w.schools[s].influence.retain(|p, v| *v > 0.003 && w.polities[*p].alive());
-        influence = w.schools[s].influence.iter().map(|(&p, &v)| (p, v)).collect();
+        w.schools[s]
+            .influence
+            .retain(|p, v| *v > 0.003 && w.polities[*p].alive());
+        influence = w.schools[s]
+            .influence
+            .iter()
+            .map(|(&p, &v)| (p, v))
+            .collect();
         let adherents = influence.iter().filter(|(_, v)| *v > 0.1).count();
         if adherents > w.schools[s].peak_polities {
             w.schools[s].peak_polities = adherents;
@@ -362,7 +482,13 @@ pub fn tick(w: &mut World) {
                             SchoolKind::Divine => format!("{} was baptised into {}, and {} became the faith of {}.", w.ruler_title(p), w.schools[s].name, w.schools[s].short, w.polities[p].name),
                             SchoolKind::Philosophical => format!("The court of {} adopted the teachings of {}; its laws were rewritten by the {}.", w.polities[p].short, w.schools[s].name, w.schools[s].kind.follower()),
                         };
-                        w.log(2, EventKind::Magic, &[Ref::School(s), Ref::Polity(p)], w.capital_cell(p), text);
+                        w.log(
+                            2,
+                            EventKind::Magic,
+                            &[Ref::School(s), Ref::Polity(p)],
+                            w.capital_cell(p),
+                            text,
+                        );
                     }
                 }
                 Some(state) if state != s => {
@@ -371,24 +497,64 @@ pub fn tick(w: &mut World) {
                         // Conversion.
                         w.polities[p].school = Some(s);
                         w.schools[s].state_of.push(p);
-                        let text = format!("{} forsook {} for {}.", w.ruler_title(p), w.schools[state].name, w.schools[s].name);
-                        w.log(2, EventKind::Magic, &[Ref::School(s), Ref::School(state), Ref::Polity(p)], w.capital_cell(p), text);
-                    } else if v > 0.25 && (w.schools[state].hostility + ruler_t.cruelty + ruler_t.piety * 0.5) > 1.2 && rng.chance(0.06) {
+                        let text = format!(
+                            "{} forsook {} for {}.",
+                            w.ruler_title(p),
+                            w.schools[state].name,
+                            w.schools[s].name
+                        );
+                        w.log(
+                            2,
+                            EventKind::Magic,
+                            &[Ref::School(s), Ref::School(state), Ref::Polity(p)],
+                            w.capital_cell(p),
+                            text,
+                        );
+                    } else if v > 0.25
+                        && (w.schools[state].hostility + ruler_t.cruelty + ruler_t.piety * 0.5)
+                            > 1.2
+                        && rng.chance(0.06)
+                    {
                         // Persecution.
                         let e = w.schools[s].influence.get_mut(&p).unwrap();
                         *e *= 0.5;
                         w.polities[p].stability = (w.polities[p].stability - 0.05).max(0.0);
-                        let cap = w.polities[p].capital.map(|c| w.cities[c].name.clone()).unwrap_or_default();
-                        let mut text = format!("{} outlawed {} throughout {}; its {} were driven from {}.", w.ruler_title(p), w.schools[s].name, w.polities[p].short, w.schools[s].kind.follower(), cap);
+                        let cap = w.polities[p]
+                            .capital
+                            .map(|c| w.cities[c].name.clone())
+                            .unwrap_or_default();
+                        let mut text = format!(
+                            "{} outlawed {} throughout {}; its {} were driven from {}.",
+                            w.ruler_title(p),
+                            w.schools[s].name,
+                            w.polities[p].short,
+                            w.schools[s].kind.follower(),
+                            cap
+                        );
                         let mut refs = vec![Ref::School(s), Ref::Polity(p), Ref::School(state)];
                         if w.high_detail() && rng.chance(0.5) {
                             let culture = w.polities[p].culture;
-                            let m = w.new_person(culture, Role::Martyr, Some(p), w.year - rng.int(20, 60), None);
+                            let m = w.new_person(
+                                culture,
+                                Role::Martyr,
+                                Some(p),
+                                w.year - rng.int(20, 60),
+                                None,
+                            );
                             w.persons[m].school = Some(s);
                             w.persons[m].died = Some(w.year);
-                            w.persons[m].death = format!("was burned in the square of {} for the teachings of {}.", cap, w.schools[s].short);
+                            w.persons[m].death = format!(
+                                "was burned in the square of {} for the teachings of {}.",
+                                cap, w.schools[s].short
+                            );
                             w.persons[m].renown = 2.0;
-                            text.push_str(&format!(" {} was burned in the square; the {} of {} call {} a martyr.", w.persons[m].name, w.schools[s].kind.follower(), w.schools[s].short, w.persons[m].gender.them()));
+                            text.push_str(&format!(
+                                " {} was burned in the square; the {} of {} call {} a martyr.",
+                                w.persons[m].name,
+                                w.schools[s].kind.follower(),
+                                w.schools[s].short,
+                                w.persons[m].gender.them()
+                            ));
                             refs.push(Ref::Person(m));
                         }
                         // Persecution raises tension with states of this school.
@@ -415,7 +581,10 @@ pub fn tick(w: &mut World) {
                 .flat_map(|(p, _)| w.polities[*p].cities.iter().copied())
                 .filter(|&c| c != home && w.cities[c].destroyed.is_none())
                 .collect();
-            if let Some(&city) = candidates.get(rng.below(candidates.len().max(1)).min(candidates.len().saturating_sub(1))) {
+            if let Some(&city) = candidates.get(
+                rng.below(candidates.len().max(1))
+                    .min(candidates.len().saturating_sub(1)),
+            ) {
                 let child = found_school(w, city, kind, None, Some(s));
                 // Split influence.
                 let mut moved = Vec::new();
@@ -430,13 +599,18 @@ pub fn tick(w: &mut World) {
                 }
                 let founder = w.schools[child].founder;
                 let dispute = match kind {
-                    SchoolKind::Arcane => format!("over whether {} may be practised on the living", PRACTICES[w.schools[child].practice % PRACTICES.len()].to_lowercase()),
+                    SchoolKind::Arcane => format!(
+                        "over whether {} may be practised on the living",
+                        PRACTICES[w.schools[child].practice % PRACTICES.len()].to_lowercase()
+                    ),
                     SchoolKind::Divine => match rng.below(3) {
                         0 => "over the true name of the god".to_string(),
                         1 => format!("over the tenet \"{}\"", w.schools[s].tenets[0]),
                         _ => "over who might sit on the high seat".to_string(),
                     },
-                    SchoolKind::Philosophical => "over the meaning of a single sentence of the founder".to_string(),
+                    SchoolKind::Philosophical => {
+                        "over the meaning of a single sentence of the founder".to_string()
+                    }
                 };
                 let text = format!(
                     "{} split {}. {} of {} led the dissenters out, and their teaching became known as {}.",
@@ -446,7 +620,12 @@ pub fn tick(w: &mut World) {
                     w.cities[city].name,
                     w.schools[child].name
                 );
-                let mut refs = vec![Ref::School(child), Ref::School(s), Ref::Person(founder), Ref::City(city)];
+                let mut refs = vec![
+                    Ref::School(child),
+                    Ref::School(s),
+                    Ref::Person(founder),
+                    Ref::City(city),
+                ];
                 for p in moved {
                     refs.push(Ref::Polity(p));
                 }
@@ -465,7 +644,11 @@ pub fn tick(w: &mut World) {
                             w.polities[p].school = None;
                         }
                     }
-                    let text = format!("The last {} of {} died, and its teachings were forgotten.", w.schools[s].kind.follower(), w.schools[s].name);
+                    let text = format!(
+                        "The last {} of {} died, and its teachings were forgotten.",
+                        w.schools[s].kind.follower(),
+                        w.schools[s].name
+                    );
                     w.log(1, EventKind::Magic, &[Ref::School(s)], None, text);
                 }
                 _ => {}
@@ -543,15 +726,29 @@ fn catastrophe(w: &mut World, s: usize, p: usize, cap: usize) {
         1 => format!("the {} Waste", name),
         _ => fname,
     };
-    w.terrain.features.push(crate::geo::Feature { kind: crate::geo::FeatureKind::Desert, name: Some(fname.clone()), named_by: Some(w.polities[p].culture), cells: cells.clone(), center: (x, y) });
+    w.terrain.features.push(crate::geo::Feature {
+        kind: crate::geo::FeatureKind::Desert,
+        name: Some(fname.clone()),
+        named_by: Some(w.polities[p].culture),
+        cells: cells.clone(),
+        center: (x, y),
+    });
     for &c in &cells {
         w.terrain.region[c] = (fid + 1) as u16;
     }
     // The polity reels.
     w.polities[p].stability = (w.polities[p].stability - 0.5).max(0.0);
     w.polities[p].school = None;
-    let remaining: Vec<usize> = w.polities[p].cities.iter().copied().filter(|&c| w.cities[c].destroyed.is_none()).collect();
-    w.polities[p].capital = remaining.iter().copied().max_by(|&a, &b| w.cities[a].pop.partial_cmp(&w.cities[b].pop).unwrap());
+    let remaining: Vec<usize> = w.polities[p]
+        .cities
+        .iter()
+        .copied()
+        .filter(|&c| w.cities[c].destroyed.is_none())
+        .collect();
+    w.polities[p].capital = remaining
+        .iter()
+        .copied()
+        .max_by(|&a, &b| w.cities[a].pop.partial_cmp(&w.cities[b].pop).unwrap());
     // The school is discredited everywhere.
     for v in w.schools[s].influence.values_mut() {
         *v *= 0.3;
@@ -569,9 +766,23 @@ fn catastrophe(w: &mut World, s: usize, p: usize, cap: usize) {
         }
     }
     if w.polities[p].capital.is_none() {
-        text.push_str(&format!(" {} did not survive the loss.", crate::lang::capitalize(&w.polities[p].name)));
+        text.push_str(&format!(
+            " {} did not survive the loss.",
+            crate::lang::capitalize(&w.polities[p].name)
+        ));
         super::politics::fall(w, p, format!("perished with {}.", name), None, 3);
     }
-    w.log(3, EventKind::Disaster, &[Ref::School(s), Ref::Polity(p), Ref::City(cap), Ref::Feature(fid)], Some(cell), text);
+    w.log(
+        3,
+        EventKind::Disaster,
+        &[
+            Ref::School(s),
+            Ref::Polity(p),
+            Ref::City(cap),
+            Ref::Feature(fid),
+        ],
+        Some(cell),
+        text,
+    );
     super::stories::artifacts_on_catastrophe(w, cell, s);
 }

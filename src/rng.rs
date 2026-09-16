@@ -124,5 +124,4 @@ impl Rng {
     pub fn trait_value(&self, mean: f64, sd: f64) -> f32 {
         (mean + self.normal() * sd).clamp(0.0, 1.0) as f32
     }
-
 }

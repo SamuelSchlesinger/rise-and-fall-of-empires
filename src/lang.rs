@@ -55,17 +55,17 @@ impl Language {
 }
 
 const FAMILIES: &[&[&str]] = &[
-    &["l", "m", "n", "r", "s", "v", "w", "y", "h"],        // soft
-    &["k", "t", "p", "g", "d", "b"],                        // stops
-    &["kh", "gh", "q", "ch", "x", "hr"],                    // guttural
-    &["sh", "zh", "z", "ts", "j"],                          // sibilant
-    &["th", "dh", "f", "ph", "wh"],                         // aspirate
-    &["ng", "ny", "ll", "rr", "mb", "nd"],                  // nasal/doubled
+    &["l", "m", "n", "r", "s", "v", "w", "y", "h"], // soft
+    &["k", "t", "p", "g", "d", "b"],                // stops
+    &["kh", "gh", "q", "ch", "x", "hr"],            // guttural
+    &["sh", "zh", "z", "ts", "j"],                  // sibilant
+    &["th", "dh", "f", "ph", "wh"],                 // aspirate
+    &["ng", "ny", "ll", "rr", "mb", "nd"],          // nasal/doubled
 ];
 
 const CLUSTERS: &[&str] = &[
-    "br", "dr", "kr", "tr", "gr", "pr", "st", "sk", "sp", "sl", "sn", "fl", "gl", "kl", "pl", "thr",
-    "str", "vr", "zr", "shr", "kw", "tw", "dw",
+    "br", "dr", "kr", "tr", "gr", "pr", "st", "sk", "sp", "sl", "sn", "fl", "gl", "kl", "pl",
+    "thr", "str", "vr", "zr", "shr", "kw", "tw", "dw",
 ];
 
 const VOWEL_SETS: &[&[&str]] = &[
@@ -78,14 +78,14 @@ const VOWEL_SETS: &[&[&str]] = &[
 ];
 
 const CODA_POOL: &[&str] = &[
-    "n", "r", "l", "s", "k", "t", "m", "sh", "th", "n", "r", "l", "d", "g", "x", "nd", "rn", "st", "ss",
-    "nn", "lm", "rk", "th",
+    "n", "r", "l", "s", "k", "t", "m", "sh", "th", "n", "r", "l", "d", "g", "x", "nd", "rn", "st",
+    "ss", "nn", "lm", "rk", "th",
 ];
 
 const PLACE_SUFFIX_POOL: &[&str] = &[
-    "burg", "heim", "gard", "hold", "haven", "mouth", "ford", "wick", "stead", "vale", "dun", "abad", "grad",
-    "polis", "keep", "mere", "moor", "rath", "kar", "than", "nor", "sar", "mar", "ost", "hal", "ia", "or",
-    "um", "eth", "ath", "is", "on", "ur",
+    "burg", "heim", "gard", "hold", "haven", "mouth", "ford", "wick", "stead", "vale", "dun",
+    "abad", "grad", "polis", "keep", "mere", "moor", "rath", "kar", "than", "nor", "sar", "mar",
+    "ost", "hal", "ia", "or", "um", "eth", "ath", "is", "on", "ur",
 ];
 
 const ADJ_SETS: &[&[&str]] = &[
@@ -106,8 +106,28 @@ const DEMONYM_SETS: &[&[&str]] = &[
 ];
 
 const HONORIFICS: &[&str] = &[
-    "King", "Queen", "Prince", "Lord", "Khan", "Rex", "Emperor", "Empress", "Chief", "Sovereign", "Arch-Lord",
-    "Sultan", "Tsar", "Basileus", "Elder", "Warden", "Great Chief", "Hierarch", "Dux", "Sar", "Tagh", "Voivode",
+    "King",
+    "Queen",
+    "Prince",
+    "Lord",
+    "Khan",
+    "Rex",
+    "Emperor",
+    "Empress",
+    "Chief",
+    "Sovereign",
+    "Arch-Lord",
+    "Sultan",
+    "Tsar",
+    "Basileus",
+    "Elder",
+    "Warden",
+    "Great Chief",
+    "Hierarch",
+    "Dux",
+    "Sar",
+    "Tagh",
+    "Voivode",
 ];
 
 fn ends_with_vowel(s: &str) -> bool {
@@ -143,11 +163,17 @@ fn tidy(w: &str, lang: &Language, rng: &Rng) -> String {
     out.into_iter().collect()
 }
 
-const AWKWARD: &[&str] = &["ass", "arse", "sex", "cum", "fag", "tit", "cock", "dick", "shit", "fuck", "poo", "pee", "nig", "cunt", "twat", "piss", "wank", "anus", "butt", "boob", "crap", "damn", "hell", "kill", "die", "nazi", "rape"];
+const AWKWARD: &[&str] = &[
+    "ass", "arse", "sex", "cum", "fag", "tit", "cock", "dick", "shit", "fuck", "poo", "pee", "nig",
+    "cunt", "twat", "piss", "wank", "anus", "butt", "boob", "crap", "damn", "hell", "kill", "die",
+    "nazi", "rape",
+];
 
 fn awkward(w: &str) -> bool {
     let l = w.to_lowercase();
-    AWKWARD.iter().any(|a| l == *a || (a.len() >= 4 && l.contains(a)))
+    AWKWARD
+        .iter()
+        .any(|a| l == *a || (a.len() >= 4 && l.contains(a)))
 }
 
 pub fn capitalize(s: &str) -> String {
@@ -167,7 +193,13 @@ impl Language {
         let mut onsets: Vec<String> = Vec::new();
         let mut onset_w: Vec<f64> = Vec::new();
         for (k, &fi) in fam.iter().take(nfam).enumerate() {
-            let weight = if k == 0 { 3.0 } else if k == 1 { 1.6 } else { 0.7 };
+            let weight = if k == 0 {
+                3.0
+            } else if k == 1 {
+                1.6
+            } else {
+                0.7
+            };
             for &c in FAMILIES[fi] {
                 if rng.chance(0.75) {
                     onsets.push(c.to_string());
@@ -201,7 +233,13 @@ impl Language {
         let vowels: Vec<String> = vs.iter().map(|s| s.to_string()).collect();
         let vowel_w: Vec<f64> = vowels
             .iter()
-            .map(|v| if v.len() == 1 { rng.range(0.8, 2.5) } else { rng.range(0.2, 0.6) })
+            .map(|v| {
+                if v.len() == 1 {
+                    rng.range(0.8, 2.5)
+                } else {
+                    rng.range(0.2, 0.6)
+                }
+            })
             .collect();
 
         let ncoda = 2 + rng.below(6);
@@ -241,9 +279,17 @@ impl Language {
             place_suffix_chance: rng.range(0.15, 0.55),
             compound_chance: rng.range(0.05, 0.3),
             hyphen: rng.chance(0.35),
-            apostrophe_chance: if rng.chance(0.2) { rng.range(0.05, 0.2) } else { 0.0 },
+            apostrophe_chance: if rng.chance(0.2) {
+                rng.range(0.05, 0.2)
+            } else {
+                0.0
+            },
             adj_suffixes: rng.pick(ADJ_SETS).iter().map(|x| x.to_string()).collect(),
-            demonym_suffixes: rng.pick(DEMONYM_SETS).iter().map(|x| x.to_string()).collect(),
+            demonym_suffixes: rng
+                .pick(DEMONYM_SETS)
+                .iter()
+                .map(|x| x.to_string())
+                .collect(),
             honorific: rng.pick(HONORIFICS).to_string(),
         };
         for _ in 0..(1 + rng.below(2)) {
@@ -258,9 +304,26 @@ impl Language {
     pub fn mutate(&self, rng: &Rng) -> Language {
         let mut l = self.clone();
         let shifts: &[(&str, &str)] = &[
-            ("p", "f"), ("k", "ch"), ("t", "th"), ("b", "v"), ("d", "dh"), ("g", "gh"), ("s", "sh"), ("kh", "h"),
-            ("f", "p"), ("ch", "k"), ("th", "t"), ("v", "w"), ("sh", "s"), ("w", "v"), ("r", "l"), ("l", "r"),
-            ("z", "s"), ("q", "k"), ("y", "j"), ("j", "y"),
+            ("p", "f"),
+            ("k", "ch"),
+            ("t", "th"),
+            ("b", "v"),
+            ("d", "dh"),
+            ("g", "gh"),
+            ("s", "sh"),
+            ("kh", "h"),
+            ("f", "p"),
+            ("ch", "k"),
+            ("th", "t"),
+            ("v", "w"),
+            ("sh", "s"),
+            ("w", "v"),
+            ("r", "l"),
+            ("l", "r"),
+            ("z", "s"),
+            ("q", "k"),
+            ("y", "j"),
+            ("j", "y"),
         ];
         let nshift = 1 + rng.below(3);
         for _ in 0..nshift {
@@ -301,7 +364,11 @@ impl Language {
             l.adj_suffixes = rng.pick(ADJ_SETS).iter().map(|x| x.to_string()).collect();
         }
         if rng.chance(0.4) {
-            l.demonym_suffixes = rng.pick(DEMONYM_SETS).iter().map(|x| x.to_string()).collect();
+            l.demonym_suffixes = rng
+                .pick(DEMONYM_SETS)
+                .iter()
+                .map(|x| x.to_string())
+                .collect();
         }
         if rng.chance(0.5) {
             l.honorific = rng.pick(HONORIFICS).to_string();
@@ -325,7 +392,11 @@ impl Language {
             s.push_str(&self.onsets[rng.weighted(&self.onset_w)]);
         }
         s.push_str(&self.vowels[rng.weighted(&self.vowel_w)]);
-        let coda_p = if last { self.coda_chance * 1.4 } else { self.coda_chance * 0.6 };
+        let coda_p = if last {
+            self.coda_chance * 1.4
+        } else {
+            self.coda_chance * 0.6
+        };
         if !self.codas.is_empty() && rng.chance(coda_p) {
             s.push_str(&self.codas[rng.weighted(&self.coda_w)]);
         }
@@ -387,7 +458,10 @@ impl Language {
         if rng.chance(self.place_suffix_chance) && !self.place_suffixes.is_empty() {
             let suf = rng.pick(&self.place_suffixes);
             let mut b = base.clone();
-            if ends_with_vowel(&b) && !suf.starts_with(|c: char| "aeiou".contains(c)) && rng.chance(0.3) {
+            if ends_with_vowel(&b)
+                && !suf.starts_with(|c: char| "aeiou".contains(c))
+                && rng.chance(0.3)
+            {
                 b.pop();
             } else if ends_with_vowel(&b) && suf.starts_with(|c: char| "aeiou".contains(c)) {
                 b.pop();
