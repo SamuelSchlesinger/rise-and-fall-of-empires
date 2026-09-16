@@ -19,6 +19,11 @@ use chronicle::{Chronicle, Event, EventKind, Ref};
 use std::collections::{BTreeMap, BTreeSet};
 use tuning::Tuning;
 
+/// A file error with the path it happened to folded into its message.
+fn io_err(what: &str, e: std::io::Error) -> crate::ser::SaveError {
+    crate::ser::SaveError::Io(std::io::Error::new(e.kind(), format!("{}: {}", what, e)))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Detail {
     Low,
@@ -673,25 +678,25 @@ impl World {
         }
     }
 
-    pub fn save_to(&mut self, path: &std::path::Path) -> Result<usize, String> {
+    pub fn save_to(&mut self, path: &std::path::Path) -> Result<usize, crate::ser::SaveError> {
         let bytes = crate::ser::save(self);
         if let Some(dir) = path.parent() {
             if !dir.as_os_str().is_empty() {
                 std::fs::create_dir_all(dir)
-                    .map_err(|e| format!("cannot create {}: {}", dir.display(), e))?;
+                    .map_err(|e| io_err(&format!("cannot create {}", dir.display()), e))?;
             }
         }
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, &bytes)
-            .map_err(|e| format!("cannot write {}: {}", tmp.display(), e))?;
+            .map_err(|e| io_err(&format!("cannot write {}", tmp.display()), e))?;
         std::fs::rename(&tmp, path)
-            .map_err(|e| format!("cannot rename to {}: {}", path.display(), e))?;
+            .map_err(|e| io_err(&format!("cannot rename to {}", path.display()), e))?;
         Ok(bytes.len())
     }
 
-    pub fn load_from(path: &std::path::Path) -> Result<World, String> {
-        let bytes =
-            std::fs::read(path).map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
+    pub fn load_from(path: &std::path::Path) -> Result<World, crate::ser::SaveError> {
+        let bytes = std::fs::read(path)
+            .map_err(|e| io_err(&format!("cannot read {}", path.display()), e))?;
         crate::ser::load(&bytes)
     }
 

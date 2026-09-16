@@ -505,7 +505,8 @@ impl Ui {
                 self.live_filter();
             }
             Key::Paste(text) => {
-                self.prompt_text.extend(text.chars().filter(|c| !c.is_control()));
+                self.prompt_text
+                    .extend(text.chars().filter(|c| !c.is_control()));
                 self.live_filter();
             }
             Key::Char(c) => {

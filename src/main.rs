@@ -6,6 +6,8 @@ mod lang;
 mod noise;
 mod rng;
 mod ser;
+#[cfg(test)]
+mod ser_tests;
 mod sim;
 mod stats;
 mod term;

@@ -51,8 +51,9 @@ impl Ui {
                 Ok(())
             }
             Err(e) => {
-                self.say(&e);
-                Err(e)
+                let msg = e.to_string();
+                self.say(&msg);
+                Err(msg)
             }
         }
     }
@@ -81,7 +82,7 @@ impl Ui {
                     self.world.year
                 ));
             }
-            Err(e) => self.say(&e),
+            Err(e) => self.say(&e.to_string()),
         }
     }
 
