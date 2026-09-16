@@ -1,6 +1,42 @@
 //! Save files. A single symmetric `Io` trait drives both writing and
 //! reading, so every field is visited in the same order in both directions
 //! and the format cannot drift between the two.
+//!
+//! # The format
+//!
+//! ```text
+//! magic "RFE\0" | format version u32 | body length u64 | FNV-1a 64 of the body
+//! body: chunk* where chunk = tag u32 | record version u32 | length u64 | payload
+//! ```
+//!
+//! The body is a sequence of tagged, length-prefixed chunks, one per
+//! top-level section of the world (see the `sections!` table). A reader
+//! takes the chunks it knows by tag, skips the rest, and leaves a section
+//! that never turned up at its blank default — so an old build can read a
+//! file with new sections in it, and a new build can read a file without
+//! them.
+//!
+//! Inside a chunk the fields of a record stay positional, which is what
+//! keeps the file small and the loop fast. Instead each section carries a
+//! record version, written once in the chunk header, which the reader hands
+//! back through `s.ver()`.
+//!
+//! **To add a field: bump that section's version in the `sections!` table,
+//! write it unconditionally, read it conditionally.**
+//!
+//! ```ignore
+//! fn city<S: Io>(s: &mut S, c: &mut City) {
+//!     s.string(&mut c.name);
+//!     if s.ver() >= 2 {
+//!         s.f32(&mut c.harbour); // absent from version-1 files: stays default
+//!     }
+//! }
+//! ```
+//!
+//! A reader that meets a *newer* version of a section it knows cannot parse
+//! it positionally, so it skips that chunk too and keeps the defaults. The
+//! format version itself only changes when the framing changes; version 1
+//! (a bare positional body, no chunks) is still read by `read_v1`.
 
 use crate::geo::{Biome, Feature, FeatureKind, Terrain};
 use crate::lang::Language;
@@ -9,10 +45,22 @@ use crate::sim::*;
 use std::collections::BTreeMap;
 
 const MAGIC: &[u8; 4] = b"RFE\0";
-pub const VERSION: u32 = 1;
+/// The format this build writes.
+pub const VERSION: u32 = 2;
+/// The oldest format it still reads.
+pub const MIN_VERSION: u32 = 1;
+/// Magic, format version, body length, checksum.
+pub const HEADER: usize = 24;
+/// Tag, record version, payload length.
+pub const CHUNK_HEADER: usize = 16;
 
 pub trait Io {
     fn reading(&self) -> bool;
+    /// The record version of the section being visited: the current one when
+    /// writing, the one the file carries when reading. No record needs it
+    /// yet — the first one to gain a field will (see the module docs).
+    #[allow(dead_code)]
+    fn ver(&self) -> u32;
     fn u8(&mut self, v: &mut u8);
     fn bytes(&mut self, v: &mut Vec<u8>);
     fn u32(&mut self, v: &mut u32) {
@@ -60,11 +108,15 @@ pub trait Io {
 
 pub struct Writer {
     pub buf: Vec<u8>,
+    ver: u32,
 }
 
 impl Io for Writer {
     fn reading(&self) -> bool {
         false
+    }
+    fn ver(&self) -> u32 {
+        self.ver
     }
     fn u8(&mut self, v: &mut u8) {
         self.buf.push(*v);
@@ -83,6 +135,7 @@ pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
     pub err: bool,
+    ver: u32,
 }
 
 impl<'a> Reader<'a> {
@@ -101,6 +154,9 @@ impl<'a> Reader<'a> {
 impl<'a> Io for Reader<'a> {
     fn reading(&self) -> bool {
         true
+    }
+    fn ver(&self) -> u32 {
+        self.ver
     }
     fn u8(&mut self, v: &mut u8) {
         let s = self.take(1);
@@ -940,8 +996,43 @@ fn blank_event() -> Event {
     }
 }
 
-/// Visit every persistent field of the world.
-fn world<S: Io>(s: &mut S, w: &mut World) {
+fn blank_era() -> Era {
+    Era {
+        start: 0,
+        name: String::new(),
+        description: String::new(),
+    }
+}
+
+fn era<S: Io>(s: &mut S, e: &mut Era) {
+    s.i32(&mut e.start);
+    s.string(&mut e.name);
+    s.string(&mut e.description);
+}
+
+fn blank_plague() -> Plague {
+    Plague {
+        name: String::new(),
+        years_left: 0,
+        polities: Vec::new(),
+        deaths: 0.0,
+    }
+}
+
+fn plague<S: Io>(s: &mut S, p: &mut Plague) {
+    s.string(&mut p.name);
+    s.i32(&mut p.years_left);
+    vec_usize(s, &mut p.polities);
+    s.f64(&mut p.deaths);
+}
+
+// -- sections -----------------------------------------------------------------
+//
+// One function per top-level section. Each is visited with `s.ver()` set to
+// that section's record version, so records can read newer fields
+// conditionally (see the module docs).
+
+fn head<S: Io>(s: &mut S, w: &mut World) {
     s.u64(&mut w.seed);
     let mut st = w.rng.state();
     for x in st.iter_mut() {
@@ -952,47 +1043,49 @@ fn world<S: Io>(s: &mut S, w: &mut World) {
     }
     s.i32(&mut w.year);
     enum8(s, &mut w.detail, &DETAILS);
+}
+
+fn terrain_sec<S: Io>(s: &mut S, w: &mut World) {
     terrain(s, &mut w.terrain);
+}
+fn cells<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.cells, CellState::default, cell);
+}
+fn races<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.races, blank_race, race);
+}
+fn cultures<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.cultures, blank_culture, culture);
+}
+fn cities<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.cities, blank_city, city);
+}
+fn polities<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.polities, blank_polity, polity);
+}
+fn persons<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.persons, blank_person, person);
+}
+fn schools<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.schools, blank_school, school);
+}
+fn wars<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.wars, blank_war, war);
-    seq(
-        s,
-        &mut w.eras,
-        || Era {
-            start: 0,
-            name: String::new(),
-            description: String::new(),
-        },
-        |s, e| {
-            s.i32(&mut e.start);
-            s.string(&mut e.name);
-            s.string(&mut e.description);
-        },
-    );
-    seq(
-        s,
-        &mut w.plagues,
-        || Plague {
-            name: String::new(),
-            years_left: 0,
-            polities: Vec::new(),
-            deaths: 0.0,
-        },
-        |s, p| {
-            s.string(&mut p.name);
-            s.i32(&mut p.years_left);
-            vec_usize(s, &mut p.polities);
-            s.f64(&mut p.deaths);
-        },
-    );
+}
+fn eras<S: Io>(s: &mut S, w: &mut World) {
+    seq(s, &mut w.eras, blank_era, era);
+}
+fn plagues<S: Io>(s: &mut S, w: &mut World) {
+    seq(s, &mut w.plagues, blank_plague, plague);
+}
+fn artifacts<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.artifacts, blank_artifact, artifact);
+}
+fn prophecies<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.prophecies, blank_prophecy, prophecy);
+}
+
+fn chronicle<S: Io>(s: &mut S, w: &mut World) {
     let mut events: Vec<Event> = if s.reading() {
         Vec::new()
     } else {
@@ -1002,12 +1095,21 @@ fn world<S: Io>(s: &mut S, w: &mut World) {
     if s.reading() {
         w.chronicle = Chronicle::from_events(events);
     }
+}
+
+fn stats<S: Io>(s: &mut S, w: &mut World) {
     s.f64(&mut w.stats.peak_pop);
     vec_f64(s, &mut w.stats.pop_history);
+}
+
+fn counters<S: Io>(s: &mut S, w: &mut World) {
     s.u32(&mut w.century_wars);
     s.u32(&mut w.century_schools);
     s.u32(&mut w.century_polities_born);
     s.f64(&mut w.century_pop_start);
+}
+
+fn battlefields<S: Io>(s: &mut S, w: &mut World) {
     let mut names: Vec<(usize, String)> = w
         .battlefield_names
         .iter()
@@ -1028,42 +1130,259 @@ fn world<S: Io>(s: &mut S, w: &mut World) {
     }
 }
 
+// -- the chunk table ----------------------------------------------------------
+
+/// A four-byte ASCII chunk tag, little-endian.
+const fn tag(b: &[u8; 4]) -> u32 {
+    u32::from_le_bytes(*b)
+}
+
+/// The sections of the body, in the order the writer emits them, each with
+/// the current version of its records. Bump a version here when a section
+/// gains a field; never reuse or renumber a tag.
+macro_rules! sections {
+    ($($name:ident = $bytes:literal, $ver:literal, $f:ident;)*) => {
+        $(const $name: u32 = tag($bytes);)*
+
+        /// Write every section as a tagged, length-prefixed chunk.
+        fn write_body(wr: &mut Writer, w: &mut World) {
+            $(write_chunk(wr, $name, $ver, |s| $f(s, w));)*
+        }
+
+        /// Read one chunk into `w`. Returns false for a tag this build does
+        /// not know, or one whose records are newer than it can parse; the
+        /// caller then skips the chunk and the section keeps its default.
+        fn read_chunk(rd: &mut Reader, tag: u32, ver: u32, w: &mut World) -> bool {
+            match tag {
+                $($name if ver <= $ver => { $f(rd, w); true })*
+                _ => false,
+            }
+        }
+    };
+}
+
+sections! {
+    T_HEAD = b"head", 1, head;
+    T_TERR = b"terr", 1, terrain_sec;
+    T_CELL = b"cell", 1, cells;
+    T_RACE = b"race", 1, races;
+    T_CULT = b"cult", 1, cultures;
+    T_CITY = b"city", 1, cities;
+    T_POLY = b"poly", 1, polities;
+    T_PERS = b"pers", 1, persons;
+    T_SCHL = b"schl", 1, schools;
+    T_WARS = b"wars", 1, wars;
+    T_ERAS = b"eras", 1, eras;
+    T_PLAG = b"plag", 1, plagues;
+    T_ARTI = b"arti", 1, artifacts;
+    T_PROP = b"prop", 1, prophecies;
+    T_CHRN = b"chrn", 1, chronicle;
+    T_STAT = b"stat", 1, stats;
+    T_CTRS = b"ctrs", 1, counters;
+    T_BFNM = b"bfnm", 1, battlefields;
+}
+
+/// The version-1 body: the same sections, positional, with no chunk frames.
+/// Frozen; new sections belong in the table above, not here.
+fn read_v1(rd: &mut Reader, w: &mut World) {
+    head(rd, w);
+    terrain_sec(rd, w);
+    cells(rd, w);
+    races(rd, w);
+    cultures(rd, w);
+    cities(rd, w);
+    polities(rd, w);
+    persons(rd, w);
+    schools(rd, w);
+    wars(rd, w);
+    eras(rd, w);
+    plagues(rd, w);
+    artifacts(rd, w);
+    prophecies(rd, w);
+    chronicle(rd, w);
+    stats(rd, w);
+    counters(rd, w);
+    battlefields(rd, w);
+}
+
+fn write_chunk(wr: &mut Writer, tag: u32, ver: u32, f: impl FnOnce(&mut Writer)) {
+    let mut t = tag;
+    wr.u32(&mut t);
+    let mut v = ver;
+    wr.u32(&mut v);
+    let at = wr.buf.len();
+    let mut len = 0u64;
+    wr.u64(&mut len);
+    let outer = wr.ver;
+    wr.ver = ver;
+    f(wr);
+    wr.ver = outer;
+    let n = (wr.buf.len() - at - 8) as u64;
+    wr.buf[at..at + 8].copy_from_slice(&n.to_le_bytes());
+}
+
+// -- errors -------------------------------------------------------------------
+
+/// Everything that can go wrong reading or writing a save.
+#[derive(Debug)]
+pub enum SaveError {
+    /// The magic bytes are missing: this is not a save file at all.
+    NotASave,
+    /// A format too new (or too old) for this build.
+    UnsupportedVersion { found: u32, supported: u32 },
+    /// The file ends in the middle of a record.
+    Truncated,
+    /// The body does not match the checksum in the header.
+    Checksum,
+    /// The file parses but describes an impossible world.
+    Inconsistent,
+    /// The file could not be read or written.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for SaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SaveError::NotASave => write!(f, "not a Rise and Fall of Empires save file"),
+            SaveError::UnsupportedVersion { found, supported } => write!(
+                f,
+                "save file version {} is not supported (this build reads versions {}..={})",
+                found, MIN_VERSION, supported
+            ),
+            SaveError::Truncated => write!(f, "save file is truncated"),
+            SaveError::Checksum => write!(f, "save file is corrupt (checksum mismatch)"),
+            SaveError::Inconsistent => write!(f, "save file is inconsistent"),
+            SaveError::Io(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for SaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            SaveError::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for SaveError {
+    fn from(e: std::io::Error) -> SaveError {
+        SaveError::Io(e)
+    }
+}
+
+// -- file ---------------------------------------------------------------------
+
+/// FNV-1a, 64 bit: a few lines, and enough to catch a damaged save.
+pub fn fnv1a(b: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &x in b {
+        h ^= x as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    h
+}
+
 pub fn save(w: &mut World) -> Vec<u8> {
     let mut wr = Writer {
         buf: Vec::with_capacity(1 << 20),
+        ver: VERSION,
     };
     wr.buf.extend_from_slice(MAGIC);
-    let mut v = VERSION;
-    wr.u32(&mut v);
-    world(&mut wr, w);
-    wr.buf
+    wr.buf.extend_from_slice(&VERSION.to_le_bytes());
+    wr.buf.resize(HEADER, 0); // body length and checksum, patched below
+    write_body(&mut wr, w);
+    let mut buf = wr.buf;
+    let n = (buf.len() - HEADER) as u64;
+    let sum = fnv1a(&buf[HEADER..]);
+    buf[8..16].copy_from_slice(&n.to_le_bytes());
+    buf[16..HEADER].copy_from_slice(&sum.to_le_bytes());
+    buf
 }
 
-pub fn load(bytes: &[u8]) -> Result<World, String> {
+pub fn load(bytes: &[u8]) -> Result<World, SaveError> {
     if bytes.len() < 8 || &bytes[..4] != MAGIC {
-        return Err("not a Rise and Fall of Empires save file".into());
+        return Err(SaveError::NotASave);
     }
-    let mut rd = Reader {
-        buf: bytes,
-        pos: 4,
-        err: false,
-    };
-    let mut v = 0u32;
-    rd.u32(&mut v);
-    if v != VERSION {
-        return Err(format!(
-            "save file version {} is not supported (this build reads version {})",
-            v, VERSION
-        ));
-    }
+    let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
     let mut w = World::blank();
-    world(&mut rd, &mut w);
-    if rd.err {
-        return Err("save file is truncated or corrupt".into());
+    match version {
+        1 => {
+            let mut rd = Reader {
+                buf: &bytes[8..],
+                pos: 0,
+                err: false,
+                ver: 1,
+            };
+            read_v1(&mut rd, &mut w);
+            if rd.err {
+                return Err(SaveError::Truncated);
+            }
+        }
+        VERSION => read_body(bytes, &mut w)?,
+        found => {
+            return Err(SaveError::UnsupportedVersion {
+                found,
+                supported: VERSION,
+            })
+        }
     }
-    if w.cells.len() != w.terrain.w * w.terrain.h {
-        return Err("save file is inconsistent".into());
+    if w.terrain.w == 0 || w.terrain.h == 0 || w.cells.len() != w.terrain.w * w.terrain.h {
+        return Err(SaveError::Inconsistent);
     }
     w.recompute();
     Ok(w)
+}
+
+/// Walk the chunks of a current-version file, skipping the tags we do not know.
+fn read_body(bytes: &[u8], w: &mut World) -> Result<(), SaveError> {
+    if bytes.len() < HEADER {
+        return Err(SaveError::Truncated);
+    }
+    let mut n = [0u8; 8];
+    n.copy_from_slice(&bytes[8..16]);
+    let n = u64::from_le_bytes(n) as usize;
+    let mut sum = [0u8; 8];
+    sum.copy_from_slice(&bytes[16..HEADER]);
+    let sum = u64::from_le_bytes(sum);
+    let body = bytes
+        .get(HEADER..)
+        .and_then(|b| b.get(..n))
+        .ok_or(SaveError::Truncated)?;
+    if fnv1a(body) != sum {
+        return Err(SaveError::Checksum);
+    }
+    let mut pos = 0usize;
+    while pos < body.len() {
+        if pos + CHUNK_HEADER > body.len() {
+            return Err(SaveError::Truncated);
+        }
+        let mut hd = Reader {
+            buf: &body[pos..pos + CHUNK_HEADER],
+            pos: 0,
+            err: false,
+            ver: 0,
+        };
+        let (mut tag, mut ver, mut len) = (0u32, 0u32, 0u64);
+        hd.u32(&mut tag);
+        hd.u32(&mut ver);
+        hd.u64(&mut len);
+        pos += CHUNK_HEADER;
+        let end = (len as usize)
+            .checked_add(pos)
+            .filter(|e| *e <= body.len())
+            .ok_or(SaveError::Truncated)?;
+        let mut rd = Reader {
+            buf: &body[pos..end],
+            pos: 0,
+            err: false,
+            ver,
+        };
+        if read_chunk(&mut rd, tag, ver, w) && rd.err {
+            return Err(SaveError::Truncated);
+        }
+        pos = end;
+    }
+    Ok(())
 }

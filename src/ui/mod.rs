@@ -1530,6 +1530,7 @@ impl Ui {
                 Ok(())
             }
             Err(e) => {
+                let e = e.to_string();
                 self.say(&e);
                 Err(e)
             }
@@ -1560,7 +1561,7 @@ impl Ui {
                     self.world.year
                 ));
             }
-            Err(e) => self.say(&e),
+            Err(e) => self.say(&e.to_string()),
         }
     }
 

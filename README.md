@@ -90,6 +90,14 @@ Inside the game `:w` saves to `~/.local/share/empires/world-SEED.rfe` and
 `:e NAME` loads. Saves are self-contained and a loaded world continues
 exactly as it would have (the simulation is deterministic per seed).
 
+The file is a small header (magic, format version, body length and an
+FNV-1a checksum) followed by one tagged, length-prefixed chunk per section
+of the world. A reader skips chunks it does not know and defaults the ones
+that are missing, so saves survive new versions of the game; damage is
+reported as a checksum error rather than a mangled world. Saves written by
+older versions still load. See the module docs in `src/ser.rs` for the rule
+on adding a field.
+
 ### Config file
 
 `empires --mkconfig` writes `~/.config/empires/config`:
