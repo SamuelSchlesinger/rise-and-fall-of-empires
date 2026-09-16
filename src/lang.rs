@@ -367,7 +367,9 @@ impl Language {
         // Vowel shift.
         if rng.chance(0.5) {
             let i = rng.below(l.vowels.len());
-            let set: &[&str] = *rng.pick(VOWEL_SETS);
+            // Indexed rather than `pick(pick(..))`: old compilers (MSRV 1.70) cannot
+            // infer through the nested deref coercion. Same single draw as `pick`.
+            let set: &[&str] = VOWEL_SETS[rng.below(VOWEL_SETS.len())];
             let nv = *rng.pick(set);
             l.vowels[i] = nv.to_string();
         }
