@@ -372,10 +372,13 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         1 => {
             let mut cs: Vec<usize> = (0..w.cities.len()).collect();
+            // Living cities first, largest first within each group.
             cs.sort_by(|&a, &b| {
-                (w.cities[a].destroyed.is_some(), -w.cities[a].pop)
-                    .partial_cmp(&(w.cities[b].destroyed.is_some(), -w.cities[b].pop))
-                    .unwrap()
+                let (ca, cb) = (&w.cities[a], &w.cities[b]);
+                ca.destroyed
+                    .is_some()
+                    .cmp(&cb.destroyed.is_some())
+                    .then_with(|| cb.pop.total_cmp(&ca.pop))
             });
             for c in cs {
                 let city = &w.cities[c];
@@ -428,16 +431,13 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         3 => {
             let mut ss: Vec<usize> = (0..w.schools.len()).collect();
+            // Living schools first, most influential first within each group.
             ss.sort_by(|&a, &b| {
-                (
-                    w.schools[a].extinct.is_some(),
-                    -w.schools[a].total_influence(),
-                )
-                    .partial_cmp(&(
-                        w.schools[b].extinct.is_some(),
-                        -w.schools[b].total_influence(),
-                    ))
-                    .unwrap()
+                let (sa, sb) = (&w.schools[a], &w.schools[b]);
+                sa.extinct
+                    .is_some()
+                    .cmp(&sb.extinct.is_some())
+                    .then_with(|| sb.total_influence().total_cmp(&sa.total_influence()))
             });
             for s in ss {
                 let sc = &w.schools[s];
@@ -459,18 +459,14 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         4 => {
             let mut ps: Vec<usize> = (0..w.persons.len()).collect();
+            // The living first, then by renown, then youngest first.
             ps.sort_by(|&a, &b| {
-                let ka = (
-                    w.persons[a].died.is_some(),
-                    -w.persons[a].renown,
-                    -(w.persons[a].born as f32),
-                );
-                let kb = (
-                    w.persons[b].died.is_some(),
-                    -w.persons[b].renown,
-                    -(w.persons[b].born as f32),
-                );
-                ka.partial_cmp(&kb).unwrap()
+                let (pa, pb) = (&w.persons[a], &w.persons[b]);
+                pa.died
+                    .is_some()
+                    .cmp(&pb.died.is_some())
+                    .then_with(|| pb.renown.total_cmp(&pa.renown))
+                    .then_with(|| pb.born.cmp(&pa.born))
             });
             for p in ps.into_iter().take(400) {
                 let per = &w.persons[p];
@@ -1212,7 +1208,7 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                 .map(|(&p, &v)| (p, v))
                 .filter(|(p, v)| *v > 0.05 && w.polities[*p].alive())
                 .collect();
-            infl.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+            infl.sort_by(|a, b| b.1.total_cmp(&a.1));
             out.push(line(
                 format!("Following (hostility {:.0}%)", sc.hostility * 100.0),
                 ACCENT,
@@ -1701,7 +1697,7 @@ pub fn hand_of_fate(w: &mut World, p: usize, choice: u8) -> String {
                 w.persons[r].traits.ambition = 1.0;
                 w.persons[r].traits.valor = (w.persons[r].traits.valor + 0.3).min(1.0);
             }
-            for (_, t) in w.polities[p].tension.iter_mut() {
+            for t in w.polities[p].tension.values_mut() {
                 *t = (*t + 0.4).min(1.0);
             }
             let text = format!("{} dreamed three nights running of a crown of many crowns, and woke each time hungry.", w.ruler_title(p));
@@ -1713,7 +1709,7 @@ pub fn hand_of_fate(w: &mut World, p: usize, choice: u8) -> String {
             crate::sim::politics::ruler_dies(
                 w,
                 p,
-                "died quietly in the night, as if called away.".into(),
+                "died quietly in the night, as if called away.",
                 1,
             );
             format!("{} has died", who)

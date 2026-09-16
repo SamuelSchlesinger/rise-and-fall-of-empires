@@ -230,8 +230,8 @@ fn key_names_round_trip() {
         Key::F(1),
         Key::F(12),
     ];
-    for k in keys {
-        let name = config::key_name(k.clone());
+    for k in &keys {
+        let name = config::key_name(k);
         assert_eq!(
             config::parse_key(&name),
             Some(k.clone()),
@@ -354,4 +354,40 @@ fn terrain_is_sane() {
         assert!(t.river.iter().any(|&r| r > 0), "seed {}: no rivers", seed);
         assert!(t.coast.iter().any(|&c| c), "seed {}: no coast", seed);
     }
+}
+
+/// The smallest world the command line allows, `--width 40 --height 20`, has
+/// little room for realms: some seeds leave one with no cities, no neighbours
+/// or no land worth the name. Nothing in a tick may fall over on that.
+#[test]
+fn tiny_worlds_run_without_panicking() {
+    for seed in 1..=6u64 {
+        for detail in [Detail::Low, Detail::Medium, Detail::High] {
+            let mut w = World::new(seed, 40, 20, detail);
+            run(&mut w, 150);
+            assert_eq!(w.year, 150, "seed {} should have reached year 150", seed);
+            assert_eq!(w.cells.len(), w.terrain.n());
+            for p in w.living_polities() {
+                assert!(
+                    w.polities[p].cells <= w.terrain.n(),
+                    "seed {}: realm {} holds more land than the world has",
+                    seed,
+                    p
+                );
+            }
+        }
+    }
+}
+
+/// A tiny world left running long enough for realms to rise, fall and run out
+/// of cities altogether, and then saved and reloaded.
+#[test]
+fn a_cramped_world_survives_a_long_run() {
+    let mut w = World::new(3, 40, 20, Detail::High);
+    run(&mut w, 800);
+    assert_eq!(w.year, 800);
+    let bytes = ser::save(&mut w);
+    let back = ser::load(&bytes).expect("a tiny world should reload");
+    assert_eq!(back.year, w.year);
+    assert_eq!(back.polities.len(), w.polities.len());
 }

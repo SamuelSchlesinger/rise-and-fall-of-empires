@@ -546,8 +546,9 @@ pub fn eras(w: &mut World) {
     let realms = living.len().max(4) as u32;
     let warlike = wars > realms * 2 && wars > 15;
     let peaceful = wars * 2 < realms;
-    let (name, desc) = if share > 0.35 && w.polities[biggest.unwrap()].kind == PolityKind::Empire {
-        let p = biggest.unwrap();
+    // One realm holding better than a third of the world's land names the age.
+    let hegemon = biggest.filter(|&p| share > 0.35 && w.polities[p].kind == PolityKind::Empire);
+    let (name, desc) = if let Some(p) = hegemon {
         (
             prose::era_name_empire(w, p, &Pick::rolled(&rng)),
             prose::era_of_empire(w, p),

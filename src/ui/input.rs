@@ -45,7 +45,7 @@ impl Ui {
             return true;
         }
         if self.mode == Mode::Fate {
-            self.key_fate(k);
+            self.key_fate(&k);
             return true;
         }
         // Second key of a two-key command.
@@ -60,10 +60,10 @@ impl Ui {
                     self.clamp_view();
                 }
                 ('z', Key::Char('i')) | ('z', Key::Char('+')) => {
-                    self.set_zoom(self.zoom.saturating_sub(n.max(1)))
+                    self.set_zoom(self.zoom.saturating_sub(n.max(1)));
                 }
                 ('z', Key::Char('o')) | ('z', Key::Char('-')) => {
-                    self.set_zoom(self.zoom + n.max(1))
+                    self.set_zoom(self.zoom + n.max(1));
                 }
                 _ => {}
             }
@@ -172,14 +172,14 @@ impl Ui {
         }
         match self.mode {
             Mode::Map => {
-                if !self.key_map(k) {
+                if !self.key_map(&k) {
                     return false;
                 }
             }
-            Mode::List => self.key_list(k),
-            Mode::Detail => self.key_detail(k),
-            Mode::Chronicle => self.key_chronicle(k),
-            Mode::Recap => self.key_recap(k),
+            Mode::List => self.key_list(&k),
+            Mode::Detail => self.key_detail(&k),
+            Mode::Chronicle => self.key_chronicle(&k),
+            Mode::Recap => self.key_recap(&k),
             Mode::Help | Mode::Fate => {}
         }
         self.count = None;
@@ -218,12 +218,12 @@ impl Ui {
     }
 
     /// Returns false to quit.
-    fn key_map(&mut self, k: Key) -> bool {
+    fn key_map(&mut self, k: &Key) -> bool {
         let n = self.count.unwrap_or(1).max(1) as i32;
         let (_, _, mw, mh) = self.map_rect();
         let tw = self.world.terrain.w;
         let th = self.world.terrain.h;
-        if k != Key::Char('q') {
+        if *k != Key::Char('q') {
             self.quit_armed = None;
         }
         match k {
@@ -315,7 +315,7 @@ impl Ui {
         true
     }
 
-    fn key_list(&mut self, k: Key) {
+    fn key_list(&mut self, k: &Key) {
         let n = self.count.unwrap_or(1).max(1);
         let rows = self.list_rows();
         let len = rows.len();
@@ -343,11 +343,11 @@ impl Ui {
                 self.list_filter.clear();
             }
             Key::Up | Key::Char('k') | Key::Char('N') => {
-                self.list_idx = self.list_idx.saturating_sub(n)
+                self.list_idx = self.list_idx.saturating_sub(n);
             }
             Key::Down | Key::Char('j') | Key::Char('n') => self.list_idx += n,
             Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => {
-                self.list_idx = self.list_idx.saturating_sub(page * n)
+                self.list_idx = self.list_idx.saturating_sub(page * n);
             }
             Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => self.list_idx += page * n,
             Key::Ctrl('u') => self.list_idx = self.list_idx.saturating_sub(page / 2 * n),
@@ -378,7 +378,7 @@ impl Ui {
         self.list_idx = self.list_idx.min(len.saturating_sub(1));
     }
 
-    fn key_detail(&mut self, k: Key) {
+    fn key_detail(&mut self, k: &Key) {
         let n = self.count.unwrap_or(1).max(1);
         let r = match self.selected {
             Some(r) => r,
@@ -406,7 +406,7 @@ impl Ui {
             Key::Up | Key::Char('k') => self.detail_scroll = self.detail_scroll.saturating_sub(n),
             Key::Down | Key::Char('j') => self.detail_scroll += n,
             Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => {
-                self.detail_scroll = self.detail_scroll.saturating_sub(page * n)
+                self.detail_scroll = self.detail_scroll.saturating_sub(page * n);
             }
             Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => self.detail_scroll += page * n,
             Key::Ctrl('u') => self.detail_scroll = self.detail_scroll.saturating_sub(page / 2 * n),
@@ -429,7 +429,7 @@ impl Ui {
                 self.mode = Mode::Map;
             }
             Key::Char(c) => {
-                if let Some(link) = detail::follow_link(&self.world, r, c) {
+                if let Some(link) = detail::follow_link(&self.world, r, *c) {
                     self.open_detail(link);
                 }
             }
@@ -437,7 +437,7 @@ impl Ui {
         }
     }
 
-    fn key_chronicle(&mut self, k: Key) {
+    fn key_chronicle(&mut self, k: &Key) {
         let n = self.count.unwrap_or(1).max(1);
         let page = self.screen.h.saturating_sub(2).max(1);
         match k {
@@ -452,7 +452,7 @@ impl Ui {
             Key::Down | Key::Char('j') => self.chron_scroll = self.chron_scroll.saturating_sub(n),
             Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => self.chron_scroll += page * n,
             Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => {
-                self.chron_scroll = self.chron_scroll.saturating_sub(page * n)
+                self.chron_scroll = self.chron_scroll.saturating_sub(page * n);
             }
             Key::Ctrl('u') => self.chron_scroll += page / 2 * n,
             Key::Ctrl('d') => self.chron_scroll = self.chron_scroll.saturating_sub(page / 2 * n),
@@ -464,7 +464,7 @@ impl Ui {
         }
     }
 
-    fn key_recap(&mut self, k: Key) {
+    fn key_recap(&mut self, k: &Key) {
         let n = self.count.unwrap_or(1).max(1);
         let page = self.screen.h.saturating_sub(2).max(1);
         match k {
@@ -472,7 +472,7 @@ impl Ui {
             Key::Up | Key::Char('k') => self.recap_scroll = self.recap_scroll.saturating_sub(n),
             Key::Down | Key::Char('j') => self.recap_scroll += n,
             Key::PageUp | Key::Ctrl('b') | Key::ShiftUp => {
-                self.recap_scroll = self.recap_scroll.saturating_sub(page * n)
+                self.recap_scroll = self.recap_scroll.saturating_sub(page * n);
             }
             Key::PageDown | Key::Ctrl('f') | Key::ShiftDown => self.recap_scroll += page * n,
             Key::Ctrl('u') => self.recap_scroll = self.recap_scroll.saturating_sub(page / 2 * n),
@@ -486,7 +486,7 @@ impl Ui {
         }
     }
 
-    fn key_fate(&mut self, k: Key) {
+    fn key_fate(&mut self, k: &Key) {
         let p = match self.selected {
             Some(Ref::Polity(p)) => p,
             _ => {
@@ -496,8 +496,8 @@ impl Ui {
         };
         match k {
             Key::Esc | Key::Char('x') | Key::Char('q') => self.mode = self.prev_mode,
-            Key::Char(c) if ('1'..='6').contains(&c) => {
-                self.choose_fate(p, c as usize - '1' as usize)
+            Key::Char(c) if ('1'..='6').contains(c) => {
+                self.choose_fate(p, *c as usize - '1' as usize);
             }
             _ => {}
         }
@@ -726,9 +726,9 @@ impl Ui {
                         let rows = self.list_rows();
                         if row < rows.len() {
                             let r = rows[row].1;
-                            if row == self.list_idx && (double || button == 2) {
-                                self.open_detail(r);
-                            } else if button == 2 {
+                            // The right button opens at once; the left needs
+                            // the row to be the selected one already.
+                            if button == 2 || (row == self.list_idx && double) {
                                 self.open_detail(r);
                             }
                             self.list_idx = row;

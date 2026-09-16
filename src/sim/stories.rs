@@ -412,7 +412,7 @@ pub fn tick_artifacts(w: &mut World) {
             prestige += pw * 0.4;
             match w.artifacts[a].kind {
                 ArtifactKind::Crown | ArtifactKind::Banner | ArtifactKind::Horn => {
-                    stab += 0.01 * pw
+                    stab += 0.01 * pw;
                 }
                 ArtifactKind::Chalice | ArtifactKind::Mirror => stab += 0.005 * pw,
                 _ => {}

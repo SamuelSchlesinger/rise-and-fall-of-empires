@@ -8,6 +8,7 @@ use crate::rng::Rng;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+/// What grows (or does not) on one cell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 #[repr(u8)]
 pub enum Biome {
@@ -42,9 +43,12 @@ pub enum BiomeGroup {
     Wetland = 4,
     Arid = 5,
 }
+/// How many [`BiomeGroup`]s there are, and so the length of a race's
+/// affinity table.
 pub const GROUP_COUNT: usize = 6;
 
 impl BiomeGroup {
+    /// Every group, in the order a race's affinities are stored.
     pub fn all() -> [BiomeGroup; GROUP_COUNT] {
         [
             BiomeGroup::Cold,
@@ -55,6 +59,7 @@ impl BiomeGroup {
             BiomeGroup::Arid,
         ]
     }
+    /// How the chronicle names this kind of country.
     pub fn phrase(self) -> &'static str {
         match self {
             BiomeGroup::Cold => "the cold north and the snow-forests",
@@ -68,15 +73,18 @@ impl BiomeGroup {
 }
 
 impl Biome {
+    /// Sea, lake or shallows: nothing lives here.
     pub fn is_water(self) -> bool {
         matches!(
             self,
             Biome::DeepOcean | Biome::Ocean | Biome::Shallows | Biome::Lake
         )
     }
+    /// Salt water, as opposed to a lake.
     pub fn is_sea(self) -> bool {
         matches!(self, Biome::DeepOcean | Biome::Ocean | Biome::Shallows)
     }
+    /// The name the chronicle and the legend use.
     pub fn name(self) -> &'static str {
         match self {
             Biome::DeepOcean => "deep ocean",
@@ -99,6 +107,7 @@ impl Biome {
             Biome::Wastes => "blighted wastes",
         }
     }
+    /// The coarse group a race can have an affinity for; `None` for water.
     pub fn group(self) -> Option<BiomeGroup> {
         match self {
             Biome::Ice | Biome::Tundra | Biome::Taiga => Some(BiomeGroup::Cold),
@@ -130,6 +139,7 @@ impl Biome {
             Biome::Wastes => Some(4.0),
         }
     }
+    /// How many people the land can feed before moisture and heat are applied.
     pub fn base_fertility(self) -> f32 {
         match self {
             Biome::Ice => 0.0,
@@ -164,6 +174,7 @@ impl Biome {
     }
 }
 
+/// A kind of named place: a sea, a range, a forest, a river, a ley nexus.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FeatureKind {
     Ocean,
@@ -182,6 +193,7 @@ pub enum FeatureKind {
 }
 
 impl FeatureKind {
+    /// The common noun for this kind of place.
     pub fn label(self) -> &'static str {
         match self {
             FeatureKind::Ocean => "ocean",
@@ -201,16 +213,23 @@ impl FeatureKind {
     }
 }
 
+/// One named (or as yet unnamed) place on the map.
 #[derive(Clone, Debug)]
 pub struct Feature {
+    /// What sort of place it is.
     pub kind: FeatureKind,
+    /// Its name, once somebody has been there to give it one.
     pub name: Option<String>,
+    /// The polity whose language named it.
     pub named_by: Option<usize>,
+    /// Every cell it covers.
     pub cells: Vec<usize>,
+    /// Where a label for it goes.
     pub center: (usize, usize),
 }
 
 impl Feature {
+    /// Its name, or "an unnamed forest" and the like.
     pub fn display(&self) -> String {
         match &self.name {
             Some(n) => n.clone(),
@@ -219,27 +238,44 @@ impl Feature {
     }
 }
 
+/// The whole stage: one value per cell for each of elevation, climate,
+/// biome, water, soil and mana, plus the named places over the top.
 pub struct Terrain {
+    /// Width in cells.
     pub w: usize,
+    /// Height in cells.
     pub h: usize,
+    /// Height in `[0, 1]`, normalised across the map.
     pub elev: Vec<f32>,
+    /// The elevation at which the sea stops.
     pub sea: f32,
+    /// Temperature in `[0, 1]`, cold to hot.
     pub temp: Vec<f32>,
+    /// Moisture in `[0, 1]`, dry to wet.
     pub moist: Vec<f32>,
+    /// What each cell became.
     pub biome: Vec<Biome>,
     /// 0 none, 1 stream, 2 river, 3 great river
     pub river: Vec<u8>,
+    /// How many cells drain through each one.
     pub flow: Vec<u32>,
+    /// How many people the cell can feed.
     pub fertility: Vec<f32>,
+    /// What can be dug out of it.
     pub minerals: Vec<f32>,
+    /// How thick the ley lines run.
     pub mana: Vec<f32>,
+    /// Whether the cell touches the sea.
     pub coast: Vec<bool>,
     /// Index+1 into `features` for the land/water region a cell belongs to (0 = none).
     pub region: Vec<u16>,
     /// Index+1 into `features` for the river a cell carries (0 = none).
     pub river_feat: Vec<u16>,
+    /// Index+1 into `features` for the continent or island a cell is part of.
     pub landmass: Vec<u16>,
+    /// Every named place in the world.
     pub features: Vec<Feature>,
+    /// How many cells are not water.
     pub land_count: usize,
 }
 
@@ -256,6 +292,7 @@ const NB8: [(i32, i32); 8] = [
 const NB4: [(i32, i32); 4] = [(0, -1), (-1, 0), (1, 0), (0, 1)];
 
 impl Terrain {
+    /// A terrain with no cells at all, for a world about to be loaded into.
     pub fn empty() -> Terrain {
         Terrain {
             w: 0,
@@ -280,19 +317,24 @@ impl Terrain {
     }
 
     #[inline]
+    /// The cell index of (`x`, `y`).
     pub fn idx(&self, x: usize, y: usize) -> usize {
         y * self.w + x
     }
     #[inline]
+    /// The column and row of cell `i`.
     pub fn xy(&self, i: usize) -> (usize, usize) {
         (i % self.w, i / self.w)
     }
+    /// How many cells the map has.
     pub fn n(&self) -> usize {
         self.w * self.h
     }
+    /// Whether anything can live on cell `i`.
     pub fn is_land(&self, i: usize) -> bool {
         !self.biome[i].is_water()
     }
+    /// The cells touching `i`, diagonals included, clipped at the edges.
     pub fn neighbors8(&self, i: usize) -> impl Iterator<Item = usize> + '_ {
         let (x, y) = self.xy(i);
         NB8.iter().filter_map(move |&(dx, dy)| {
@@ -305,6 +347,7 @@ impl Terrain {
             }
         })
     }
+    /// The cells sharing an edge with `i`, clipped at the map's edges.
     pub fn neighbors4(&self, i: usize) -> impl Iterator<Item = usize> + '_ {
         let (x, y) = self.xy(i);
         NB4.iter().filter_map(move |&(dx, dy)| {
@@ -325,9 +368,11 @@ impl Terrain {
             .unsigned_abs()
             .max((ay as i32 - by as i32).unsigned_abs()) as usize
     }
+    /// Height above sea level in `[0, 1]`, 0 at the shore.
     pub fn height_norm(&self, i: usize) -> f32 {
         ((self.elev[i] - self.sea) / (1.0 - self.sea)).clamp(0.0, 1.0)
     }
+    /// The region feature cell `i` belongs to, if any.
     pub fn feature_at(&self, i: usize) -> Option<usize> {
         if self.region[i] > 0 {
             Some(self.region[i] as usize - 1)
@@ -335,6 +380,7 @@ impl Terrain {
             None
         }
     }
+    /// The river running through cell `i`, if any.
     pub fn river_at(&self, i: usize) -> Option<usize> {
         if self.river_feat[i] > 0 {
             Some(self.river_feat[i] as usize - 1)
@@ -354,6 +400,7 @@ impl Terrain {
         }
     }
 
+    /// A phrase for the land at cell `i`, for the chronicle and the sidebar.
     pub fn describe_cell(&self, i: usize) -> String {
         let b = self.biome[i];
         let mut s = String::from(b.name());
@@ -371,11 +418,13 @@ impl Terrain {
 
 fn percentile(vals: &[f32], p: f32) -> f32 {
     let mut v: Vec<f32> = vals.to_vec();
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v.sort_by(f32::total_cmp);
     let k = ((v.len() - 1) as f32 * p) as usize;
     v[k]
 }
 
+/// Raise a whole world: elevation, climate, rivers, biomes, soil, mana and
+/// the names of the places they make. Deterministic in `rng`.
 pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
     let n = w * h;
     let noise_e = Noise::new(rng);
@@ -408,7 +457,7 @@ pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
             let edge = (ex.min(ey) * 5.0).clamp(0.0, 1.0);
             let edge = edge * edge * (3.0 - 2.0 * edge);
             let mut e = base * 0.55 + cont * 0.45;
-            e = e * (0.25 + 0.75 * edge);
+            e *= 0.25 + 0.75 * edge;
             e += ridge * 0.13 * (cont * 0.6 + 0.4);
             elev[y * w + x] = e;
         }
@@ -448,7 +497,7 @@ pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
     // Cooling with altitude uses each cell's rank among land heights, so only
     // the genuinely high country turns cold whatever the continent's shape.
     let mut land_h: Vec<f32> = (0..n).filter(|&i| !water[i]).map(|i| t.elev[i]).collect();
-    land_h.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    land_h.sort_by(f32::total_cmp);
     let rank_of = |e: f32| -> f32 {
         if land_h.is_empty() {
             return 0.0;
@@ -501,11 +550,11 @@ pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
     let land_raw: Vec<f32> = (0..n).filter(|&i| !water[i]).map(|i| raw[i]).collect();
     let m_lo = percentile(&land_raw, 0.05);
     let m_hi = percentile(&land_raw, 0.9);
-    for i in 0..n {
+    for (i, (&r, moist)) in raw.iter().zip(t.moist.iter_mut()).enumerate() {
         let (x, y) = (i % w, i / w);
         let nz = noise_m.fbm(x as f32 * 0.06, y as f32 * 0.12, 3, 2.0, 0.5) * 0.25;
-        let v = (raw[i] - m_lo) / (m_hi - m_lo + 1e-6) + nz;
-        t.moist[i] = v.clamp(0.0, 1.0);
+        let v = (r - m_lo) / (m_hi - m_lo + 1e-6) + nz;
+        *moist = v.clamp(0.0, 1.0);
     }
 
     // --- Hydrology: priority-flood depression filling, then flow ---------
@@ -558,7 +607,7 @@ pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
         dir[i] = best;
     }
     let mut order: Vec<usize> = (0..n).filter(|&i| !water[i]).collect();
-    order.sort_by(|&a, &b| filled[b].partial_cmp(&filled[a]).unwrap());
+    order.sort_by(|&a, &b| filled[b].total_cmp(&filled[a]));
     let mut acc = vec![0f32; n];
     for &i in &order {
         acc[i] += (t.moist[i] - 0.15).max(0.0) * (1.0 + t.temp[i] * 0.5);
@@ -727,9 +776,16 @@ pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
     }
 
     t.land_count = t.biome.iter().filter(|b| !b.is_water()).count();
-    label_features(&mut t, &nexi, dir);
+    label_features(&mut t, &nexi, &dir);
     t
 }
+
+/// Whether a cell belongs to a feature of some kind.
+type FeatureTest = Box<dyn Fn(usize, &Terrain) -> bool>;
+
+/// A kind of feature, the test for its cells and the fewest cells one needs
+/// to be worth a name.
+type FeatureSpec = (FeatureKind, FeatureTest, usize);
 
 fn components(t: &Terrain, pred: &dyn Fn(usize) -> bool, four: bool) -> Vec<Vec<usize>> {
     let n = t.n();
@@ -772,7 +828,7 @@ fn centroid(t: &Terrain, cells: &[usize]) -> (usize, usize) {
     (sx / cells.len().max(1), sy / cells.len().max(1))
 }
 
-fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usize>>) {
+fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: &[Option<usize>]) {
     let n = t.n();
     let water_total = n - t.land_count;
     let mut features: Vec<Feature> = Vec::new();
@@ -848,7 +904,7 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: Vec<Option<usi
     }
     t.landmass = landmass;
     // Ranges, forests, deserts, marshes, steppes.
-    let specs: Vec<(FeatureKind, Box<dyn Fn(usize, &Terrain) -> bool>, usize)> = vec![
+    let specs: Vec<FeatureSpec> = vec![
         (
             FeatureKind::Range,
             Box::new(|i, t| matches!(t.biome[i], Biome::Mountain | Biome::Peak)),

@@ -188,12 +188,7 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
         .collect();
     if !dead.is_empty() {
         let mut best = dead.clone();
-        best.sort_by(|&a, &b| {
-            w.persons[b]
-                .renown
-                .partial_cmp(&w.persons[a].renown)
-                .unwrap()
-        });
+        best.sort_by(|&a, &b| w.persons[b].renown.total_cmp(&w.persons[a].renown));
         let items: Vec<String> = best
             .iter()
             .take(4)
@@ -246,7 +241,7 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
     if !founded.is_empty() || !razed.is_empty() || !sacked.is_empty() {
         let mut items = Vec::new();
         let mut biggest = founded.clone();
-        biggest.sort_by(|&a, &b| w.cities[b].pop.partial_cmp(&w.cities[a].pop).unwrap());
+        biggest.sort_by(|&a, &b| w.cities[b].pop.total_cmp(&w.cities[a].pop));
         for &c in biggest.iter().take(2) {
             items.push(format!(
                 "{} was founded in {} and is {} of {} people.",
@@ -467,8 +462,8 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
 fn count(n: usize, noun: &str) -> String {
     let plural = if n == 1 {
         noun.to_string()
-    } else if noun.ends_with('y') {
-        format!("{}ies", &noun[..noun.len() - 1])
+    } else if let Some(stem) = noun.strip_suffix('y') {
+        format!("{}ies", stem)
     } else {
         format!("{}s", noun)
     };

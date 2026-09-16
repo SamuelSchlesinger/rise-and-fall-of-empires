@@ -4,6 +4,7 @@
 
 use crate::term::Rgb;
 
+/// One of the palettes the finished frame can be re-coloured into.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Theme {
     Default,
@@ -14,6 +15,7 @@ pub enum Theme {
 }
 
 impl Theme {
+    /// Every theme, in the order `next` cycles them.
     pub fn all() -> [Theme; 5] {
         [
             Theme::Default,
@@ -23,6 +25,7 @@ impl Theme {
             Theme::Dusk,
         ]
     }
+    /// The name the config file and `:theme` use.
     pub fn name(self) -> &'static str {
         match self {
             Theme::Default => "default",
@@ -32,15 +35,18 @@ impl Theme {
             Theme::Dusk => "dusk",
         }
     }
+    /// The theme of that name, ignoring case.
     pub fn from_name(s: &str) -> Option<Theme> {
         let s = s.to_lowercase();
         Theme::all().into_iter().find(|t| t.name() == s)
     }
+    /// The next theme round the cycle.
     pub fn next(self) -> Theme {
         let all = Theme::all();
         let i = all.iter().position(|&t| t == self).unwrap_or(0);
         all[(i + 1) % all.len()]
     }
+    /// Whether `map` leaves colours alone, so the caller can skip it.
     pub fn is_identity(self) -> bool {
         self == Theme::Default
     }

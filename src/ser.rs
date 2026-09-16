@@ -54,51 +54,66 @@ pub const HEADER: usize = 24;
 /// Tag, record version, payload length.
 pub const CHUNK_HEADER: usize = 16;
 
+/// One traversal of a world's fields, used both to write and to read: each
+/// section is described once, and [`Writer`] and [`Reader`] play it in
+/// opposite directions.
 pub trait Io {
+    /// True when this traversal is filling the world in from bytes.
     fn reading(&self) -> bool;
     /// The record version of the section being visited: the current one when
     /// writing, the one the file carries when reading. No record needs it
     /// yet — the first one to gain a field will (see the module docs).
     #[allow(dead_code)]
     fn ver(&self) -> u32;
+    /// Visit one byte.
     fn u8(&mut self, v: &mut u8);
+    /// Visit a length-prefixed run of bytes.
     fn bytes(&mut self, v: &mut Vec<u8>);
+    /// Visit a little-endian `u32`.
     fn u32(&mut self, v: &mut u32) {
         let mut b = v.to_le_bytes().to_vec();
         self.fixed(&mut b, 4);
         *v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
     }
+    /// Visit a little-endian `u64`.
     fn u64(&mut self, v: &mut u64) {
         let mut b = v.to_le_bytes().to_vec();
         self.fixed(&mut b, 8);
         *v = u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
     }
+    /// Visit exactly `n` bytes, with no length prefix.
     fn fixed(&mut self, b: &mut Vec<u8>, n: usize);
+    /// Visit an `i32`, two's complement.
     fn i32(&mut self, v: &mut i32) {
         let mut u = *v as u32;
         self.u32(&mut u);
         *v = u as i32;
     }
+    /// Visit an `f32` by its bits, so the value survives exactly.
     fn f32(&mut self, v: &mut f32) {
         let mut u = v.to_bits();
         self.u32(&mut u);
         *v = f32::from_bits(u);
     }
+    /// Visit an `f64` by its bits, so the value survives exactly.
     fn f64(&mut self, v: &mut f64) {
         let mut u = v.to_bits();
         self.u64(&mut u);
         *v = f64::from_bits(u);
     }
+    /// Visit a `usize`, on the wire as a `u64`.
     fn usize(&mut self, v: &mut usize) {
         let mut u = *v as u64;
         self.u64(&mut u);
         *v = u as usize;
     }
+    /// Visit a `bool`, on the wire as one byte.
     fn bool(&mut self, v: &mut bool) {
         let mut b = *v as u8;
         self.u8(&mut b);
         *v = b != 0;
     }
+    /// Visit a length-prefixed UTF-8 string; invalid bytes are replaced.
     fn string(&mut self, v: &mut String) {
         let mut b = v.as_bytes().to_vec();
         self.bytes(&mut b);
@@ -106,7 +121,9 @@ pub trait Io {
     }
 }
 
+/// An [`Io`] that appends to a buffer.
 pub struct Writer {
+    /// The bytes written so far.
     pub buf: Vec<u8>,
     ver: u32,
 }
@@ -131,9 +148,12 @@ impl Io for Writer {
     }
 }
 
+/// An [`Io`] that consumes a buffer. It never panics on damaged input: it
+/// sets `err` and hands out zeroes from then on.
 pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
+    /// Set once the reader has run off the end of the buffer.
     pub err: bool,
     ver: u32,
 }
@@ -195,16 +215,16 @@ fn opt<S: Io, T: Default>(s: &mut S, v: &mut Option<T>, f: impl Fn(&mut S, &mut 
 }
 
 fn opt_usize<S: Io>(s: &mut S, v: &mut Option<usize>) {
-    opt(s, v, |s, t| s.usize(t));
+    opt(s, v, Io::usize);
 }
 fn opt_i32<S: Io>(s: &mut S, v: &mut Option<i32>) {
-    opt(s, v, |s, t| s.i32(t));
+    opt(s, v, Io::i32);
 }
 fn opt_string<S: Io>(s: &mut S, v: &mut Option<String>) {
-    opt(s, v, |s, t| s.string(t));
+    opt(s, v, Io::string);
 }
 fn opt_bool<S: Io>(s: &mut S, v: &mut Option<bool>) {
-    opt(s, v, |s, t| s.bool(t));
+    opt(s, v, Io::bool);
 }
 
 fn seq<S: Io, T>(s: &mut S, v: &mut Vec<T>, blank: impl Fn() -> T, f: impl Fn(&mut S, &mut T)) {
@@ -227,16 +247,16 @@ fn seq<S: Io, T>(s: &mut S, v: &mut Vec<T>, blank: impl Fn() -> T, f: impl Fn(&m
 }
 
 fn vec_usize<S: Io>(s: &mut S, v: &mut Vec<usize>) {
-    seq(s, v, || 0, |s, t| s.usize(t));
+    seq(s, v, || 0, Io::usize);
 }
 fn vec_string<S: Io>(s: &mut S, v: &mut Vec<String>) {
-    seq(s, v, String::new, |s, t| s.string(t));
+    seq(s, v, String::new, Io::string);
 }
 fn vec_f32<S: Io>(s: &mut S, v: &mut Vec<f32>) {
-    seq(s, v, || 0.0, |s, t| s.f32(t));
+    seq(s, v, || 0.0, Io::f32);
 }
 fn vec_f64<S: Io>(s: &mut S, v: &mut Vec<f64>) {
-    seq(s, v, || 0.0, |s, t| s.f64(t));
+    seq(s, v, || 0.0, Io::f64);
 }
 fn vec_u8<S: Io>(s: &mut S, v: &mut Vec<u8>) {
     s.bytes(v);
@@ -246,13 +266,16 @@ fn vec_u16<S: Io>(s: &mut S, v: &mut Vec<u16>) {
     s.bytes(&mut b);
     if s.reading() {
         *v = b
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .copied()
+            .map(u16::from_le_bytes)
             .collect();
     }
 }
 fn vec_u32<S: Io>(s: &mut S, v: &mut Vec<u32>) {
-    seq(s, v, || 0, |s, t| s.u32(t));
+    seq(s, v, || 0, Io::u32);
 }
 fn vec_bool<S: Io>(s: &mut S, v: &mut Vec<bool>) {
     let mut b: Vec<u8> = v.iter().map(|&x| x as u8).collect();
@@ -661,7 +684,7 @@ fn polity<S: Io>(s: &mut S, p: &mut Polity) {
     s.bool(&mut p.seafaring);
     opt_usize(s, &mut p.school);
     vec_usize(s, &mut p.wars);
-    map(s, &mut p.tension, |s, v| s.f32(v));
+    map(s, &mut p.tension, Io::f32);
     seq(
         s,
         &mut p.neighbors,
@@ -683,8 +706,8 @@ fn polity<S: Io>(s: &mut S, p: &mut Polity) {
     vec_usize(s, &mut p.rulers);
     vec_usize(s, &mut p.generals);
     s.i32(&mut p.last_kind_change);
-    map(s, &mut p.culture_counts, |s, v| s.u32(v));
-    map(s, &mut p.truce, |s, v| s.i32(v));
+    map(s, &mut p.culture_counts, Io::u32);
+    map(s, &mut p.truce, Io::i32);
 }
 
 fn blank_polity() -> Polity {
@@ -792,7 +815,7 @@ fn school<S: Io>(s: &mut S, c: &mut School) {
     s.i32(&mut c.founded);
     s.usize(&mut c.home_city);
     opt_usize(s, &mut c.parent);
-    map(s, &mut c.influence, |s, v| s.f32(v));
+    map(s, &mut c.influence, Io::f32);
     opt_i32(s, &mut c.extinct);
     rgb(s, &mut c.color);
     s.f32(&mut c.hostility);
@@ -1284,6 +1307,7 @@ pub fn fnv1a(b: &[u8]) -> u64 {
     h
 }
 
+/// The whole world as bytes: header, then one tagged chunk per section.
 pub fn save(w: &mut World) -> Vec<u8> {
     let mut wr = Writer {
         buf: Vec::with_capacity(1 << 20),
@@ -1301,6 +1325,12 @@ pub fn save(w: &mut World) -> Vec<u8> {
     buf
 }
 
+/// Rebuild a world from [`save`]'s bytes.
+///
+/// # Errors
+///
+/// [`SaveError`] if the bytes are not a save, are of an unreadable version,
+/// are truncated, fail the checksum, or describe an impossible world.
 pub fn load(bytes: &[u8]) -> Result<World, SaveError> {
     if bytes.len() < 8 || &bytes[..4] != MAGIC {
         return Err(SaveError::NotASave);

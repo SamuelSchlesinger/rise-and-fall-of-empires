@@ -1,29 +1,120 @@
 //! User configuration: `~/.config/empires/config` with `key = value`
 //! settings and vim-style `map <from> <to>` key remaps.
 
+use crate::sim::tuning::UnknownField;
 use crate::sim::Detail;
 use crate::term::Key;
 use std::path::PathBuf;
 
+/// Why one `key = value` setting was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfigError {
+    /// No setting goes by that name.
+    UnknownSetting(String),
+    /// The setting exists but the value does not fit it.
+    BadValue {
+        /// The setting's name.
+        key: String,
+        /// What the value should have looked like, e.g. "low, medium or high".
+        expected: &'static str,
+    },
+    /// A `tune.<field>` setting named a field that does not exist.
+    UnknownTuning(UnknownField),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::UnknownSetting(k) => write!(f, "unknown setting '{}'", k),
+            ConfigError::BadValue { key, expected } => write!(f, "{} must be {}", key, expected),
+            ConfigError::UnknownTuning(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ConfigError::UnknownTuning(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<UnknownField> for ConfigError {
+    fn from(e: UnknownField) -> ConfigError {
+        ConfigError::UnknownTuning(e)
+    }
+}
+
+/// Why the commented config template could not be written.
+#[derive(Debug)]
+pub enum TemplateError {
+    /// There is a config file there already; it is never overwritten.
+    Exists(PathBuf),
+    /// The directory or the file could not be written.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for TemplateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TemplateError::Exists(p) => write!(f, "{} already exists", p.display()),
+            TemplateError::Io(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for TemplateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            TemplateError::Io(e) => Some(e),
+            TemplateError::Exists(_) => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for TemplateError {
+    fn from(e: std::io::Error) -> TemplateError {
+        TemplateError::Io(e)
+    }
+}
+
+/// Everything the config file can say. `None` means "the file did not
+/// mention it", so a command-line flag or the default still wins.
 #[derive(Default, Clone)]
 pub struct Config {
+    /// How much detail the simulation keeps.
     pub detail: Option<Detail>,
+    /// Years per second at start.
     pub speed: Option<f64>,
+    /// A [`crate::theme::Theme`] name.
     pub theme: Option<String>,
+    /// Whether to capture the mouse.
     pub mouse: Option<bool>,
+    /// Whether to draw with plain ASCII glyphs.
     pub ascii: Option<bool>,
+    /// Years between autosaves, 0 for never.
     pub autosave: Option<i32>,
+    /// Map width in cells.
     pub width: Option<usize>,
+    /// Map height in cells.
     pub height: Option<usize>,
+    /// Lowest importance shown in the event log.
     pub log: Option<u8>,
+    /// Whether the cursor follows major events.
     pub follow: Option<bool>,
+    /// World cells per character, 1 to 4.
     pub zoom: Option<usize>,
+    /// `map <from> <to>` key remaps, in the order they were written.
     pub maps: Vec<(Key, Key)>,
     /// `tune.<field> = <number>` overrides for `sim::tuning::Tuning`.
     pub tunes: Vec<(String, f64)>,
+    /// Complaints about the file, reported once the interface is up.
     pub errors: Vec<String>,
 }
 
+/// `$XDG_CONFIG_HOME/empires`, or `~/.config/empires`.
 pub fn config_dir() -> PathBuf {
     if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
         if !x.is_empty() {
@@ -34,10 +125,13 @@ pub fn config_dir() -> PathBuf {
     PathBuf::from(home).join(".config/empires")
 }
 
+/// The config file itself: [`config_dir`] plus `config`.
 pub fn config_path() -> PathBuf {
     config_dir().join("config")
 }
 
+/// Read [`config_path`]. A missing file is not an error, and a bad line is
+/// collected into `Config::errors` rather than stopping the rest.
 pub fn load() -> Config {
     let mut c = Config::default();
     let text = match std::fs::read_to_string(config_path()) {
@@ -90,42 +184,45 @@ fn parse_bool(v: &str) -> Option<bool> {
 }
 
 impl Config {
-    /// Apply one `key = value` setting. Returns an error message for bad input.
-    pub fn set(&mut self, k: &str, v: &str) -> Result<(), String> {
+    /// Apply one `key = value` setting.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError`] naming the setting, if it is unknown or the value does
+    /// not fit it.
+    pub fn set(&mut self, k: &str, v: &str) -> Result<(), ConfigError> {
+        // A value that does not parse: "<k> must be <expected>".
+        let bad = |expected: &'static str| ConfigError::BadValue {
+            key: k.to_string(),
+            expected,
+        };
         match k {
             "detail" => {
                 self.detail = Some(match v.to_lowercase().as_str() {
                     "low" | "l" => Detail::Low,
                     "medium" | "med" | "m" => Detail::Medium,
                     "high" | "h" => Detail::High,
-                    _ => return Err("detail must be low, medium or high".into()),
-                })
+                    _ => return Err(bad("low, medium or high")),
+                });
             }
-            "speed" => self.speed = Some(v.parse().map_err(|_| "speed must be a number")?),
+            "speed" => self.speed = Some(v.parse().map_err(|_| bad("a number"))?),
             "theme" => self.theme = Some(v.to_lowercase()),
-            "mouse" => self.mouse = Some(parse_bool(v).ok_or("mouse must be on or off")?),
-            "ascii" => self.ascii = Some(parse_bool(v).ok_or("ascii must be on or off")?),
-            "autosave" => {
-                self.autosave = Some(
-                    v.parse()
-                        .map_err(|_| "autosave must be a number of years")?,
-                )
-            }
-            "width" => self.width = Some(v.parse().map_err(|_| "width must be a number")?),
-            "height" => self.height = Some(v.parse().map_err(|_| "height must be a number")?),
-            "log" => self.log = Some(v.parse().map_err(|_| "log must be 0-3")?),
-            "follow" => self.follow = Some(parse_bool(v).ok_or("follow must be on or off")?),
-            "zoom" => self.zoom = Some(v.parse().map_err(|_| "zoom must be 1-4")?),
+            "mouse" => self.mouse = Some(parse_bool(v).ok_or_else(|| bad("on or off"))?),
+            "ascii" => self.ascii = Some(parse_bool(v).ok_or_else(|| bad("on or off"))?),
+            "autosave" => self.autosave = Some(v.parse().map_err(|_| bad("a number of years"))?),
+            "width" => self.width = Some(v.parse().map_err(|_| bad("a number"))?),
+            "height" => self.height = Some(v.parse().map_err(|_| bad("a number"))?),
+            "log" => self.log = Some(v.parse().map_err(|_| bad("0-3"))?),
+            "follow" => self.follow = Some(parse_bool(v).ok_or_else(|| bad("on or off"))?),
+            "zoom" => self.zoom = Some(v.parse().map_err(|_| bad("1-4"))?),
             _ => match k.strip_prefix("tune.") {
                 Some(field) => {
-                    let value: f64 = v
-                        .parse()
-                        .map_err(|_| format!("tune.{} must be a number", field))?;
+                    let value: f64 = v.parse().map_err(|_| bad("a number"))?;
                     // Check the name now so mistakes are reported where they are made.
                     crate::sim::tuning::Tuning::default().set(field, value)?;
                     self.tunes.push((field.to_string(), value));
                 }
-                None => return Err(format!("unknown setting '{}'", k)),
+                None => return Err(ConfigError::UnknownSetting(k.to_string())),
             },
         }
         Ok(())
@@ -206,7 +303,8 @@ pub fn parse_key(s: &str) -> Option<Key> {
     Some(k)
 }
 
-pub fn key_name(k: Key) -> String {
+/// The vim-style name of a key, the inverse of [`parse_key`].
+pub fn key_name(k: &Key) -> String {
     match k {
         Key::Char(' ') => "<Space>".into(),
         Key::Char('<') => "<lt>".into(),
@@ -240,14 +338,21 @@ pub fn key_name(k: Key) -> String {
     }
 }
 
+/// The commented config file `--mkconfig` writes.
 pub const TEMPLATE: &str = "# Rise and Fall of Empires configuration\n# Settings take `key = value`; keys can be remapped vim-style with `map <from> <to>`.\n\n# detail = medium        # low | medium | high\n# speed = 5              # years per second at start (0.5 1 2 5 10 25 50 100)\n# theme = default        # default | phosphor | amber | paper | dusk\n# mouse = on\n# ascii = off\n# autosave = 100         # years between autosaves when a save file is set (0 = off)\n# width = 160\n# height = 64\n# log = 1                # minimum importance shown in the event log (0-3)\n# follow = on            # jump the cursor to major events\n# zoom = 1               # 1-4, how many world cells per character\n\n# tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning\n\n# map w k                # examples: map <S-Up> K, map <C-p> :, map ; :\n";
 
-pub fn write_template() -> Result<PathBuf, String> {
+/// Write [`TEMPLATE`] to [`config_path`] and return where it landed.
+///
+/// # Errors
+///
+/// [`TemplateError::Exists`] rather than overwriting a config someone has
+/// already written, or [`TemplateError::Io`] if the write fails.
+pub fn write_template() -> Result<PathBuf, TemplateError> {
     let path = config_path();
     if path.exists() {
-        return Err(format!("{} already exists", path.display()));
+        return Err(TemplateError::Exists(path));
     }
-    std::fs::create_dir_all(config_dir()).map_err(|e| e.to_string())?;
-    std::fs::write(&path, TEMPLATE).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(config_dir())?;
+    std::fs::write(&path, TEMPLATE)?;
     Ok(path)
 }

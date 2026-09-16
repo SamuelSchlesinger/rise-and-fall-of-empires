@@ -149,7 +149,7 @@ pub fn bench(world: &mut World, years: i32) {
         .enumerate()
         .map(|(i, name)| (world.prof.ms[i], *name))
         .collect();
-    rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
     let accounted: f64 = rows.iter().map(|r| r.0).sum();
     for (ms, name) in &rows {
         println!(

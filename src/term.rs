@@ -5,7 +5,7 @@
 //! # Platform assumptions
 //!
 //! The FFI structs below are hand-written copies of the Linux definitions for
-//! the architectures this game is built for, x86_64 and aarch64, where glibc
+//! the architectures this game is built for, `x86_64` and aarch64, where glibc
 //! and musl agree: `struct termios` is four `u32` flag words, `c_line`, 32
 //! control characters and two `u32` speeds, `ioctl` takes its request as an
 //! `unsigned long`, and `TIOCGWINSZ` is `0x5413`. Other architectures (mips,
@@ -130,18 +130,24 @@ static ORIG: OnceLock<Termios> = OnceLock::new();
 /// may not lock, allocate or run Rust's I/O machinery.
 struct SigCell(UnsafeCell<Termios>);
 
-// SAFETY: the cell is written exactly once, in `enter`, before the signal
-// handlers that read it are installed, and never written again; readers
-// therefore only ever see fully initialised bytes.
+// SAFETY: the cell is written at most once, by whichever call to `enter` wins
+// `ORIG_RAW_CLAIM`, and never again. A reader only looks at it once
+// `ORIG_RAW_SET` reads true, and that release/acquire pair orders the write
+// before every such read, so readers only ever see fully initialised bytes
+// and no read ever races with the write.
 unsafe impl Sync for SigCell {}
 
 static ORIG_RAW: SigCell = SigCell(UnsafeCell::new(Termios::ZERO));
+/// Taken by the one call to `enter` that is allowed to write `ORIG_RAW`.
+static ORIG_RAW_CLAIM: AtomicBool = AtomicBool::new(false);
 /// Set once `ORIG_RAW` holds real settings; the handler checks it first.
 static ORIG_RAW_SET: AtomicBool = AtomicBool::new(false);
 /// Set once the termination handlers have been installed.
 static HANDLERS: AtomicBool = AtomicBool::new(false);
 
 fn errno() -> i32 {
+    // SAFETY: `__errno_location` always returns a valid, suitably aligned
+    // pointer to this thread's `errno`, which lives for as long as the thread.
     unsafe { *__errno_location() }
 }
 
@@ -156,7 +162,10 @@ fn errno() -> i32 {
 unsafe fn restore_raw() {
     let mut off = 0usize;
     while off < RESET.len() {
-        let n = write(1, RESET.as_ptr().add(off), RESET.len() - off);
+        // SAFETY: `off < RESET.len()`, so `add(off)` stays inside `RESET` and
+        // the length passed is exactly the bytes left in it. `write` only
+        // reads from that buffer, and `RESET` is a `'static` constant.
+        let n = unsafe { write(1, RESET.as_ptr().add(off), RESET.len() - off) };
         if n > 0 {
             off += n as usize;
         } else if n < 0 && errno() == EINTR {
@@ -166,13 +175,22 @@ unsafe fn restore_raw() {
         }
     }
     if ORIG_RAW_SET.load(Ordering::Acquire) {
-        tcsetattr(0, TCSAFLUSH, ORIG_RAW.0.get());
+        // SAFETY: `ORIG_RAW_SET` is only released after `ORIG_RAW` has been
+        // written, so the pointer is to an initialised `Termios` that nothing
+        // writes again; `tcsetattr` only reads through it.
+        unsafe { tcsetattr(0, TCSAFLUSH, ORIG_RAW.0.get()) };
     }
 }
 
 /// SIGHUP/SIGINT/SIGTERM: hand the terminal back, then die of the signal so
 /// that the exit status is the usual one.
 extern "C" fn on_signal(sig: i32) {
+    // SAFETY: every call below is async-signal-safe, so it is legal from a
+    // handler. `restore_raw` only writes fd 1 and resets fd 0, which is what
+    // this handler exists to do. `sig` was handed to us by the kernel, so it
+    // is a real signal number, and the two `SigSet`s are local, initialised
+    // and only ever passed as `&mut`/`&`, so the pointers are valid and
+    // unaliased for the length of each call.
     unsafe {
         restore_raw();
         // Back to the default disposition, unblock the signal (it is blocked
@@ -196,16 +214,26 @@ extern "C" fn on_signal(sig: i32) {
 ///
 /// Changes process-wide signal dispositions.
 unsafe fn install(sig: i32) {
-    let prev = signal(sig, on_signal as *const () as usize);
-    if prev == SIG_IGN {
-        signal(sig, SIG_IGN);
+    // SAFETY: `on_signal` is an `extern "C"` function of the shape `signal(2)`
+    // expects, and its address outlives the process; `SIG_IGN` is the constant
+    // libc defines for the same parameter. The caller has accepted that the
+    // process-wide disposition of `sig` changes.
+    unsafe {
+        let prev = signal(sig, on_signal as *const () as usize);
+        if prev == SIG_IGN {
+            signal(sig, SIG_IGN);
+        }
     }
 }
 
+/// Whether both stdin and stdout are terminals.
 pub fn is_tty() -> bool {
+    // SAFETY: `isatty` only inspects the descriptor it is given and has no
+    // preconditions beyond that; 0 and 1 are always valid to ask about.
     unsafe { isatty(0) == 1 && isatty(1) == 1 }
 }
 
+/// The terminal's size in columns and rows, falling back to 80x24.
 pub fn size() -> (usize, usize) {
     let mut ws = Winsize {
         ws_row: 0,
@@ -213,6 +241,9 @@ pub fn size() -> (usize, usize) {
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
+    // SAFETY: `TIOCGWINSZ` takes one `struct winsize *` out-parameter, and
+    // `ws` is a live, correctly laid out (see the module header) `Winsize`
+    // that nothing else aliases for the length of the call.
     let r = unsafe { ioctl(1, TIOCGWINSZ, &mut ws as *mut Winsize) };
     if r != 0 || ws.ws_col == 0 || ws.ws_row == 0 {
         (80, 24)
@@ -238,13 +269,19 @@ pub fn enter(mouse: bool) -> bool {
         return false;
     }
     let mut t = Termios::ZERO;
+    // SAFETY: `t` and `raw` are live, correctly laid out (see the module
+    // header) `Termios` values that nothing else aliases, so `tcgetattr` may
+    // fill one in and `tcsetattr` may read the other. The `ORIG_RAW` write is
+    // the single one allowed by `ORIG_RAW_CLAIM`, it happens before the
+    // release of `ORIG_RAW_SET` that any reader acquires, and it is done
+    // before `install` makes a reader (the signal handler) possible.
     unsafe {
         if tcgetattr(0, &mut t) != 0 {
             return false;
         }
         // Save the settings in both places *before* installing the handlers
         // that read the raw copy, and write that copy only once.
-        if !ORIG_RAW_SET.load(Ordering::Acquire) {
+        if !ORIG_RAW_CLAIM.swap(true, Ordering::SeqCst) {
             ORIG_RAW.0.get().write(t);
             ORIG_RAW_SET.store(true, Ordering::Release);
         }
@@ -279,12 +316,16 @@ pub fn leave() {
     let _ = out.write_all(RESET);
     let _ = out.flush();
     if let Some(t) = ORIG.get() {
+        // SAFETY: `t` borrows a settled `OnceLock` value, so it points at an
+        // initialised `Termios` for the whole call, and `tcsetattr` only reads
+        // through it.
         unsafe {
             tcsetattr(0, TCSAFLUSH, t);
         }
     }
 }
 
+/// One keypress, as the escape-sequence parser understood it.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Key {
     Char(char),
@@ -318,6 +359,7 @@ pub enum Key {
     Mouse(Mouse),
 }
 
+/// What the mouse did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MouseKind {
     Press(u8),
@@ -327,10 +369,14 @@ pub enum MouseKind {
     WheelDown,
 }
 
+/// A mouse report: what happened, and where on the screen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Mouse {
+    /// What the mouse did.
     pub kind: MouseKind,
+    /// Column, zero-based.
     pub x: usize,
+    /// Row, zero-based.
     pub y: usize,
 }
 
@@ -339,6 +385,8 @@ pub struct Mouse {
 fn read_bytes(buf: &mut Vec<u8>) -> bool {
     let mut tmp = [0u8; 1024];
     loop {
+        // SAFETY: `tmp` is a live, uniquely borrowed buffer and the count is
+        // its true length, so `read` writes at most that many bytes into it.
         let n = unsafe { read(0, tmp.as_mut_ptr(), tmp.len()) };
         if n > 0 {
             buf.extend_from_slice(&tmp[..n as usize]);
@@ -369,6 +417,8 @@ fn wait_input(timeout_ms: i32) -> Ready {
         events: POLLIN,
         revents: 0,
     };
+    // SAFETY: `pfd` is one live, correctly laid out `struct pollfd` that
+    // nothing else aliases, and the count passed says so.
     let r = unsafe { poll(&mut pfd, 1, timeout_ms) };
     if r <= 0 {
         // Nothing yet, or interrupted by a signal (a window resize, say): the
@@ -392,6 +442,7 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+/// Buffered stdin, handing out one [`Key`] at a time.
 pub struct Input {
     buf: Vec<u8>,
     /// Stdin has closed: there will never be another key.
@@ -399,6 +450,7 @@ pub struct Input {
 }
 
 impl Input {
+    /// An empty buffer over stdin.
     pub fn new() -> Input {
         Input {
             buf: Vec::new(),
@@ -545,7 +597,7 @@ impl Input {
                     .and_then(|m| m.parse::<u8>().ok())
                     .unwrap_or(1);
                 let shift = matches!(modifier, 2 | 4 | 6 | 8);
-                let ctrl = matches!(modifier, 5 | 6 | 7 | 8);
+                let ctrl = matches!(modifier, 5..=8);
                 let arrow = |plain: Key, s: Key, c: Key| {
                     if ctrl {
                         c
@@ -615,10 +667,19 @@ impl Input {
     }
 }
 
+/// A 24-bit colour: red, green, blue.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Rgb(pub u8, pub u8, pub u8);
+pub struct Rgb(
+    /// Red.
+    pub u8,
+    /// Green.
+    pub u8,
+    /// Blue.
+    pub u8,
+);
 
 impl Rgb {
+    /// Linear blend towards `o`; `t` is clamped to `[0, 1]`.
     pub fn mix(self, o: Rgb, t: f32) -> Rgb {
         let t = t.clamp(0.0, 1.0);
         Rgb(
@@ -627,6 +688,7 @@ impl Rgb {
             (self.2 as f32 + (o.2 as f32 - self.2 as f32) * t) as u8,
         )
     }
+    /// Every channel multiplied by `k` and clamped back into range.
     pub fn scale(self, k: f32) -> Rgb {
         Rgb(
             (self.0 as f32 * k).clamp(0.0, 255.0) as u8,
@@ -634,6 +696,7 @@ impl Rgb {
             (self.2 as f32 * k).clamp(0.0, 255.0) as u8,
         )
     }
+    /// From hue (0-360), saturation and value (both 0-1).
     pub fn from_hsv(h: f32, s: f32, v: f32) -> Rgb {
         let h = h.rem_euclid(360.0);
         let c = v * s;
@@ -674,26 +737,82 @@ impl Rgb {
         (h.rem_euclid(360.0), s, max)
     }
 
+    /// Perceived brightness in `[0, 1]`, for deciding on light or dark text.
     pub fn luma(self) -> f32 {
         (0.299 * self.0 as f32 + 0.587 * self.1 as f32 + 0.114 * self.2 as f32) / 255.0
     }
 }
 
+/// Attribute bit: bold.
 pub const BOLD: u8 = 1;
+/// Attribute bit: dim.
 pub const DIM: u8 = 2;
+/// Attribute bit: italic.
 pub const ITALIC: u8 = 4;
+/// Attribute bit: underline.
 pub const UNDERLINE: u8 = 8;
+/// Attribute bit: reverse video.
 pub const REVERSE: u8 = 16;
 
+/// A rectangle of character cells: the top-left corner and a size.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Rect {
+    /// Column of the left edge.
+    pub x: usize,
+    /// Row of the top edge.
+    pub y: usize,
+    /// Width in columns.
+    pub w: usize,
+    /// Height in rows.
+    pub h: usize,
+}
+
+impl Rect {
+    /// A rectangle `w` by `h` with its top-left corner at (`x`, `y`).
+    pub fn new(x: usize, y: usize, w: usize, h: usize) -> Rect {
+        Rect { x, y, w, h }
+    }
+}
+
+/// How something is painted: a foreground colour, a background colour and a
+/// bitmask of the `BOLD`..`REVERSE` attributes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Style {
+    /// Text colour.
+    pub fg: Rgb,
+    /// Background colour.
+    pub bg: Rgb,
+    /// `BOLD | DIM | ITALIC | UNDERLINE | REVERSE`, or 0 for plain.
+    pub attr: u8,
+}
+
+impl Style {
+    /// Plain text in these colours: no bold, dim, italic or underline.
+    pub fn new(fg: Rgb, bg: Rgb) -> Style {
+        Style { fg, bg, attr: 0 }
+    }
+
+    /// These colours with the attribute bits in `attr` set.
+    pub fn attr(fg: Rgb, bg: Rgb, attr: u8) -> Style {
+        Style { fg, bg, attr }
+    }
+}
+
+/// One character cell of the screen buffer.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
+    /// The character drawn in the cell.
     pub ch: char,
+    /// Its colour.
     pub fg: Rgb,
+    /// The colour behind it.
     pub bg: Rgb,
+    /// Its attribute bits.
     pub attr: u8,
 }
 
 impl Cell {
+    /// An empty cell over `bg`.
     pub fn blank(bg: Rgb) -> Cell {
         Cell {
             ch: ' ',
@@ -704,8 +823,11 @@ impl Cell {
     }
 }
 
+/// A cell buffer that redraws only what changed since the last [`Screen::flush`].
 pub struct Screen {
+    /// Width in columns.
     pub w: usize,
+    /// Height in rows.
     pub h: usize,
     cells: Vec<Cell>,
     prev: Vec<Cell>,
@@ -714,6 +836,7 @@ pub struct Screen {
 }
 
 impl Screen {
+    /// A blank screen `w` by `h`.
     pub fn new(w: usize, h: usize) -> Screen {
         let bg = Rgb(0, 0, 0);
         Screen {
@@ -726,6 +849,7 @@ impl Screen {
         }
     }
 
+    /// Change the size, blanking everything, if the size really changed.
     pub fn resize(&mut self, w: usize, h: usize) {
         if w != self.w || h != self.h {
             self.w = w;
@@ -737,12 +861,14 @@ impl Screen {
         }
     }
 
+    /// Blank every cell over `bg`.
     pub fn clear(&mut self, bg: Rgb) {
         for c in self.cells.iter_mut() {
             *c = Cell::blank(bg);
         }
     }
 
+    /// Write one character. Out-of-range positions are ignored.
     #[inline]
     pub fn put(&mut self, x: usize, y: usize, ch: char, fg: Rgb, bg: Rgb) {
         if x < self.w && y < self.h {
@@ -755,6 +881,7 @@ impl Screen {
         }
     }
 
+    /// Write one character with attributes. Out-of-range positions are ignored.
     #[inline]
     pub fn put_attr(&mut self, x: usize, y: usize, ch: char, fg: Rgb, bg: Rgb, attr: u8) {
         if x < self.w && y < self.h {
@@ -762,12 +889,18 @@ impl Screen {
         }
     }
 
+    /// The whole buffer, for a pass that re-colours a finished frame.
     pub fn cells_mut(&mut self) -> &mut [Cell] {
         &mut self.cells
     }
 
+    /// The cell at (`x`, `y`), or a blank one if that is off the screen.
     pub fn cell(&self, x: usize, y: usize) -> Cell {
-        self.cells[y * self.w + x]
+        if x < self.w && y < self.h {
+            self.cells[y * self.w + x]
+        } else {
+            Cell::blank(Rgb(0, 0, 0))
+        }
     }
 
     /// Write text; returns the x position after the last character written.
@@ -775,6 +908,7 @@ impl Screen {
         self.text_attr(x, y, s, fg, bg, 0)
     }
 
+    /// Write text with attributes; returns the x position after it.
     pub fn text_attr(&mut self, x: usize, y: usize, s: &str, fg: Rgb, bg: Rgb, attr: u8) -> usize {
         let mut cx = x;
         for ch in s.chars() {
@@ -787,54 +921,52 @@ impl Screen {
         cx
     }
 
-    /// Write text clipped to `max` columns.
-    pub fn text_clip(
-        &mut self,
-        x: usize,
-        y: usize,
-        s: &str,
-        max: usize,
-        fg: Rgb,
-        bg: Rgb,
-        attr: u8,
-    ) -> usize {
+    /// Write text clipped to `max` columns. Returns the x position after the
+    /// last character written.
+    pub fn text_clip(&mut self, x: usize, y: usize, s: &str, max: usize, st: Style) -> usize {
         let mut cx = x;
         for ch in s.chars() {
             if cx >= self.w || cx >= x + max {
                 break;
             }
-            self.put_attr(cx, y, ch, fg, bg, attr);
+            self.put_attr(cx, y, ch, st.fg, st.bg, st.attr);
             cx += 1;
         }
         cx
     }
 
-    pub fn fill(&mut self, x: usize, y: usize, w: usize, h: usize, ch: char, fg: Rgb, bg: Rgb) {
-        for yy in y..(y + h).min(self.h) {
-            for xx in x..(x + w).min(self.w) {
+    /// Paint every cell of `r` with `ch`.
+    pub fn fill(&mut self, r: Rect, ch: char, st: Style) {
+        for yy in r.y..(r.y + r.h).min(self.h) {
+            for xx in r.x..(r.x + r.w).min(self.w) {
                 self.cells[yy * self.w + xx] = Cell {
                     ch,
-                    fg,
-                    bg,
-                    attr: 0,
+                    fg: st.fg,
+                    bg: st.bg,
+                    attr: st.attr,
                 };
             }
         }
     }
 
+    /// Draw `w` columns of horizontal rule starting at (`x`, `y`).
     pub fn hline(&mut self, x: usize, y: usize, w: usize, fg: Rgb, bg: Rgb) {
         for xx in x..(x + w).min(self.w) {
             self.put(xx, y, '─', fg, bg);
         }
     }
 
+    /// Draw `h` rows of vertical rule starting at (`x`, `y`).
     pub fn vline(&mut self, x: usize, y: usize, h: usize, fg: Rgb, bg: Rgb) {
         for yy in y..(y + h).min(self.h) {
             self.put(x, yy, '│', fg, bg);
         }
     }
 
-    pub fn frame(&mut self, x: usize, y: usize, w: usize, h: usize, title: &str, fg: Rgb, bg: Rgb) {
+    /// Draw a box around `r`, with `title` inset into its top edge if it fits.
+    pub fn frame(&mut self, r: Rect, title: &str, st: Style) {
+        let (x, y, w, h) = (r.x, r.y, r.w, r.h);
+        let (fg, bg) = (st.fg, st.bg);
         if w < 2 || h < 2 {
             return;
         }
@@ -848,7 +980,7 @@ impl Screen {
         self.put(x + w - 1, y + h - 1, '┘', fg, bg);
         if !title.is_empty() && w > title.chars().count() + 4 {
             let t = format!(" {} ", title);
-            self.text_attr(x + 2, y, &t, fg, bg, BOLD);
+            self.text_attr(x + 2, y, &t, fg, bg, st.attr | BOLD);
         }
     }
 
@@ -886,6 +1018,7 @@ impl Screen {
         *last = Some(cur);
     }
 
+    /// Send everything that changed since the last flush to the terminal.
     pub fn flush(&mut self) {
         self.out.clear();
         let mut last: Option<(Rgb, Rgb, u8)> = None;

@@ -4,6 +4,8 @@
 
 use std::collections::BTreeMap;
 
+/// A pointer at something in the world: what an event is *about*, and what
+/// the interface follows when a line is opened.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum Ref {
     Polity(usize),
@@ -17,6 +19,7 @@ pub enum Ref {
     Artifact(usize),
 }
 
+/// What sort of thing happened, for colouring and for `:mute`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EventKind {
     Genesis,
@@ -36,6 +39,7 @@ pub enum EventKind {
 }
 
 impl EventKind {
+    /// Every kind, in a fixed order.
     pub fn all() -> [EventKind; 14] {
         [
             EventKind::Genesis,
@@ -54,6 +58,7 @@ impl EventKind {
             EventKind::Person,
         ]
     }
+    /// The lowercase name `:mute` and the filters use.
     pub fn name(self) -> &'static str {
         match self {
             EventKind::Genesis => "genesis",
@@ -72,6 +77,7 @@ impl EventKind {
             EventKind::Person => "person",
         }
     }
+    /// The first kind whose name starts with `s`, ignoring case.
     pub fn from_name(s: &str) -> Option<EventKind> {
         let s = s.to_lowercase();
         EventKind::all()
@@ -80,18 +86,27 @@ impl EventKind {
     }
 }
 
+/// One line of history, with its prose already written.
 #[derive(Clone, Debug)]
 pub struct Event {
+    /// The year it happened.
     pub year: i32,
+    /// 0 for a footnote, 4 for an age-defining event.
     pub importance: u8,
+    /// What sort of thing it was.
     pub kind: EventKind,
+    /// Everything it is about, in the order the prose mentions them.
     pub refs: Vec<Ref>,
+    /// The cell to jump to, if it happened anywhere in particular.
     pub loc: Option<usize>,
+    /// The sentence itself.
     pub text: String,
 }
 
+/// Every event of a world's life, indexed by what each one is about.
 #[derive(Default)]
 pub struct Chronicle {
+    /// The events themselves, oldest first.
     pub events: Vec<Event>,
     by_ref: BTreeMap<Ref, Vec<usize>>,
     /// How many events compaction has thrown away over the world's life.
@@ -103,6 +118,7 @@ pub struct Chronicle {
 }
 
 impl Chronicle {
+    /// Record an event and index it. Returns its id.
     pub fn push(&mut self, ev: Event) -> usize {
         let id = self.events.len();
         for r in &ev.refs {
@@ -121,10 +137,15 @@ impl Chronicle {
         c
     }
 
+    /// The ids of every event about `r`, oldest first.
     pub fn for_ref(&self, r: Ref) -> &[usize] {
-        self.by_ref.get(&r).map(|v| v.as_slice()).unwrap_or(&[])
+        self.by_ref
+            .get(&r)
+            .map(std::vec::Vec::as_slice)
+            .unwrap_or(&[])
     }
 
+    /// How many events are still kept (compaction drops the least of them).
     pub fn len(&self) -> usize {
         self.events.len()
     }

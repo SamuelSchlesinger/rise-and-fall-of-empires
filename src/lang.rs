@@ -4,8 +4,11 @@
 
 use crate::rng::Rng;
 
+/// One culture's way of making words: what may start a syllable, what may
+/// end one, and the habits that turn syllables into names.
 #[derive(Clone, Debug)]
 pub struct Language {
+    /// The language's own name for itself.
     pub name: String,
     pub(crate) onsets: Vec<String>,
     pub(crate) onset_w: Vec<f64>,
@@ -24,6 +27,7 @@ pub struct Language {
     pub(crate) apostrophe_chance: f64,
     pub(crate) adj_suffixes: Vec<String>,
     pub(crate) demonym_suffixes: Vec<String>,
+    /// What this culture calls a ruler: King, Khan, Hierarch ...
     pub honorific: String,
 }
 
@@ -169,6 +173,7 @@ const AWKWARD: &[&str] = &[
     "nazi", "rape",
 ];
 
+/// Whether a coined word reads badly enough to be worth rolling again.
 pub(crate) fn awkward(w: &str) -> bool {
     let l = w.to_lowercase();
     AWKWARD
@@ -176,6 +181,7 @@ pub(crate) fn awkward(w: &str) -> bool {
         .any(|a| l == *a || (a.len() >= 4 && l.contains(a)))
 }
 
+/// Upper-case the first character, leaving the rest alone.
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
@@ -185,6 +191,7 @@ pub fn capitalize(s: &str) -> String {
 }
 
 impl Language {
+    /// Roll a whole language: consonant families, vowels, codas and habits.
     pub fn generate(rng: &Rng) -> Language {
         // Choose 2-3 consonant families, weight them.
         let mut fam: Vec<usize> = (0..FAMILIES.len()).collect();
@@ -230,7 +237,7 @@ impl Language {
         }
 
         let vs = *rng.pick(VOWEL_SETS);
-        let vowels: Vec<String> = vs.iter().map(|s| s.to_string()).collect();
+        let vowels: Vec<String> = vs.iter().map(std::string::ToString::to_string).collect();
         let vowel_w: Vec<f64> = vowels
             .iter()
             .map(|v| {
@@ -284,11 +291,15 @@ impl Language {
             } else {
                 0.0
             },
-            adj_suffixes: rng.pick(ADJ_SETS).iter().map(|x| x.to_string()).collect(),
+            adj_suffixes: rng
+                .pick(ADJ_SETS)
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             demonym_suffixes: rng
                 .pick(DEMONYM_SETS)
                 .iter()
-                .map(|x| x.to_string())
+                .map(std::string::ToString::to_string)
                 .collect(),
             honorific: rng.pick(HONORIFICS).to_string(),
         };
@@ -361,13 +372,17 @@ impl Language {
         }
         l.coda_chance = (l.coda_chance + rng.range(-0.2, 0.2)).clamp(0.05, 0.7);
         if rng.chance(0.4) {
-            l.adj_suffixes = rng.pick(ADJ_SETS).iter().map(|x| x.to_string()).collect();
+            l.adj_suffixes = rng
+                .pick(ADJ_SETS)
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect();
         }
         if rng.chance(0.4) {
             l.demonym_suffixes = rng
                 .pick(DEMONYM_SETS)
                 .iter()
-                .map(|x| x.to_string())
+                .map(std::string::ToString::to_string)
                 .collect();
         }
         if rng.chance(0.5) {
@@ -439,6 +454,7 @@ impl Language {
         capitalize(&self.word(rng, 2))
     }
 
+    /// A place name, which may be a compound or take a suffix.
     pub fn place(&self, rng: &Rng) -> String {
         let mut base = self.word(rng, self.syl_count(rng));
         for _ in 0..6 {
@@ -458,12 +474,10 @@ impl Language {
         if rng.chance(self.place_suffix_chance) && !self.place_suffixes.is_empty() {
             let suf = rng.pick(&self.place_suffixes);
             let mut b = base.clone();
-            if ends_with_vowel(&b)
-                && !suf.starts_with(|c: char| "aeiou".contains(c))
-                && rng.chance(0.3)
-            {
-                b.pop();
-            } else if ends_with_vowel(&b) && suf.starts_with(|c: char| "aeiou".contains(c)) {
+            // A trailing vowel always goes before a vowel-initial suffix, and
+            // sometimes before a consonant.
+            let vowel_suffix = suf.starts_with(|c: char| "aeiou".contains(c));
+            if ends_with_vowel(&b) && (vowel_suffix || rng.chance(0.3)) {
                 b.pop();
             }
             return capitalize(&format!("{}{}", b, suf));
@@ -471,6 +485,7 @@ impl Language {
         capitalize(&base)
     }
 
+    /// A person's given name.
     pub fn person(&self, rng: &Rng) -> String {
         self.name(rng)
     }
