@@ -5,4 +5,4 @@
 # Kept in step with `rust-version` in Cargo.toml so that MSRV-gated lints
 # (`clippy::manual_let_else` and friends) only suggest what the oldest
 # supported compiler can actually build.
-msrv = "1.96"
+msrv = "1.70"

@@ -266,11 +266,8 @@ fn vec_u16<S: Io>(s: &mut S, v: &mut Vec<u16>) {
     s.bytes(&mut b);
     if s.reading() {
         *v = b
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .copied()
-            .map(u16::from_le_bytes)
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
     }
 }

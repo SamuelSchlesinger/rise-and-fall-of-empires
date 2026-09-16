@@ -1103,8 +1103,8 @@ impl World {
     /// that neighbours rarely clash.
     pub fn polity_color(&self, id: usize) -> Rgb {
         let hue = (id as f32 * 137.508) % 360.0;
-        let sat = if id.is_multiple_of(3) { 0.75 } else { 0.55 };
-        let val = if id.is_multiple_of(2) { 0.85 } else { 0.65 };
+        let sat = if id % 3 == 0 { 0.75 } else { 0.55 };
+        let val = if id % 2 == 0 { 0.85 } else { 0.65 };
         Rgb::from_hsv(hue, sat, val)
     }
 

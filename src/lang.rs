@@ -367,7 +367,8 @@ impl Language {
         // Vowel shift.
         if rng.chance(0.5) {
             let i = rng.below(l.vowels.len());
-            let nv = *rng.pick(rng.pick(VOWEL_SETS));
+            let set: &[&str] = *rng.pick(VOWEL_SETS);
+            let nv = *rng.pick(set);
             l.vowels[i] = nv.to_string();
         }
         l.coda_chance = (l.coda_chance + rng.range(-0.2, 0.2)).clamp(0.05, 0.7);

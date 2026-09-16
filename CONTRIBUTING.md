@@ -100,11 +100,12 @@ CI runs all of the above on every push.
 raised only deliberately, in a commit that says so.
 
 Nothing in the tree uses a library or language feature newer than
-`std::sync::OnceLock` (Rust 1.70, `src/term.rs`). The MSRV is higher than that
-because of type inference, not features: `src/lang.rs` picks from a
-`&[&[&str]]` with a nested `rng.pick(rng.pick(VOWEL_SETS))`, and older
-compilers cannot infer through that deref coercion (`E0282`, `E0308`). Binding
-the inner pick to a `let` first is enough to build on 1.70.
+`std::sync::OnceLock` (Rust 1.70, `src/term.rs`), and `clippy.toml` sets
+`msrv = "1.70"` so clippy will not suggest newer idioms (`is_multiple_of`,
+`as_chunks`, `Option::inspect` and the like are off limits). Two things have
+bitten before: nested `rng.pick(rng.pick(...))` needs an explicit binding for
+old compilers to infer through the deref coercion, and `Cargo.lock` must stay
+at lockfile version 3 (newer cargo writes version 4, which 1.70 refuses).
 
 When you touch that line, or the MSRV, re-measure rather than guess:
 

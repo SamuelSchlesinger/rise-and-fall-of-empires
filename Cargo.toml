@@ -12,7 +12,7 @@ categories = ["games", "simulation", "command-line-utilities"]
 # See CONTRIBUTING.md ("Minimum supported Rust version"). Nothing in the tree
 # needs a library feature newer than `std::sync::OnceLock` (1.70); the binding
 # constraint is a type-inference improvement that older compilers lack.
-rust-version = "1.96"
+rust-version = "1.70"
 exclude = [
     ".claude/",
     ".github/",

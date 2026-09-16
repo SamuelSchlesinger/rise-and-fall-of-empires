@@ -1165,8 +1165,9 @@ pub fn split_off(
         .copied()
         .find(|&i| w.cells[i].city.is_some())
         .unwrap_or(seed);
-    let leader = leader.inspect(|&l| {
+    let leader = leader.map(|l| {
         w.persons[l].culture = seed_culture;
+        l
     });
     let np = found_polity(w, seed_culture, seat, kind, Some(p), &region, leader);
     w.polities[p].last_revolt = w.year;
