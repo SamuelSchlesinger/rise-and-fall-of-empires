@@ -1,11 +1,15 @@
 //! Deterministic xoshiro256** PRNG with interior mutability so it can be
-//! shared freely across split borrows of the world state.
+//! shared freely across split borrows of the world state. Cloning an `Rng`
+//! shares the same stream rather than forking an identical one, so a handle
+//! taken with `w.rng.clone()` and the world's own generator never draw the
+//! same numbers.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct Rng {
-    s: Cell<[u64; 4]>,
+    s: Rc<Cell<[u64; 4]>>,
 }
 
 fn splitmix64(state: &mut u64) -> u64 {
@@ -25,7 +29,9 @@ impl Rng {
             splitmix64(&mut st),
             splitmix64(&mut st),
         ];
-        Rng { s: Cell::new(s) }
+        Rng {
+            s: Rc::new(Cell::new(s)),
+        }
     }
 
     pub fn state(&self) -> [u64; 4] {

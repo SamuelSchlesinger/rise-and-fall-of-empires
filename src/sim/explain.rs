@@ -13,8 +13,11 @@ pub struct Factor {
 }
 
 /// What stability settles at with an average ruler and nothing else
-/// pulling on it: the 0.5 floor plus a middling ruler's wisdom and charm.
-pub const STABILITY_BASE: f32 = 0.5 + 0.5 * 0.2 + 0.5 * 0.1;
+/// pulling on it: the tuned floor plus a middling ruler's wisdom and charm.
+pub fn stability_base(w: &World) -> f32 {
+    let tn = &w.tuning;
+    tn.stability_base + 0.5 * tn.stability_wisdom_weight + 0.5 * tn.stability_charisma_weight
+}
 
 fn push(out: &mut Vec<Factor>, weight: f32, text: String) {
     if weight.abs() >= 0.01 {
@@ -43,7 +46,7 @@ fn war_years(w: &World, p: usize) -> i32 {
 }
 
 /// Everything pulling a realm's stability up or down, strongest first.
-/// `STABILITY_BASE` plus the weights is the value stability is drifting
+/// `stability_base` plus the weights is the value stability is drifting
 /// towards, which is what `politics::economy` computes each year.
 pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
     let mut out: Vec<Factor> = Vec::new();
@@ -51,6 +54,7 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         return out;
     }
     let pol = &w.polities[p];
+    let tn = &w.tuning;
     let vals = w.cultures[pol.culture].values;
 
     // The ruler.
@@ -59,7 +63,7 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
             let t = w.persons[r].traits;
             push(
                 &mut out,
-                (t.wisdom - 0.5) * 0.2,
+                (t.wisdom - 0.5) * tn.stability_wisdom_weight,
                 if t.wisdom >= 0.5 {
                     "the ruler governs wisely".into()
                 } else {
@@ -68,7 +72,7 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
             );
             push(
                 &mut out,
-                (t.charisma - 0.5) * 0.1,
+                (t.charisma - 0.5) * tn.stability_charisma_weight,
                 if t.charisma >= 0.5 {
                     "the ruler is beloved".into()
                 } else {
@@ -78,27 +82,27 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         }
         None => push(
             &mut out,
-            (0.3 - 0.5) * 0.2 + (0.3 - 0.5) * 0.1,
+            (0.3 - 0.5) * (tn.stability_wisdom_weight + tn.stability_charisma_weight),
             "there is no ruler, and the great men quarrel".into(),
         ),
     }
 
     // Overextension.
-    let over = pol.overextension();
+    let over = pol.overextension(tn);
     push(
         &mut out,
-        -(over - 1.0).max(0.0) * 0.25,
+        -(over - 1.0).max(0.0) * tn.stability_overextension_weight,
         format!(
             "overextended: {} lands, but the crown can govern about {:.0}",
             pol.cells,
-            pol.admin_capacity()
+            pol.admin_capacity(tn)
         ),
     );
 
     // Foreign subjects.
     push(
         &mut out,
-        -pol.foreign_share * 0.2,
+        -pol.foreign_share * tn.stability_foreign_weight,
         format!(
             "{} in every 10 subjects are of other peoples",
             (pol.foreign_share * 10.0).round().max(1.0)
@@ -108,7 +112,7 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
     // War-weariness.
     push(
         &mut out,
-        -pol.exhaustion * 0.3,
+        -pol.exhaustion * tn.stability_exhaustion_weight,
         if pol.at_war() {
             format!("war-weary after {} years of fighting", war_years(w, p))
         } else {
@@ -119,7 +123,7 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
     // Decadence.
     push(
         &mut out,
-        -pol.decadence * 0.35,
+        -pol.decadence * tn.stability_decadence_weight,
         if pol.decadence > 0.6 {
             "the court has rotted through with luxury".into()
         } else {
@@ -169,9 +173,7 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
 
     // What kind of thing it is.
     let (kind_stab, kind_text) = match pol.kind {
-        PolityKind::Kingdom | PolityKind::Republic => {
-            (0.05, "settled law and long custom hold")
-        }
+        PolityKind::Kingdom | PolityKind::Republic => (0.05, "settled law and long custom hold"),
         PolityKind::Empire => (-0.08, "an empire is a hard thing to hold together"),
         PolityKind::Horde => (-0.1, "a horde obeys only while it is winning"),
         PolityKind::Theocracy => (0.03, "the temple's authority steadies the realm"),
@@ -185,7 +187,12 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
 
 /// Where stability is heading, given everything pulling on it.
 pub fn stability_target(w: &World, p: usize) -> f32 {
-    (STABILITY_BASE + stability_factors(w, p).iter().map(|f| f.weight).sum::<f32>()).clamp(0.0, 1.0)
+    (stability_base(w)
+        + stability_factors(w, p)
+            .iter()
+            .map(|f| f.weight)
+            .sum::<f32>())
+    .clamp(0.0, 1.0)
 }
 
 /// How a realm's stability is moving: up, down or holding.
@@ -247,7 +254,10 @@ fn home_defense(w: &World, p: usize) -> f32 {
         if w.cells[i].owner != Some(p) {
             continue;
         }
-        if w.terrain.neighbors4(i).any(|nb| w.cells[nb].owner != Some(p)) {
+        if w.terrain
+            .neighbors4(i)
+            .any(|nb| w.cells[nb].owner != Some(p))
+        {
             sum += w.terrain.biome[i].defense();
             n += 1;
             if n >= 200 {
@@ -306,7 +316,11 @@ pub fn war_view(w: &World, wid: usize) -> WarView {
     }
     let (stab_a, stab_d) = (w.polities[a].stability, w.polities[d].stability);
     if (stab_a - stab_d).abs() > 0.2 {
-        let (who, other) = if stab_a < stab_d { (&an, &dn) } else { (&dn, &an) };
+        let (who, other) = if stab_a < stab_d {
+            (&an, &dn)
+        } else {
+            (&dn, &an)
+        };
         reasons.push(format!(
             "{} is troubled at home while {} is not",
             who, other
@@ -341,7 +355,10 @@ pub fn war_view(w: &World, wid: usize) -> WarView {
     );
     let peace = if rebellion {
         if war.score < -0.4 {
-            format!("Were it settled now, the rising would be crushed and {} would be no more.", w.polities[a].name)
+            format!(
+                "Were it settled now, the rising would be crushed and {} would be no more.",
+                w.polities[a].name
+            )
         } else if war.score > 0.8 && w.polities[a].cells > w.polities[d].cells {
             format!(
                 "Were it settled now, {} would take the old capital and rule in its place.",
@@ -384,9 +401,9 @@ pub fn war_weariness(w: &World, wid: usize) -> &'static str {
     }
     let ex = (w.polities[war.attacker].exhaustion + w.polities[war.defender].exhaustion) / 2.0;
     if w.year - war.started < 3 {
-        "fresh, and neither side will yet talk of peace"
+        "neither side will yet talk of peace"
     } else if ex > 0.8 {
-        "both sides are spent; peace cannot be far off"
+        "both sides are spent, and peace cannot be far off"
     } else if ex > 0.4 {
         "the armies are tiring"
     } else {
@@ -401,8 +418,25 @@ pub fn war_weariness(w: &World, wid: usize) -> &'static str {
 /// Small numbers read better as words.
 pub fn spell(n: i32) -> String {
     const ONES: [&str; 20] = [
-        "no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+        "no",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
         "nineteen",
     ];
     const TENS: [&str; 10] = [
@@ -543,7 +577,7 @@ mod tests {
         let w = world();
         for p in w.living_polities() {
             let sum: f32 = stability_factors(&w, p).iter().map(|f| f.weight).sum();
-            let target = (STABILITY_BASE + sum).clamp(0.0, 1.0);
+            let target = (stability_base(&w) + sum).clamp(0.0, 1.0);
             assert!((stability_target(&w, p) - target).abs() < 1e-5);
             // Nothing tiny survives the filter.
             for f in stability_factors(&w, p) {
@@ -568,7 +602,7 @@ mod tests {
     fn overextension_pulls_down() {
         let w = world();
         for p in w.living_polities() {
-            if w.polities[p].overextension() > 1.5 {
+            if w.polities[p].overextension(&w.tuning) > 1.5 {
                 let fs = stability_factors(&w, p);
                 let over = fs.iter().find(|f| f.text.starts_with("overextended"));
                 assert!(over.is_some());
@@ -594,7 +628,11 @@ mod tests {
         for i in 0..w.persons.len() {
             let s = standing(&w, i);
             assert!(s.ends_with('.'), "{}", s);
-            assert!(s.chars().next().unwrap().is_uppercase() || s.starts_with('a'), "{}", s);
+            assert!(
+                s.chars().next().unwrap().is_uppercase() || s.starts_with('a'),
+                "{}",
+                s
+            );
         }
     }
 }

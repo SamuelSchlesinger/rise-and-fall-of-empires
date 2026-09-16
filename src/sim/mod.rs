@@ -9,6 +9,7 @@ pub mod magic;
 pub mod people;
 pub mod politics;
 pub mod stories;
+pub mod tuning;
 pub mod war;
 
 use crate::geo::{self, FeatureKind, Terrain, GROUP_COUNT};
@@ -17,6 +18,12 @@ use crate::rng::Rng;
 use crate::term::Rgb;
 use chronicle::{Chronicle, Event, EventKind, Ref};
 use std::collections::{BTreeMap, BTreeSet};
+use tuning::Tuning;
+
+/// A file error with the path it happened to folded into its message.
+fn io_err(what: &str, e: std::io::Error) -> crate::ser::SaveError {
+    crate::ser::SaveError::Io(std::io::Error::new(e.kind(), format!("{}: {}", what, e)))
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Detail {
@@ -248,11 +255,14 @@ impl Polity {
     pub fn at_war(&self) -> bool {
         !self.wars.is_empty()
     }
-    pub fn admin_capacity(&self) -> f32 {
-        16.0 + self.kind.admin_bonus() + self.dev * 45.0 + self.cities.len() as f32 * 8.0
+    pub fn admin_capacity(&self, t: &Tuning) -> f32 {
+        t.admin_capacity_base
+            + self.kind.admin_bonus()
+            + self.dev * t.admin_capacity_dev_weight
+            + self.cities.len() as f32 * t.admin_capacity_city_weight
     }
-    pub fn overextension(&self) -> f32 {
-        (self.cells as f32 / self.admin_capacity()).max(0.0)
+    pub fn overextension(&self, t: &Tuning) -> f32 {
+        (self.cells as f32 / self.admin_capacity(t)).max(0.0)
     }
 }
 
@@ -612,6 +622,7 @@ pub struct World {
     pub rng: Rng,
     pub year: i32,
     pub detail: Detail,
+    pub tuning: Tuning,
     pub terrain: Terrain,
     pub cells: Vec<CellState>,
     pub races: Vec<Race>,
@@ -643,6 +654,7 @@ impl World {
             rng: Rng::new(0),
             year: 0,
             detail: Detail::Medium,
+            tuning: Tuning::default(),
             terrain: Terrain::empty(),
             cells: Vec::new(),
             races: Vec::new(),
@@ -667,25 +679,25 @@ impl World {
         }
     }
 
-    pub fn save_to(&mut self, path: &std::path::Path) -> Result<usize, String> {
+    pub fn save_to(&mut self, path: &std::path::Path) -> Result<usize, crate::ser::SaveError> {
         let bytes = crate::ser::save(self);
         if let Some(dir) = path.parent() {
             if !dir.as_os_str().is_empty() {
                 std::fs::create_dir_all(dir)
-                    .map_err(|e| format!("cannot create {}: {}", dir.display(), e))?;
+                    .map_err(|e| io_err(&format!("cannot create {}", dir.display()), e))?;
             }
         }
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, &bytes)
-            .map_err(|e| format!("cannot write {}: {}", tmp.display(), e))?;
+            .map_err(|e| io_err(&format!("cannot write {}", tmp.display()), e))?;
         std::fs::rename(&tmp, path)
-            .map_err(|e| format!("cannot rename to {}: {}", path.display(), e))?;
+            .map_err(|e| io_err(&format!("cannot rename to {}", path.display()), e))?;
         Ok(bytes.len())
     }
 
-    pub fn load_from(path: &std::path::Path) -> Result<World, String> {
-        let bytes =
-            std::fs::read(path).map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
+    pub fn load_from(path: &std::path::Path) -> Result<World, crate::ser::SaveError> {
+        let bytes = std::fs::read(path)
+            .map_err(|e| io_err(&format!("cannot read {}", path.display()), e))?;
         crate::ser::load(&bytes)
     }
 
@@ -698,6 +710,7 @@ impl World {
             rng,
             year: 0,
             detail,
+            tuning: Tuning::default(),
             terrain,
             cells: vec![CellState::default(); n],
             races: Vec::new(),

@@ -31,7 +31,10 @@ fn clip(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         return s.to_string();
     }
-    s.chars().take(n.saturating_sub(1)).chain("…".chars()).collect()
+    s.chars()
+        .take(n.saturating_sub(1))
+        .chain("…".chars())
+        .collect()
 }
 
 /// Did this realm take part in the event?
@@ -106,11 +109,7 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
         }
         sections.push(Section {
             label: "Realms",
-            head: format!(
-                "{} rose, {} fell.",
-                count(born.len(), "realm"),
-                gone.len()
-            ),
+            head: format!("{} rose, {} fell.", count(born.len(), "realm"), gone.len()),
             items,
             color: FG,
         });
@@ -189,20 +188,25 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
         .collect();
     if !dead.is_empty() {
         let mut best = dead.clone();
-        best.sort_by(|&a, &b| w.persons[b].renown.partial_cmp(&w.persons[a].renown).unwrap());
+        best.sort_by(|&a, &b| {
+            w.persons[b]
+                .renown
+                .partial_cmp(&w.persons[a].renown)
+                .unwrap()
+        });
         let items: Vec<String> = best
             .iter()
             .take(4)
             .map(|&i| {
                 format!(
-                    "{} of {} {} in {}.",
+                    "{} of {}, {}: {}.",
                     w.persons[i].full_name(),
                     w.persons[i]
                         .polity
                         .map(|p| w.polities[p].short.clone())
                         .unwrap_or_default(),
-                    w.persons[i].death.trim_end_matches('.'),
-                    w.persons[i].died.unwrap_or(0)
+                    w.persons[i].died.unwrap_or(0),
+                    w.persons[i].death.trim_end_matches('.')
                 )
             })
             .collect();
@@ -282,7 +286,9 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
         .filter(|s| {
             s.founded >= since
                 && only
-                    .map(|p| s.influence.contains_key(&p) || w.cities[s.home_city].polity == Some(p))
+                    .map(|p| {
+                        s.influence.contains_key(&p) || w.cities[s.home_city].polity == Some(p)
+                    })
                     .unwrap_or(true)
         })
         .map(|s| s.id)
@@ -332,9 +338,7 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
     let peaks: Vec<usize> = w
         .living_polities()
         .into_iter()
-        .filter(|&p| {
-            mine(p) && w.polities[p].peak_year >= since && w.polities[p].peak_cells >= 40
-        })
+        .filter(|&p| mine(p) && w.polities[p].peak_year >= since && w.polities[p].peak_cells >= 40)
         .collect();
     if !movers.is_empty() || !peaks.is_empty() {
         let mut items = Vec::new();
@@ -389,8 +393,7 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
             .map(|&i| {
                 format!(
                     "{}  {}",
-                    w.chronicle.events[i].year,
-                    w.chronicle.events[i].text
+                    w.chronicle.events[i].year, w.chronicle.events[i].text
                 )
             })
             .collect();
@@ -411,8 +414,14 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
         return out;
     }
 
+    // A digest that runs past a screen is not a digest: every section gets
+    // its heading, and the detail underneath shares what is left.
     let lw = 12usize;
     let body = width.saturating_sub(lw + 4).max(24);
+    const BUDGET: usize = 30;
+    let spare = BUDGET.saturating_sub(sections.len() * 2);
+    let per_section = (spare / sections.len().max(1)).max(1);
+    let mut cut = false;
     for s in sections {
         if !s.head.is_empty() {
             out.push(line(
@@ -423,7 +432,12 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
         } else {
             out.push(line(format!("{:<lw$}", s.label), s.color, BOLD));
         }
+        let mut used = 0usize;
         for it in s.items {
+            if used >= per_section {
+                cut = true;
+                break;
+            }
             for (k, l) in crate::term::wrap(&clip(&it, body * 2), body)
                 .into_iter()
                 .take(2)
@@ -435,9 +449,17 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
                     format!("{:<lw$}    ", "", lw = lw)
                 };
                 out.push(line(format!("{}{}", pre, l), FG, 0));
+                used += 1;
             }
         }
         out.push(line("", FG, 0));
+    }
+    if cut {
+        out.push(line(
+            "There was more. The chronicle (c) has all of it.",
+            DIMC,
+            DIM,
+        ));
     }
     out
 }
@@ -474,7 +496,7 @@ mod tests {
         }
         for years in [10, 50, 100, 1000] {
             let ls = lines(&w, years, None, 100);
-            assert!(ls.len() <= 60, "{} lines for {} years", ls.len(), years);
+            assert!(ls.len() <= 40, "{} lines for {} years", ls.len(), years);
             for l in &ls {
                 assert!(l.text.chars().count() <= 100, "{}", l.text);
             }

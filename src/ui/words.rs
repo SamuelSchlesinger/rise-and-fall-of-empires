@@ -66,17 +66,6 @@ pub fn realm_size(cells: usize) -> &'static str {
     }
 }
 
-/// A one-word standing for a realm, for lists and the map legend.
-pub fn realm_rank(cells: usize) -> &'static str {
-    match cells {
-        0..=14 => "tiny",
-        15..=39 => "small",
-        40..=99 => "middling",
-        100..=249 => "large",
-        _ => "great",
-    }
-}
-
 /// "a village", "a great city".
 pub fn city_size(pop: f32) -> &'static str {
     if pop < 3.0 {
@@ -190,14 +179,13 @@ pub fn here_sentence(w: &World, cell: usize) -> String {
     if let Some(c) = cs.city {
         let city = &w.cities[c];
         if city.destroyed.is_none() {
-            s.push_str(&format!(
-                ", where {} stands ({}, {} people)",
-                city.name,
-                city_size(city.pop),
-                folk(city.pop)
-            ));
+            s.push_str(&format!(", where {} stands", city.name));
         } else {
-            s.push_str(&format!(", where {} stood until {}", city.name, city.destroyed.unwrap()));
+            s.push_str(&format!(
+                ", where {} stood until {}",
+                city.name,
+                city.destroyed.unwrap()
+            ));
         }
     }
     match cs.owner {
@@ -288,7 +276,7 @@ mod tests {
             assert_ne!(pair[0], pair[1]);
         }
         assert_eq!(realm_size(400), "a great power");
-        assert_eq!(realm_rank(400), "great");
+        assert_eq!(realm_size(0), "a realm of no land at all");
     }
 
     #[test]

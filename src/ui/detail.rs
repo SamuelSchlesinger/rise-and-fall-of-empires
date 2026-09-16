@@ -160,7 +160,11 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
             ));
             out.push((w.ruler_short(p), FG));
             out.push((
-                format!("{} lands · {} people", pol.cells, words::folk(pol.pop as f32)),
+                format!(
+                    "{} lands · {} people",
+                    pol.cells,
+                    words::folk(pol.pop as f32)
+                ),
                 DIMC,
             ));
             if pol.alive() {
@@ -216,7 +220,11 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
             let city = &w.cities[c];
             out.push((city.name.clone(), Rgb(255, 255, 255)));
             out.push((
-                format!("{}, founded in {}", words::city_size(city.pop), city.founded),
+                format!(
+                    "{}, founded in {}",
+                    words::city_size(city.pop),
+                    city.founded
+                ),
                 FG,
             ));
             out.push((format!("{} people", words::folk(city.pop)), DIMC));
@@ -278,7 +286,11 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
                     FG,
                 ));
                 out.push((
-                    format!("{} years on; {}", w.year - war.started, explain::war_weariness(w, x)),
+                    format!(
+                        "{} years on; {}",
+                        w.year - war.started,
+                        explain::war_weariness(w, x)
+                    ),
                     DIMC,
                 ));
             } else {
@@ -719,10 +731,10 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                     let per = &w.persons[rl];
                     out.push(line(
                         format!(
-                            "              {} · age {} · reigning {} years",
+                            "              {} · age {} · {} years on the throne",
                             per.traits.describe(),
                             w.year - per.born,
-                            w.year - pol.reign_start
+                            (w.year - pol.reign_start).max(0)
                         ),
                         DIMC,
                         0,
@@ -842,7 +854,7 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                     ));
                     out.push(line("", FG, 0));
                 }
-                out.push(line(format!("    Strain    {} overextension {:.0}%, foreign subjects {:.0}%, war-weariness {:.0}%, decadence {:.0}%", bar((pol.overextension() - 0.5).clamp(0.0, 1.0), 20, ascii), pol.overextension() * 100.0, pol.foreign_share * 100.0, pol.exhaustion * 100.0, pol.decadence * 100.0), FG, 0));
+                out.push(line(format!("    Strain    {} overextension {:.0}%, foreign subjects {:.0}%, war-weariness {:.0}%, decadence {:.0}%", bar((pol.overextension(&w.tuning) - 0.5).clamp(0.0, 1.0), 20, ascii), pol.overextension(&w.tuning) * 100.0, pol.foreign_share * 100.0, pol.exhaustion * 100.0, pol.decadence * 100.0), FG, 0));
                 let mut flags = Vec::new();
                 if pol.seafaring {
                     flags.push("seafaring");
@@ -895,7 +907,7 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                             format!("{} ({})", w.polities[q].short, mood)
                         })
                         .collect();
-                    labelled(&mut out, "    Neighbours", &s.join(", "), w2, DIMC);
+                    labelled(&mut out, "    Bordering", &s.join(", "), w2, DIMC);
                 }
                 if !pol.cities.is_empty() {
                     let names: Vec<String> = pol
@@ -1241,7 +1253,8 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
             let per = &w.persons[pi];
             out.push(line(per.full_name().to_uppercase(), FG, BOLD));
             let mut desc = format!(
-                "A {} {} of the {}, born in year {}",
+                "{} {} {} of the {}, born in year {}",
+                article(&per.traits.describe()),
                 per.traits.describe(),
                 per.role.name(),
                 w.cultures[per.culture].plural,
@@ -1407,21 +1420,21 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
                 None => "  Neither side has the better of it.".to_string(),
             };
             out.push(line(lean, FG, BOLD));
+            // One bar pulled between the two sides, rather than two bars
+            // the eye has to compare.
+            let total = v.attacker_strength + v.defender_strength;
+            let n = 24usize;
+            let a = ((v.attacker_strength / total) * n as f32).round() as usize;
+            let (mine, theirs) = if ascii { ('#', '-') } else { ('█', '▒') };
             out.push(line(
                 format!(
-                    "  {} {}  ·  {} {}",
+                    "  {} {}{} {}   ({:.0} against {:.0} in the field)",
                     w.polities[war.attacker].short,
-                    bar(
-                        v.attacker_strength / (v.attacker_strength + v.defender_strength),
-                        12,
-                        ascii
-                    ),
-                    bar(
-                        v.defender_strength / (v.attacker_strength + v.defender_strength),
-                        12,
-                        ascii
-                    ),
-                    w.polities[war.defender].short
+                    mine.to_string().repeat(a.min(n)),
+                    theirs.to_string().repeat(n - a.min(n)),
+                    w.polities[war.defender].short,
+                    v.attacker_strength,
+                    v.defender_strength
                 ),
                 DIMC,
                 0,
@@ -1437,7 +1450,11 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
             }
             if war.alive() {
                 out.push(line(
-                    format!("  The fighting is {}.", explain::war_weariness(w, x)),
+                    format!(
+                        "  After {} years of it, {}.",
+                        (w.year - war.started).max(1),
+                        explain::war_weariness(w, x)
+                    ),
                     DIMC,
                     0,
                 ));
@@ -1558,6 +1575,7 @@ pub const HELP: &[&str] = &[
     "             Home centre   zz centre on cursor   zi zo zoom in / out (or :zoom N)   Tab layer",
     "             Enter open   s select   Esc clear   gg or G jump to selection   f follow events",
     "             ] [ next / previous realm   } { next / previous city   t go to the top story",
+    "             r a recap of the last fifty years (of the selected realm, if one is selected)",
     "             v filter the event log by importance   x the Hand of Fate for the selected realm",
     "",
     "Search       /name finds realms, cities, people, peoples, schools, wars, places and relics;",
@@ -1567,6 +1585,7 @@ pub const HELP: &[&str] = &[
     "             ~/.local/share/empires; --save FILE or --load FILE on the command line)",
     "             :speed 25  :layer culture  :detail high  :zoom 2  :theme paper  :find Velen",
     "             :new [seed]  :until YEAR  :step N  :follow on  :log 2  :mute battle  :story",
+    "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
     "             :fate 3  :q  :wq  :q!",
     "",
@@ -1577,13 +1596,16 @@ pub const HELP: &[&str] = &[
     "",
     "Mouse        click selects, click again opens, wheel scrolls, clicking a chronicle line or",
     "             a sidebar entry jumps there.  --no-mouse or :mouse leaves it to the terminal.",
-    "",
     "Config       ~/.config/empires/config: key = value settings (detail speed theme mouse ascii",
     "             autosave width height log follow zoom) and vim-style remaps: map <S-Up> K",
     "Themes       default  phosphor  amber  paper  dusk   (:theme cycles)",
     "Quitting     :q  or  ZZ  or q twice on the map. With a save file set, quitting saves.",
-    "",
     "Symbols      @ capital  # city  × ruins  ! recent event  ≈ river  ▲ mountains  ♣ forest",
+    "             At zoom 1 a realm's name stands beside its capital; the line under the map says",
+    "             what the colours of the layer mean (:legend turns it off).",
+    "Plain words  stability reads steady / restless / troubled / on the brink, a treasury bankrupt /",
+    "             poor / solvent / rich, an army outmatched / matched / formidable. A realm's page",
+    "             has a Why block: what pulls its stability up or down, ranked, in words.",
 ];
 
 pub fn fate_menu(w: &World, p: usize) -> Vec<String> {
