@@ -3,6 +3,7 @@
 
 use super::chronicle::{EventKind, Ref};
 use super::politics::{self, claim};
+use super::prose::{self, Pick};
 use super::{Role, SchoolKind, War, WarKind, World};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -58,23 +59,11 @@ impl World {
                 (w.attacker == a && w.defender == d) || (w.attacker == d && w.defender == a)
             })
             .count();
-        let ordinal = match count {
-            0 => "",
-            1 => "Second ",
-            2 => "Third ",
-            3 => "Fourth ",
-            _ => "Latest ",
-        };
+        let ordinal = prose::war_ordinal(count);
         match kind {
-            WarKind::Rebellion => {
-                format!("the {} Rising", self.cultures[self.polities[a].culture].adj)
+            WarKind::Rebellion | WarKind::CivilWar | WarKind::Succession | WarKind::Holy => {
+                prose::war_name_internal(self, a, d, kind)
             }
-            WarKind::CivilWar => format!("the {} Civil War", self.polities[d].adj),
-            WarKind::Succession => format!("the War of the {} Succession", self.polities[d].adj),
-            WarKind::Holy => match self.polities[a].school {
-                Some(s) => format!("the {} Crusade", self.schools[s].short),
-                None => format!("the {} Holy War", self.polities[a].adj),
-            },
             _ => {
                 // Try naming after a contested feature near the border.
                 let mut feature = None;
@@ -92,21 +81,10 @@ impl World {
                 if let Some(f) = feature {
                     if rng.chance(0.5) {
                         let n = self.feature_name(f, Some(a));
-                        return format!(
-                            "the {}War of {}",
-                            ordinal,
-                            n.trim_start_matches("the ").to_string()
-                        );
+                        return prose::war_name_feature(&ordinal, &n);
                     }
                 }
-                match rng.below(3) {
-                    0 => format!(
-                        "the {}{}-{} War",
-                        ordinal, self.polities[a].adj, self.polities[d].adj
-                    ),
-                    1 => format!("the {}{} War", ordinal, self.polities[d].adj),
-                    _ => format!("the {}War of {}", ordinal, self.polities[a].short),
-                }
+                prose::war_name_realms(self, a, d, &ordinal, &Pick::rolled(&rng))
             }
         }
     }
@@ -126,11 +104,7 @@ impl World {
         self.polities[a].tension.insert(d, 0.0);
         self.polities[d].tension.insert(a, 0.0);
         if log {
-            let text = format!(
-                "{} {}",
-                crate::lang::capitalize(&self.wars[wid].name),
-                result
-            );
+            let text = prose::war_ended(&self.wars[wid].name, &result);
             self.log(
                 2,
                 EventKind::Peace,
@@ -257,44 +231,10 @@ pub fn diplomacy(w: &mut World) {
             } else {
                 WarKind::Conquest
             };
-            let cause = if holy {
-                format!("the heresies of {}", qol.short)
-            } else {
-                match rng.below(6) {
-                    0 => format!("a dispute over the borderlands of {}", w.polities[q].short),
-                    1 => "the insult of a refused marriage".to_string(),
-                    2 => format!("the ambition of {}", w.ruler_short(p)),
-                    3 => format!(
-                        "the {} settlers living under {} rule",
-                        w.cultures[pol.culture].adj, qol.adj
-                    ),
-                    4 => "a murdered envoy".to_string(),
-                    _ => "old grievances no one could quite recall".to_string(),
-                }
-            };
+            let cause = prose::war_cause(w, p, q, holy, &Pick::rolled(&rng));
             let wid = w.wars_start(p, q, kind, cause.clone());
-            let text = match kind {
-                WarKind::Holy => format!(
-                    "{} declared holy war upon {}, citing {}. Thus began {}.",
-                    w.ruler_title(p),
-                    w.polities[q].name,
-                    cause,
-                    w.wars[wid].name
-                ),
-                WarKind::Raid => format!(
-                    "The riders of {} fell upon {}. {} had begun.",
-                    w.polities[p].short,
-                    w.polities[q].name,
-                    crate::lang::capitalize(&w.wars[wid].name)
-                ),
-                _ => format!(
-                    "{} declared war upon {}, citing {}. Thus began {}.",
-                    w.ruler_title(p),
-                    w.polities[q].name,
-                    cause,
-                    w.wars[wid].name
-                ),
-            };
+            let war_name = w.wars[wid].name.clone();
+            let text = prose::war_declared(w, p, q, kind, &cause, &war_name);
             w.log(
                 2,
                 EventKind::War,
@@ -481,17 +421,7 @@ fn battle(
         }
     }
     let mut importance = 1;
-    let mut text = if win {
-        format!(
-            "The armies of {} defeated {} at the Battle of {}.",
-            w.polities[off].short, w.polities[def].short, place
-        )
-    } else {
-        format!(
-            "The {} attack on {} was thrown back at the Battle of {}.",
-            w.polities[off].adj, w.polities[def].short, place
-        )
-    };
+    let mut text = prose::battle_opening(w, off, def, &place, win);
     let mut refs = vec![Ref::War(wid), Ref::Polity(winner), Ref::Polity(loser)];
     // Territory changes: the winner takes cells from the loser along the front.
     let loser_front: Vec<usize> = if loser == def {
@@ -526,16 +456,13 @@ fn battle(
                     importance = 2;
                     taken += 1;
                 } else if w.detail.level() >= 1 && rng.chance(0.3) {
-                    text.push_str(&format!(" {} withstood the siege.", w.cities[city].name));
+                    text.push_str(&prose::siege_withstood(w, city));
                     w.cities[city].walls = (walls - 0.05).max(0.0);
                 }
                 continue;
             }
             if !win && taken == 0 {
-                text.push_str(&format!(
-                    " The {} pressed their advantage.",
-                    w.polities[winner].adj
-                ));
+                text.push_str(&prose::pressed_advantage(w, winner));
             }
             claim(w, winner, c);
             w.polities[winner].reign_gained += 1;
@@ -556,8 +483,8 @@ fn battle(
             let p_die = if side == loser { 0.035 } else { 0.008 };
             if leads && rng.chance(p_die) {
                 let name = w.persons[r].name.clone();
-                politics::ruler_dies(w, side, format!("fell at the Battle of {}.", place), 2);
-                text.push_str(&format!(" {} fell in the fighting.", name));
+                politics::ruler_dies(w, side, prose::fell_at(&place), 2);
+                text.push_str(&prose::ruler_fell_in_battle(&name));
                 importance = 2;
             }
         }
@@ -567,32 +494,14 @@ fn battle(
         for g in w.polities[side].generals.clone() {
             if w.persons[g].alive() && rng.chance(if side == loser { 0.06 } else { 0.015 }) {
                 w.persons[g].died = Some(w.year);
-                w.persons[g].death = format!("fell at the Battle of {}.", place);
-                text.push_str(
-                    &format!(
-                        " {} {}, the {} general, was slain.",
-                        w.persons[g].name,
-                        w.persons[g].epithet.clone().unwrap_or_default(),
-                        w.polities[side].adj
-                    )
-                    .replace("  ", " "),
-                );
+                w.persons[g].death = prose::fell_at(&place);
+                text.push_str(&prose::general_slain(w, g, side));
                 refs.push(Ref::Person(g));
             }
         }
     }
     if w.high_detail() && importance == 1 && rng.chance(0.25) {
-        let fl = match rng.below(5) {
-            0 => " The river ran red for a day.".to_string(),
-            1 => format!(" The {} held the high ground.", w.polities[winner].adj),
-            2 => " Rain turned the field to mud and the wounded drowned in it.".to_string(),
-            3 => format!(
-                " The {} fled at dusk, leaving their baggage.",
-                w.polities[loser].adj
-            ),
-            _ => " Both sides claimed the victory; the ravens did not care.".to_string(),
-        };
-        text.push_str(&fl);
+        text.push_str(&prose::battle_flourish(w, winner, loser, &Pick::rolled(&rng)));
     }
     if quiet && importance < 2 {
         return;
@@ -621,21 +530,14 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
         w.cities[city].times_sacked += 1;
         w.cities[city].prosperity *= 0.6;
         let lost = if !w.cities[city].wonders.is_empty() && rng.chance(0.5) {
-            let wn = w.cities[city].wonders.remove(0);
-            format!(" {} was cast down.", wn)
+            Some(w.cities[city].wonders.remove(0))
         } else {
-            String::new()
+            None
         };
         w.polities[winner].treasury += w.cities[city].pop * 2.0;
-        format!(
-            " {} was taken and sacked by the {}.{}",
-            name, w.polities[winner].adj, lost
-        )
+        prose::city_sacked(w, &name, winner, lost.as_deref())
     } else {
-        format!(
-            " {} opened its gates to the {}.",
-            name, w.polities[winner].adj
-        )
+        prose::city_surrendered(w, &name, winner)
     };
     s.push_str(&super::stories::artifacts_on_capture(
         w, city, winner, loser,
@@ -656,19 +558,11 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
             .max_by(|&&x, &&y| w.cities[x].pop.partial_cmp(&w.cities[y].pop).unwrap())
         {
             w.polities[loser].capital = Some(nc);
-            s.push_str(&format!(
-                " The court of {} fled to {}.",
-                w.polities[loser].short, w.cities[nc].name
-            ));
+            let to = w.cities[nc].name.clone();
+            s.push_str(&prose::court_flees(w, loser, &to));
         } else {
-            let cause = format!(
-                "was conquered by {} with the fall of {}.",
-                w.polities[winner].name, name
-            );
-            s.push_str(&format!(
-                " With its capital lost, {} was no more.",
-                w.polities[loser].name
-            ));
+            let cause = prose::conquered_by(w, winner, &name);
+            s.push_str(&prose::capital_lost(w, loser));
             politics::fall(w, loser, cause, Some(winner), 2);
         }
     }
@@ -684,18 +578,13 @@ fn make_peace(w: &mut World, wid: usize) {
         WarKind::Rebellion | WarKind::CivilWar | WarKind::Succession => {
             if score < -0.4 {
                 // Rebels crushed.
-                let cause = format!(
-                    "was crushed by {} after {} years of fighting.",
-                    w.polities[d].name,
-                    years.max(1)
-                );
+                let cause = prose::rebellion_crushed(w, d, years);
                 let leader = w.polities[a].ruler;
                 politics::fall(w, a, cause, Some(d), 2);
                 if let Some(l) = leader {
                     if w.persons[l].alive() {
                         w.persons[l].died = Some(w.year);
-                        w.persons[l].death =
-                            "was executed after the failure of the rising.".to_string();
+                        w.persons[l].death = prose::rebel_executed().to_string();
                     }
                 }
                 w.polities[d].reign_wars_won += 1;
@@ -705,18 +594,11 @@ fn make_peace(w: &mut World, wid: usize) {
                 && w.polities[a].cells > w.polities[d].cells
             {
                 // Rebels take over the old realm.
-                let cause = format!(
-                    "was overthrown; {} took the old capital and ruled in its place.",
-                    w.polities[a].name
-                );
+                let cause = prose::rebellion_triumphant(w, a);
                 politics::fall(w, d, cause, Some(a), 2);
                 return;
             } else {
-                w.polities[d].reign_wars_won += 0;
-                format!(
-                    "ended with {} recognising the independence of {}.",
-                    w.polities[d].short, w.polities[a].name
-                )
+                prose::independence_recognised(w, a, d)
             }
         }
         _ => {
@@ -733,18 +615,14 @@ fn make_peace(w: &mut World, wid: usize) {
                         *e = (*e + 0.3).min(1.0);
                     }
                 }
-                format!("ended in victory for {} after {} years; {} ceded the lands it had lost and paid tribute.", w.polities[a].short, years.max(1), w.polities[d].short)
+                prose::peace_attacker_won(w, a, d, years)
             } else if score < -0.5 {
                 w.polities[d].reign_wars_won += 1;
                 w.polities[d].prestige += 5.0;
                 w.polities[a].prestige -= 3.0;
-                format!(
-                    "ended after {} years with {} thrown back and humbled.",
-                    years.max(1),
-                    w.polities[a].short
-                )
+                prose::peace_defender_won(w, a, years)
             } else {
-                format!("ended after {} years with neither side the master; the exhausted realms made peace.", years.max(1))
+                prose::peace_stalemate(years)
             }
         }
     };

@@ -2,98 +2,15 @@
 //! lines of the chronicle.
 
 use super::chronicle::{EventKind, Ref};
+use super::prose::{self, genesis::FEATURE, genesis::STATURE};
 use super::{Culture, Era, Race, Values, World, GROUP_COUNT};
-use crate::geo::{BiomeGroup, FeatureKind};
+use crate::geo::FeatureKind;
 use crate::lang::Language;
 use crate::term::Rgb;
-
-const STATURE: &[&str] = &[
-    "tall",
-    "small",
-    "lithe",
-    "broad-shouldered",
-    "gaunt",
-    "stout",
-    "long-limbed",
-    "heavy-browed",
-];
-const FEATURE: &[&str] = &[
-    "grey-skinned",
-    "amber-eyed",
-    "horned",
-    "feathered at the brow",
-    "scaled",
-    "fur-cloaked",
-    "long-eared",
-    "bark-skinned",
-    "pale as chalk",
-    "dark as river clay",
-    "luminous-eyed",
-    "silver-haired",
-    "tusked",
-    "moss-haired",
-    "copper-skinned",
-    "black-eyed",
-    "antlered",
-    "web-fingered",
-];
 
 pub fn culture_color(id: usize) -> Rgb {
     let hue = (id as f32 * 97.3 + 40.0) % 360.0;
     Rgb::from_hsv(hue, 0.5, 0.9)
-}
-
-fn describe_race(r: &Race, stature: &str, feature: &str) -> String {
-    let mut temper: Vec<&str> = Vec::new();
-    if r.martial > 0.65 {
-        temper.push("warlike");
-    }
-    if r.mystic > 0.65 {
-        temper.push("given to visions and sorcery");
-    }
-    if r.mercantile > 0.65 {
-        temper.push("shrewd in trade");
-    }
-    if r.fecund > 0.65 {
-        temper.push("quick to multiply");
-    }
-    if r.seafaring > 0.65 {
-        temper.push("born to the sea");
-    }
-    if r.martial < 0.35 {
-        temper.push("slow to anger");
-    }
-    if r.mystic < 0.35 {
-        temper.push("distrustful of magic");
-    }
-    if temper.is_empty() {
-        temper.push("patient and enduring");
-    }
-    let life = if r.lifespan < 55.0 {
-        "short-lived"
-    } else if r.lifespan > 140.0 {
-        "long-lived beyond the memory of other peoples"
-    } else if r.lifespan > 95.0 {
-        "long-lived"
-    } else {
-        "mortal as the seasons"
-    };
-    let mut best = BiomeGroup::Temperate;
-    let mut best_v = 0.0;
-    for g in BiomeGroup::all() {
-        if r.affinity[g as usize] > best_v {
-            best_v = r.affinity[g as usize];
-            best = g;
-        }
-    }
-    format!(
-        "a {}, {} people, {}, {}, most at home in {}",
-        stature,
-        feature,
-        temper.join(" and "),
-        life,
-        best.phrase()
-    )
 }
 
 pub fn populate(w: &mut World) {
@@ -110,20 +27,14 @@ pub fn populate(w: &mut World) {
     w.eras.push(Era {
         start: 0,
         name: "the Dawn Age".to_string(),
-        description: format!(
-            "The first peoples of {} wake and look about them.",
-            world_name
-        ),
+        description: prose::dawn_age(&world_name),
     });
     w.log(
         3,
         EventKind::Genesis,
         &[],
         None,
-        format!(
-            "In the beginning there was only the sea and the stone. Then the world of {} was peopled, and its history began.",
-            world_name
-        ),
+        prose::first_words(&world_name),
     );
 
     for ri in 0..n_races {
@@ -178,7 +89,7 @@ pub fn populate(w: &mut World) {
         };
         used_stature.push(si);
         used_feature.push(fi);
-        race.description = describe_race(&race, STATURE[si], FEATURE[fi]);
+        race.description = prose::race_description(&race, STATURE[si], FEATURE[fi]);
 
         // Choose a homeland: fertile, favoured biome, far from other homes.
         let mut best = None;
@@ -291,10 +202,7 @@ pub fn populate(w: &mut World) {
     for ri in 0..w.races.len() {
         let home = w.races[ri].home;
         let place = w.place_phrase(home, None);
-        let text = format!(
-            "The {} are {}. They dwell {}.",
-            w.races[ri].plural, w.races[ri].description, place
-        );
+        let text = prose::race_awakes(&w.races[ri].plural, &w.races[ri].description, &place);
         w.log(2, EventKind::Genesis, &[Ref::Race(ri)], Some(home), text);
     }
 }

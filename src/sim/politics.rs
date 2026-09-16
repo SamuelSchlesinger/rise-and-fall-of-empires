@@ -2,6 +2,7 @@
 //! lose stability, change rulers, and eventually fragment or fall.
 
 use super::chronicle::{EventKind, Ref};
+use super::prose::{self, Pick};
 use super::{City, Polity, PolityKind, Role, Traits, World};
 use std::collections::BTreeMap;
 
@@ -328,23 +329,15 @@ pub fn form_polities(w: &mut World) {
         let p = found_polity(w, culture, i, kind, None, &cells, None);
         founded += 1;
         let place = w.place_phrase(i, Some(p));
-        let (pname, cname, ruler, plural) = (
-            w.polities[p].name.clone(),
-            w.cities[w.polities[p].capital.unwrap()].name.clone(),
-            w.ruler_short(p),
-            w.cultures[culture].plural.clone(),
-        );
-        let text = match kind {
-            PolityKind::Horde => format!("{} gathered the {} riders into a single host: {}, with its camps at {} {}.", ruler, plural, pname, cname, place),
-            _ => format!("The {} living {} raised {} as their chief and built the settlement of {}. Thus began {}.", plural, place, ruler, cname, pname),
-        };
+        let capital = w.polities[p].capital.unwrap();
+        let text = prose::polity_founded(w, p, kind, capital, culture, &place);
         w.log(
             1,
             EventKind::Founding,
             &[
                 Ref::Polity(p),
                 Ref::Culture(culture),
-                Ref::City(w.polities[p].capital.unwrap()),
+                Ref::City(capital),
             ],
             Some(i),
             text,
@@ -592,19 +585,7 @@ pub fn found_cities(w: &mut World) {
             let c = found_city(w, Some(p), i, culture);
             w.polities[p].reign_cities += 1;
             let place = w.place_phrase(i, Some(p));
-            let text = if rng.chance(0.5) {
-                format!(
-                    "{} founded the town of {} {}.",
-                    w.ruler_title(p),
-                    w.cities[c].name,
-                    place
-                )
-            } else {
-                format!(
-                    "Settlers from {} raised the town of {} {}.",
-                    w.polities[p].short, w.cities[c].name, place
-                )
-            };
+            let text = prose::city_founded(w, p, c, &place, &Pick::rolled(&rng));
             w.log(
                 1,
                 EventKind::Founding,
@@ -736,10 +717,7 @@ pub fn economy(w: &mut World) {
             let sea = w.races[w.cultures[culture].race].seafaring;
             if coastal_city && rng.chance(0.01 * (sea as f64 + pol.dev as f64 * 0.5)) {
                 pol.seafaring = true;
-                let text = format!(
-                    "The shipwrights of {} learned to build vessels fit for the open sea.",
-                    pol.short
-                );
+                let text = prose::learned_seafaring(w, p);
                 w.log(1, EventKind::Discovery, &[Ref::Polity(p)], None, text);
             }
         }
@@ -867,33 +845,10 @@ pub fn ruler_dies(w: &mut World, p: usize, cause: String, importance: u8) {
     w.persons[r].epithet = epithet;
     w.persons[r].died = Some(w.year);
     w.persons[r].death = cause.clone();
-    let title = w.ruler_title(p);
     let length = w.year - w.polities[p].reign_start;
-    let mut text = format!("{} {}", title, cause);
+    let mut text = prose::ruler_died(w, p, r, &cause, length);
     if w.high_detail() {
-        let g = w.persons[r].gender;
-        let flourish = match w.rng.below(6) {
-            0 => format!(
-                " {} had reigned {} years.",
-                crate::lang::capitalize(g.they()),
-                length
-            ),
-            1 => format!(
-                " The people of {} mourned for many days.",
-                w.polities[p].short
-            ),
-            2 => format!(
-                " {} was laid in the tombs of {}.",
-                crate::lang::capitalize(g.they()),
-                w.polities[p]
-                    .capital
-                    .map(|c| w.cities[c].name.clone())
-                    .unwrap_or_else(|| w.polities[p].short.clone())
-            ),
-            3 => " Few wept.".to_string(),
-            4 => format!(" Songs were sung of {} reign for a generation.", g.their()),
-            _ => String::new(),
-        };
+        let flourish = prose::ruler_death_flourish(w, p, r, length, &Pick::rolled(&w.rng.clone()));
         text.push_str(&flourish);
     }
     w.log(
@@ -925,24 +880,7 @@ fn succession(w: &mut World, p: usize, old: usize) {
             None,
         );
         install_ruler(w, p, heir);
-        let text = match kind {
-            PolityKind::Republic => format!(
-                "The assemblies of {} elected {} as consul.",
-                w.polities[p].short, w.persons[heir].name
-            ),
-            PolityKind::Magocracy => format!(
-                "The towers of {} chose {} as their archmage.",
-                w.polities[p].short, w.persons[heir].name
-            ),
-            PolityKind::Theocracy => format!(
-                "The priests of {} raised {} to the hierarchy.",
-                w.polities[p].short, w.persons[heir].name
-            ),
-            _ => format!(
-                "The {} chose {} to lead them.",
-                w.cultures[culture].plural, w.persons[heir].name
-            ),
-        };
+        let text = prose::elected(w, p, kind, heir);
         w.log(
             1,
             EventKind::Politics,
@@ -963,18 +901,7 @@ fn succession(w: &mut World, p: usize, old: usize) {
         );
         w.persons[heir].parent = Some(old);
         install_ruler(w, p, heir);
-        let hon = w.honorific(p, w.persons[heir].gender);
-        let text = if rng.chance(0.5) {
-            format!(
-                "{} {} succeeded to the throne of {}, of {}.",
-                hon, w.persons[heir].name, w.polities[p].short, dynasty
-            )
-        } else {
-            format!(
-                "The crown of {} passed to {} {}.",
-                w.polities[p].short, hon, w.persons[heir].name
-            )
-        };
+        let text = prose::succession_smooth(w, p, heir, &dynasty, &Pick::rolled(&rng));
         w.log(
             1,
             EventKind::Politics,
@@ -1000,14 +927,7 @@ fn succession(w: &mut World, p: usize, old: usize) {
         w.polities[p].dynasty = dyn_name.clone();
         install_ruler(w, p, usurper);
         w.polities[p].stability = (w.polities[p].stability - 0.2).max(0.0);
-        let hon = w.honorific(p, w.persons[usurper].gender);
-        let text = format!(
-            "With no clear heir, {} seized the throne of {} and founded {}. {} was ended.",
-            w.persons[usurper].name,
-            w.polities[p].short,
-            dyn_name,
-            crate::lang::capitalize(&dynasty)
-        );
+        let text = prose::succession_usurped(w, p, usurper, &dyn_name, &dynasty);
         w.log(
             2,
             EventKind::Politics,
@@ -1015,7 +935,6 @@ fn succession(w: &mut World, p: usize, old: usize) {
             w.capital_cell(p),
             text,
         );
-        let _ = hon;
     } else if roll < 0.75 {
         // Succession war: the realm splits.
         let claimant_a = w.new_person(
@@ -1038,23 +957,10 @@ fn succession(w: &mut World, p: usize, old: usize) {
         let name_a = w.persons[claimant_a].name.clone();
         let name_b = w.persons[claimant_b].name.clone();
         if let Some(rebel) = split_off(w, p, Some(claimant_b), None) {
-            w.wars_start(
-                rebel,
-                p,
-                super::WarKind::Succession,
-                format!(
-                    "the claim of {} to the throne of {}",
-                    name_b, w.polities[p].short
-                ),
-            );
-            let text = format!(
-                "Two claimants rose for the throne of {}: {} held {}, while {} raised banners in {}. The realm went to war with itself.",
-                w.polities[p].short,
-                name_a,
-                w.cities[w.polities[p].capital.unwrap()].name,
-                name_b,
-                w.polities[rebel].cities.first().map(|&c| w.cities[c].name.clone()).unwrap_or_else(|| "the provinces".into())
-            );
+            let claim = prose::succession_claim(w, p, &name_b);
+            w.wars_start(rebel, p, super::WarKind::Succession, claim);
+            let seat_a = w.cities[w.polities[p].capital.unwrap()].name.clone();
+            let text = prose::succession_war(w, p, rebel, &name_a, &name_b, &seat_a);
             w.log(
                 2,
                 EventKind::Politics,
@@ -1068,10 +974,7 @@ fn succession(w: &mut World, p: usize, old: usize) {
                 text,
             );
         } else {
-            let text = format!(
-                "{} took the throne of {} after a bitter dispute.",
-                name_a, w.polities[p].short
-            );
+            let text = prose::succession_disputed(w, p, &name_a);
             w.log(
                 1,
                 EventKind::Politics,
@@ -1092,12 +995,7 @@ fn succession(w: &mut World, p: usize, old: usize) {
         w.persons[regent].parent = Some(old);
         install_ruler(w, p, regent);
         w.polities[p].stability = (w.polities[p].stability - 0.25).max(0.0);
-        let text = format!(
-            "The child {} inherited {}; the great houses ruled in {} name and quarrelled over the spoils.",
-            w.persons[regent].name,
-            w.polities[p].short,
-            w.persons[regent].gender.their()
-        );
+        let text = prose::succession_regency(w, p, regent);
         w.log(
             1,
             EventKind::Politics,
@@ -1152,29 +1050,12 @@ pub fn rulers(w: &mut World) {
             0.002 * (1.0 + per.traits.cruelty * 3.0) + (0.5 - stability).max(0.0) * 0.02;
         let roll = rng.f64();
         if roll < p_nat as f64 {
-            let cause = match rng.below(7) {
-                0 => "died of a fever.".to_string(),
-                1 => format!("died in bed at the age of {}.", age as i32),
-                2 => "fell from a horse and did not rise.".to_string(),
-                3 => "died of a wasting sickness.".to_string(),
-                4 => "died in the night, and no one could say why.".to_string(),
-                5 => format!("died, full of years, at the age of {}.", age as i32),
-                _ => "choked at a feast.".to_string(),
-            };
+            let cause = prose::natural_death(age as i32, &Pick::rolled(&rng));
             ruler_dies(w, p, cause, 1);
         } else if roll < (p_nat + p_assassin) as f64 {
-            let by = match rng.below(5) {
-                0 => "a cupbearer".to_string(),
-                1 => "the palace guard".to_string(),
-                2 => "a discontented noble".to_string(),
-                3 => match w.polities[p].neighbors.first() {
-                    Some(&(q, _)) => format!("agents of {}", w.polities[q].short),
-                    None => "an unknown hand".to_string(),
-                },
-                _ => "a masked assassin".to_string(),
-            };
+            let by = prose::assassin(w, p, &Pick::rolled(&rng));
             w.polities[p].stability = (w.polities[p].stability - 0.15).max(0.0);
-            ruler_dies(w, p, format!("was murdered by {}.", by), 2);
+            ruler_dies(w, p, prose::murdered_by(&by), 2);
         }
     }
 }
@@ -1295,11 +1176,8 @@ pub fn fall(
     }
     let wars = w.polities[p].wars.clone();
     for wid in wars {
-        w.end_war(
-            wid,
-            format!("ended when {} ceased to exist", w.polities[p].name),
-            false,
-        );
+        let result = prose::war_lapsed(w, p);
+        w.end_war(wid, result, false);
     }
     if let Some(r) = w.polities[p].ruler {
         if w.persons[r].alive() {
@@ -1318,19 +1196,13 @@ pub fn fall(
         1
     }
     .max(importance_floor);
-    let mut text = format!("{} {}", crate::lang::capitalize(&w.polities[p].name), cause);
-    if peak > 40 {
-        text.push_str(&format!(
-            " At its height in year {} it had ruled {} lands and {} cities.",
-            w.polities[p].peak_year,
-            peak,
-            w.cities
-                .iter()
-                .filter(|c| c.founder == Some(p))
-                .count()
-                .max(w.polities[p].cities.len())
-        ));
-    }
+    let cities_built = w
+        .cities
+        .iter()
+        .filter(|c| c.founder == Some(p))
+        .count()
+        .max(w.polities[p].cities.len());
+    let text = prose::realm_fell(w, p, &cause, cities_built);
     let mut refs = vec![Ref::Polity(p)];
     if let Some(a) = absorbed_by {
         refs.push(Ref::Polity(a));
@@ -1344,11 +1216,7 @@ pub fn unrest(w: &mut World) {
     for p in w.living_polities() {
         let pol = &w.polities[p];
         if pol.cells == 0 && pol.founded < w.year {
-            let cause = if pol.wars.is_empty() {
-                "faded away, its last lands abandoned.".to_string()
-            } else {
-                "was overrun and destroyed.".to_string()
-            };
+            let cause = prose::faded_away(!pol.wars.is_empty()).to_string();
             fall(w, p, cause, None, 1);
             continue;
         }
@@ -1382,28 +1250,16 @@ pub fn unrest(w: &mut World) {
                     } else {
                         super::WarKind::Rebellion
                     };
-                    let cause = if kind == super::WarKind::CivilWar {
-                        if cruelty > 0.6 {
-                            format!("the cruelty of {}", w.ruler_short(p))
-                        } else {
-                            format!("the misrule of {}", w.ruler_short(p))
-                        }
-                    } else {
-                        format!(
-                            "the {} yearning for freedom from {}",
-                            w.cultures[rc].adj, w.polities[p].short
-                        )
-                    };
+                    let cause = prose::revolt_cause(
+                        w,
+                        p,
+                        rc,
+                        kind == super::WarKind::CivilWar,
+                        cruelty > 0.6,
+                    );
                     w.wars_start(rebel, p, kind, cause.clone());
                     let seat = w.cities[w.polities[rebel].capital.unwrap()].name.clone();
-                    let text = format!(
-                        "{} raised the banner of revolt at {} against {}, citing {}. The rebels named their realm {}.",
-                        w.persons[leader].name,
-                        seat,
-                        w.polities[p].name,
-                        cause,
-                        w.polities[rebel].name
-                    );
+                    let text = prose::revolt(w, p, rebel, leader, &seat, &cause);
                     w.log(
                         2,
                         EventKind::War,
@@ -1514,16 +1370,8 @@ fn kind_changes(w: &mut World, p: usize) {
             w.polities[p].dynasty = d;
         }
     }
-    let (imp, text) = match new {
-        PolityKind::Chiefdom => (0, format!("The clans of {} bent the knee to a single chieftain; {} was now {}.", short, oldname, name)),
-        PolityKind::Kingdom if old == PolityKind::Empire => (2, format!("Shrunken and humbled, {} was an empire no longer. Its rulers styled it {}.", oldname, name)),
-        PolityKind::Kingdom => (1, format!("{} was crowned in {}, and {} became {}.", ruler, cap_name.unwrap_or_default(), oldname, name)),
-        PolityKind::Republic => (1, format!("The merchant houses of {} cast down their chieftain and proclaimed {}.", cap_name.unwrap_or_default(), name)),
-        PolityKind::Empire => (3, format!("{} was proclaimed {}. {} took the imperial diadem before the assembled peoples of {} lands.", crate::lang::capitalize(&oldname), name, ruler, w.polities[p].cells)),
-        PolityKind::Theocracy => (2, format!("The priests of {} took the crown for their own; {} was now {}.", short, oldname, name)),
-        PolityKind::Magocracy => (2, format!("The mages who counselled the throne of {} dispensed with the throne. {} was now {}.", short, oldname, name)),
-        _ => (1, format!("{} became {}.", oldname, name)),
-    };
+    let capital = cap_name.unwrap_or_else(|| short.clone());
+    let (imp, text) = prose::rank_changed(w, p, old, new, &oldname, &name, &ruler, &capital);
     w.log(
         imp,
         EventKind::Politics,
@@ -1549,15 +1397,13 @@ fn fragment(w: &mut World, p: usize) {
     let k = (2 + rng.below(3)).min(cities.len());
     if k < 1 {
         // No cities to seed successors: the state simply collapses.
-        let name = w.polities[p].name.clone();
         fall(
             w,
             p,
-            "collapsed into lawlessness, its lords each seizing what they could.".to_string(),
+            prose::collapsed_into_lawlessness().to_string(),
             None,
             2,
         );
-        let _ = name;
         return;
     }
     let seeds: Vec<usize> = cities[..k].iter().map(|&c| w.cities[c].cell).collect();
@@ -1612,31 +1458,13 @@ fn fragment(w: &mut World, p: usize) {
         .iter()
         .map(|&s| w.polities[s].name.clone())
         .collect();
-    let text = format!(
-        "{} shattered. Its governors and generals each crowned themselves, and from its ruin rose {}. What remained of the old realm, now {}, held only the lands about {}.",
-        crate::lang::capitalize(&oldname),
-        join_names(&names),
-        w.polities[p].name,
-        w.cities[capital].name
-    );
+    let capital_name = w.cities[capital].name.clone();
+    let text = prose::shattered(w, p, &oldname, &names, &capital_name);
     let mut refs = vec![Ref::Polity(p)];
     for &s in &successors {
         refs.push(Ref::Polity(s));
     }
     w.log(3, EventKind::Politics, &refs, Some(capital_cell), text);
-}
-
-pub fn join_names(names: &[String]) -> String {
-    match names.len() {
-        0 => String::new(),
-        1 => names[0].clone(),
-        2 => format!("{} and {}", names[0], names[1]),
-        _ => format!(
-            "{}, and {}",
-            names[..names.len() - 1].join(", "),
-            names[names.len() - 1]
-        ),
-    }
 }
 
 pub fn traits_of(w: &World, p: usize) -> Traits {

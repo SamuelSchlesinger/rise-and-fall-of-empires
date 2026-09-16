@@ -2,6 +2,7 @@
 //! change hands across the centuries, tyrants, heroes and legends.
 
 use super::chronicle::{EventKind, Ref};
+use super::prose::{self, Pick};
 use super::{Artifact, ArtifactKind, Holder, PolityKind, Prophecy, ProphecyKind, Role, World};
 
 const ART_ADJ: &[&str] = &[
@@ -111,21 +112,7 @@ pub fn make_artifact(
                 .unwrap_or_else(|| lang.name(&rng))
         ),
     };
-    let description = match kind {
-        ArtifactKind::Crown => "a circlet that is said to weigh heavier on an unjust brow",
-        ArtifactKind::Blade => "a sword that has never been sharpened and has never needed to be",
-        ArtifactKind::Tome => "a book whose last pages are always blank until they are needed",
-        ArtifactKind::Gem => "a stone in which, by candlelight, a city can be seen burning",
-        ArtifactKind::Banner => {
-            "a standard that has never been taken in battle, whatever the outcome"
-        }
-        ArtifactKind::Staff => "a staff of wood from a tree no one alive has seen",
-        ArtifactKind::Chalice => "a cup that turns wine bitter in the mouth of a liar",
-        ArtifactKind::Horn => "a horn whose note is heard in every valley of the realm",
-        ArtifactKind::Mirror => "a mirror that shows the room as it will be in a hundred years",
-        ArtifactKind::Shard => "a splinter of glass from an unmade city, warm to the touch",
-    }
-    .to_string();
+    let description = prose::artifact_description(kind);
     let lost_at = if let Holder::Lost = holder {
         polity.and_then(|p| w.capital_cell(p))
     } else {
@@ -144,7 +131,7 @@ pub fn make_artifact(
         lost_at,
         hands: 0,
     });
-    let text = format!("{} {} was made: {}.", occasion, name, description);
+    let text = prose::artifact_made(occasion, &name, &description);
     let mut refs = vec![Ref::Artifact(id)];
     if let Some(m) = maker {
         refs.push(Ref::Person(m));
@@ -173,7 +160,7 @@ pub fn artifact_passes(w: &mut World, a: usize, to: Holder, how: &str) {
         Holder::Lost => {}
     }
     let loc = w.artifact_loc(a);
-    let text = format!("{} {}", crate::lang::capitalize(&name), how);
+    let text = prose::artifact_passed(&name, how);
     w.log(1, EventKind::Wonder, &refs, loc, text);
 }
 
@@ -197,27 +184,13 @@ pub fn artifacts_on_capture(w: &mut World, city: usize, winner: usize, loser: us
         let name = w.artifacts[a].name.clone();
         if w.rng.chance(0.25) {
             w.artifacts[a].lost_at = Some(w.cities[city].cell);
-            artifact_passes(
-                w,
-                a,
-                Holder::Lost,
-                &format!("vanished in the sack of {}.", w.cities[city].name),
-            );
-            s.push_str(&format!(
-                " {} vanished in the confusion.",
-                crate::lang::capitalize(&name)
-            ));
+            let how = prose::relic_vanished_in_sack(&w.cities[city].name.clone());
+            artifact_passes(w, a, Holder::Lost, &how);
+            s.push_str(&prose::relic_lost_aside(&name));
         } else {
-            artifact_passes(
-                w,
-                a,
-                Holder::Polity(winner),
-                &format!("was carried off to {} as spoils.", w.polities[winner].short),
-            );
-            s.push_str(&format!(
-                " {} was carried off by the victors.",
-                crate::lang::capitalize(&name)
-            ));
+            let how = prose::relic_taken_as_spoils(w, winner);
+            artifact_passes(w, a, Holder::Polity(winner), &how);
+            s.push_str(&prose::relic_taken_aside(&name));
         }
     }
     s
@@ -227,23 +200,14 @@ pub fn artifacts_on_capture(w: &mut World, city: usize, winner: usize, loser: us
 pub fn artifacts_on_fall(w: &mut World, p: usize, absorbed_by: Option<usize>) {
     for a in w.artifacts_of(p) {
         match absorbed_by {
-            Some(q) if w.rng.chance(0.7) => artifact_passes(
-                w,
-                a,
-                Holder::Polity(q),
-                &format!(
-                    "passed to {} with the fall of {}.",
-                    w.polities[q].short, w.polities[p].short
-                ),
-            ),
+            Some(q) if w.rng.chance(0.7) => {
+                let how = prose::relic_passed_with_fall(w, q, p);
+                artifact_passes(w, a, Holder::Polity(q), &how);
+            }
             _ => {
                 w.artifacts[a].lost_at = w.capital_cell(p);
-                artifact_passes(
-                    w,
-                    a,
-                    Holder::Lost,
-                    &format!("was lost in the ruin of {}.", w.polities[p].name),
-                );
+                let how = prose::relic_lost_in_ruin(w, p);
+                artifact_passes(w, a, Holder::Lost, &how);
             }
         }
     }
@@ -292,10 +256,7 @@ pub fn artifacts_on_ruler_death(w: &mut World, p: usize, r: usize) {
             Some(r),
             Some(p),
             Holder::Polity(p),
-            &format!(
-                "In memory of {}, the smiths of {} laboured a year and",
-                name, capital
-            ),
+            &prose::occasion_ruler_memorial(&name, &capital),
         );
     }
 }
@@ -318,7 +279,7 @@ pub fn artifacts_on_wonder(w: &mut World, p: usize, cap: usize) {
             w.polities[p].ruler,
             Some(p),
             Holder::City(cap),
-            &format!("To crown the new wonder of {},", city),
+            &prose::occasion_wonder(&city),
         );
     }
 }
@@ -348,7 +309,7 @@ pub fn artifacts_on_school(w: &mut World, s: usize) {
             Some(founder),
             polity,
             Holder::City(city),
-            &format!("For the {} of {},", w.schools[s].kind.follower(), sname),
+            &prose::occasion_school(w.schools[s].kind.follower(), &sname),
         );
     }
 }
@@ -361,7 +322,7 @@ pub fn artifacts_on_catastrophe(w: &mut World, cell: usize, s: usize) {
         Some(founder),
         None,
         Holder::Lost,
-        "Among the glass of the unmade city,",
+        prose::occasion_catastrophe(),
     );
     w.artifacts[id].lost_at = Some(cell);
 }
@@ -401,19 +362,10 @@ pub fn tick_artifacts(w: &mut World) {
                         best
                     });
                 if let Some(p) = finder {
-                    let finder_desc = *rng.pick(&[
-                        "shepherds",
-                        "grave-robbers",
-                        "a ploughman",
-                        "children",
-                        "soldiers digging a well",
-                        "a hermit",
-                    ]);
+                    let finder_desc = prose::finders(&Pick::rolled(&rng));
                     let place = w.place_phrase(at, Some(p));
-                    let how = format!(
-                        "was found: {} of {} dug it out of the earth {}.",
-                        finder_desc, w.polities[p].short, place
-                    );
+                    let buried = w.year - w.artifacts[a].made;
+                    let how = prose::relic_found(w, p, &finder_desc, &place, buried);
                     artifact_passes(w, a, Holder::Polity(p), &how);
                 }
             }
@@ -431,34 +383,14 @@ pub fn tick_artifacts(w: &mut World) {
                 }
                 let at = w.artifact_loc(a);
                 w.artifacts[a].lost_at = at;
-                let how = match rng.below(3) {
-                    0 => format!(
-                        "was stolen from the vaults of {} by a thief who was never caught.",
-                        w.polities[p].short
-                    ),
-                    1 => format!(
-                        "was lost when the ship carrying it from {} foundered.",
-                        w.polities[p].short
-                    ),
-                    _ => format!(
-                        "vanished from {}; the guards swore the doors had never opened.",
-                        w.polities[p].short
-                    ),
-                };
+                let how = prose::relic_stolen(w, p, &Pick::rolled(&rng));
                 artifact_passes(w, a, Holder::Lost, &how);
             }
             Holder::Person(per) if !w.persons[per].alive() => {
                 // A dead holder outside the succession path: the relic is lost.
                 w.artifacts[a].lost_at = w.persons[per].polity.and_then(|p| w.capital_cell(p));
-                artifact_passes(
-                    w,
-                    a,
-                    Holder::Lost,
-                    &format!(
-                        "was buried with {} and its resting place forgotten.",
-                        w.persons[per].full_name()
-                    ),
-                );
+                let how = prose::relic_buried_with(&w.persons[per].full_name());
+                artifact_passes(w, a, Holder::Lost, &how);
             }
             _ => {}
         }
@@ -561,19 +493,9 @@ pub fn utter_prophecy(w: &mut World, seer: usize, p: usize) -> Option<usize> {
         .city
         .map(|c| w.cities[c].name.clone())
         .unwrap_or_else(|| w.polities[p].short.clone());
-    let what = prophecy_what(w, kind);
-    let opening = *rng.pick(&[
-        "spoke in a trance before the court",
-        "was found on the temple steps at dawn, and said",
-        "cried out in the market",
-        "read the entrails of a white bull and declared",
-        "woke from a fever of nine days and said",
-        "wrote on the wall of the granary in charcoal",
-    ]);
-    let text = format!(
-        "{} of {} {} that {} before {} winters had passed.",
-        seer_name, where_, opening, what, years
-    );
+    let what = prose::prophecy_what(w, kind);
+    let opening = prose::prophecy_opening(&Pick::rolled(&rng));
+    let text = prose::prophecy_uttered(&seer_name, &where_, &opening, &what, years);
     let id = w.prophecies.len();
     w.prophecies.push(Prophecy {
         id,
@@ -601,28 +523,6 @@ pub fn utter_prophecy(w: &mut World, seer: usize, p: usize) -> Option<usize> {
     w.log(1, EventKind::Magic, &refs, w.capital_cell(p), text);
     w.persons[seer].renown += 1.0;
     Some(id)
-}
-
-fn prophecy_what(w: &World, kind: ProphecyKind) -> String {
-    match kind {
-        ProphecyKind::RealmFalls(q) => format!("{} would fall", w.polities[q].name),
-        ProphecyKind::CrownOfEmpire(q) => format!(
-            "a ruler of {} would wear an emperor's crown",
-            w.polities[q].short
-        ),
-        ProphecyKind::CityBurns(c, _) => format!("{} would burn", w.cities[c].name),
-        ProphecyKind::RulerMurdered(q) => format!(
-            "a ruler of {} would die by a hand they trusted",
-            w.polities[q].short
-        ),
-        ProphecyKind::FaithSpreads(s, n) => {
-            format!("{} would be honoured in {} realms", w.schools[s].name, n)
-        }
-        ProphecyKind::RelicReturns(a, q) => format!(
-            "{} would return to {}",
-            w.artifacts[a].name, w.polities[q].short
-        ),
-    }
 }
 
 fn prophecy_met(w: &World, pr: &Prophecy) -> bool {
@@ -663,7 +563,7 @@ pub fn tick_prophecies(w: &mut World) {
             w.prophecies[i].outcome = Some(true);
             w.prophecies[i].resolved = Some(w.year);
             let age = w.year - w.prophecies[i].year;
-            let text = format!("The words of {} came true {} years after they were spoken: it had been foretold that {}, and so it was.", seer_name, age, what);
+            let text = prose::prophecy_fulfilled(&seer_name, &what, age);
             w.persons[seer].renown += 3.0;
             if let Some(s) = w.persons[seer].school {
                 if w.schools[s].alive() {
@@ -677,11 +577,8 @@ pub fn tick_prophecies(w: &mut World) {
         } else if w.year >= w.prophecies[i].deadline {
             w.prophecies[i].outcome = Some(false);
             w.prophecies[i].resolved = Some(w.year);
-            let text = match w.rng.below(3) {
-                0 => format!("The years allotted to the prophecy of {} ran out. It had been foretold that {}; it had not come to pass, and the seer's name became a byword for foolishness.", seer_name, what),
-                1 => format!("The prophecy of {} that {} was quietly forgotten.", seer_name, what),
-                _ => format!("Nothing came of the words of {}. It had been said that {}; children laughed at the old story.", seer_name, what),
-            };
+            let rng = w.rng.clone();
+            let text = prose::prophecy_failed(&seer_name, &what, &Pick::rolled(&rng));
             let refs = prophecy_refs(w, i);
             w.log(1, EventKind::Magic, &refs, None, text);
         }
@@ -732,15 +629,8 @@ pub fn tick_legends(w: &mut World) {
                 .to_string(),
             );
             w.polities[p].stability = (w.polities[p].stability - 0.06).max(0.0);
-            let title = w.ruler_title(p);
             let n = 3 + rng.below(30);
-            let text = format!(
-                "The people of {} spoke of {} only in whispers. {} had {} nobles put to death in a single winter, and the roads were lined with what remained.",
-                w.polities[p].short,
-                title,
-                crate::lang::capitalize(w.persons[r].gender.they()),
-                n
-            );
+            let text = prose::tyrant(w, p, r, n);
             w.log(
                 1,
                 EventKind::Politics,
@@ -776,15 +666,10 @@ pub fn tick_legends(w: &mut World) {
             _ => *rng.pick(&["the Remembered", "the Great"]),
         };
         w.persons[i].epithet = Some(epithet.to_string());
-        let name = w.persons[i].full_name();
         let culture = w.cultures[w.persons[i].culture].plural.clone();
         let deeds = w.chronicle.for_ref(Ref::Person(i)).len();
         let _ = deeds;
-        let text = match role {
-            Role::General => format!("{} was laid on a pyre with {} sword. The {} still tell of {} battles, and the number grows each telling.", name, w.persons[i].gender.their(), culture, w.persons[i].battles_won.max(3)),
-            Role::Poet => format!("{} died; the {} sing {} verses still.", name, culture, w.persons[i].gender.their()),
-            _ => format!("{} died. The {} count {} among the great of their people; {} deeds are told to children.", name, culture, w.persons[i].gender.them(), w.persons[i].gender.their()),
-        };
+        let text = prose::legend_remembered(w, i, role.name(), &culture);
         w.log(2, EventKind::Death, &[Ref::Person(i)], None, text);
     }
 }
@@ -804,18 +689,6 @@ impl World {
 
     /// "child of X, grandchild of Y"
     pub fn lineage(&self, r: usize) -> String {
-        let mut parts = Vec::new();
-        let mut cur = self.persons[r].parent;
-        let words = ["child", "grandchild", "great-grandchild"];
-        let mut k = 0;
-        while let Some(p) = cur {
-            if k >= words.len() {
-                break;
-            }
-            parts.push(format!("{} of {}", words[k], self.persons[p].full_name()));
-            cur = self.persons[p].parent;
-            k += 1;
-        }
-        parts.join(", ")
+        prose::lineage(self, r)
     }
 }

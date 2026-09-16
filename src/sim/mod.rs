@@ -7,6 +7,7 @@ pub mod genesis;
 pub mod magic;
 pub mod people;
 pub mod politics;
+pub mod prose;
 pub mod stories;
 pub mod war;
 
@@ -289,30 +290,6 @@ pub enum Gender {
     F,
     M,
     N,
-}
-
-impl Gender {
-    pub fn they(self) -> &'static str {
-        match self {
-            Gender::F => "she",
-            Gender::M => "he",
-            Gender::N => "they",
-        }
-    }
-    pub fn them(self) -> &'static str {
-        match self {
-            Gender::F => "her",
-            Gender::M => "him",
-            Gender::N => "them",
-        }
-    }
-    pub fn their(self) -> &'static str {
-        match self {
-            Gender::F => "her",
-            Gender::M => "his",
-            Gender::N => "their",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]

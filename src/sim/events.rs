@@ -2,6 +2,7 @@
 
 use super::chronicle::{EventKind, Ref};
 use super::politics;
+use super::prose::{self, Pick};
 use super::{Era, Plague, PolityKind, Role, SchoolKind, World};
 
 const PLAGUE_ADJ: &[&str] = &[
@@ -69,7 +70,7 @@ pub fn disasters(w: &mut World) {
         let pname = w.plagues[i].name.clone();
         if !spread.is_empty() {
             let names: Vec<String> = spread.iter().map(|&q| w.polities[q].name.clone()).collect();
-            let text = format!("{} spread into {}.", pname, politics::join_names(&names));
+            let text = prose::plague_spread(&pname, &names);
             let refs: Vec<Ref> = spread.iter().map(|&q| Ref::Polity(q)).collect();
             w.log(1, EventKind::Disaster, &refs, None, text);
             w.plagues[i].polities.extend(spread);
@@ -78,10 +79,7 @@ pub fn disasters(w: &mut World) {
         w.plagues[i].years_left -= 1;
         if w.plagues[i].years_left <= 0 {
             let dead = w.plagues[i].deaths;
-            let text = format!(
-                "{} burned itself out at last, having carried off some {} thousand souls.",
-                pname, dead as i64
-            );
+            let text = prose::plague_ended(&pname, dead as i64);
             w.log(1, EventKind::Disaster, &[], None, text);
             w.plagues.remove(i);
         } else {
@@ -113,11 +111,7 @@ pub fn disasters(w: &mut World) {
             polities: vec![p],
             deaths: 0.0,
         });
-        let text = match rng.below(3) {
-            0 => format!("{} came to {} with the ships and the caravans. Within a season the streets of {} were empty.", crate::lang::capitalize(&name), w.cities[c].name, w.cities[c].name),
-            1 => format!("A sickness the physicians called {} broke out in {}. The dead were buried in pits outside the walls.", name, w.cities[c].name),
-            _ => format!("{} began in the poor quarters of {} and spread through {}.", crate::lang::capitalize(&name), w.cities[c].name, w.polities[p].name),
-        };
+        let text = prose::plague_began(w, &name, c, p, &Pick::rolled(&rng));
         w.log(
             2,
             EventKind::Disaster,
@@ -141,13 +135,8 @@ pub fn disasters(w: &mut World) {
                 w.cities[c].pop *= 0.9;
             }
             w.polities[p].stability = (w.polities[p].stability - 0.08).max(0.0);
-            let cause = match rng.below(4) {
-                0 => "The rains failed",
-                1 => "Locusts came out of the east",
-                2 => "A killing frost struck at midsummer",
-                _ => "The rivers ran low",
-            };
-            let text = format!("{} and famine gripped {}. The granaries of {} were emptied and the people ate bark.", cause, w.polities[p].name, w.polities[p].capital.map(|c| w.cities[c].name.clone()).unwrap_or_default());
+            let cause = prose::famine_cause(&Pick::rolled(&rng));
+            let text = prose::famine(w, p, &cause);
             w.log(
                 1,
                 EventKind::Disaster,
@@ -187,23 +176,7 @@ pub fn disasters(w: &mut World) {
         } else {
             None
         };
-        let mut text = match kind {
-            "flood" => format!(
-                "The river burst its banks and drowned the lower town of {}.",
-                w.cities[c].name
-            ),
-            "earthquake" => format!(
-                "The earth shook beneath {} and its towers fell.",
-                w.cities[c].name
-            ),
-            _ => format!(
-                "A great fire swept through {}; it burned for three days.",
-                w.cities[c].name
-            ),
-        };
-        if let Some(wn) = lost {
-            text.push_str(&format!(" {} was destroyed.", wn));
-        }
+        let text = prose::city_disaster(w, c, kind, lost.as_deref());
         let mut refs = vec![Ref::City(c)];
         if let Some(p) = w.cities[c].polity {
             refs.push(Ref::Polity(p));
@@ -212,12 +185,7 @@ pub fn disasters(w: &mut World) {
     }
     // Omens.
     if rng.chance(0.006) {
-        let text = match rng.below(4) {
-            0 => "A comet with a tail like a sword hung in the sky for forty nights. Priests everywhere read it as they pleased.".to_string(),
-            1 => "The sun went dark at noon and the birds fell silent.".to_string(),
-            2 => "Two moons were seen in the sky, and the second wept.".to_string(),
-            _ => "It rained fish upon the coasts, and the fish were alive.".to_string(),
-        };
+        let text = prose::omen(&Pick::rolled(&rng));
         w.log(1, EventKind::Disaster, &[], None, text);
     }
 }
@@ -258,22 +226,7 @@ pub fn notables(w: &mut World) {
                 );
                 w.persons[g].traits.valor = (w.persons[g].traits.valor + 0.3).min(1.0);
                 super::war::role_general(w, p, g);
-                let text = match rng.below(3) {
-                    0 => format!(
-                        "{}, a {} captain of low birth, rose to command the armies of {}.",
-                        w.persons[g].name, w.cultures[culture].adj, w.polities[p].short
-                    ),
-                    1 => format!(
-                        "{} was given command of the {} host; the soldiers loved {}.",
-                        w.persons[g].name,
-                        w.polities[p].adj,
-                        w.persons[g].gender.them()
-                    ),
-                    _ => format!(
-                        "The armies of {} marched now under {}, who had never lost a skirmish.",
-                        w.polities[p].short, w.persons[g].name
-                    ),
-                };
+                let text = prose::general_appointed(w, p, g, &Pick::rolled(&rng));
                 w.log(
                     1,
                     EventKind::Person,
@@ -308,16 +261,20 @@ pub fn notables(w: &mut World) {
                 });
                 let text = match subject {
                     Some(e) => {
-                        let what = e.refs.iter().find_map(|r| match r {
-                            Ref::War(wid) => Some(w.wars[*wid].name.clone()),
-                            Ref::Person(pid) => Some(w.persons[*pid].full_name()),
-                            _ => None,
-                        }).unwrap_or_else(|| "the old days".to_string());
+                        let what = e
+                            .refs
+                            .iter()
+                            .find_map(|r| match r {
+                                Ref::War(wid) => Some(w.wars[*wid].name.clone()),
+                                Ref::Person(pid) => Some(w.persons[*pid].full_name()),
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| "the old days".to_string());
                         let form = *rng.pick(&["Lay", "Song", "Lament", "Epic", "Ballad"]);
                         w.persons[poet].renown += 2.0;
-                        format!("{} of {} composed the {} of {}, which is still sung in {}.", w.persons[poet].name, w.polities[p].short, form, what, w.polities[p].capital.map(|c| w.cities[c].name.clone()).unwrap_or_default())
+                        prose::poet_sings(w, p, poet, form, &what)
                     }
-                    None => format!("{} of {} wrote verses on the rivers and the seasons that were long remembered.", w.persons[poet].name, w.polities[p].short),
+                    None => prose::poet_idle(w, p, poet),
                 };
                 w.log(
                     1,
@@ -362,13 +319,14 @@ pub fn notables(w: &mut World) {
                         let kind = w.terrain.features[fi].kind;
                         let n = w.feature_name(fi, Some(p));
                         w.persons[ex].renown += 2.0;
-                        match kind {
-                            crate::geo::FeatureKind::Island => format!("{} of {} sailed beyond the known coasts and came upon {}.", w.persons[ex].name, w.polities[p].short, n),
-                            crate::geo::FeatureKind::Continent => format!("{} of {} sailed beyond the known coasts and returned with tales of a land called {}.", w.persons[ex].name, w.polities[p].short, n),
-                            _ => format!("{} of {} charted the waters of {}.", w.persons[ex].name, w.polities[p].short, n),
-                        }
+                        let what = match kind {
+                            crate::geo::FeatureKind::Island => "island",
+                            crate::geo::FeatureKind::Continent => "continent",
+                            _ => "waters",
+                        };
+                        prose::explorer_found(w, p, ex, what, &n)
                     }
-                    None => format!("{} of {} sailed west for a year and returned with strange fruit and stranger stories.", w.persons[ex].name, w.polities[p].short),
+                    None => prose::explorer_empty_handed(w, p, ex),
                 };
                 w.log(
                     1,
@@ -403,11 +361,7 @@ pub fn notables(w: &mut World) {
                     }
                     let e = w.schools[s].influence.entry(p).or_insert(0.0);
                     *e = (*e + 0.15).min(1.0);
-                    let text = match role {
-                        Role::Mage => format!("{}, an adept of {}, performed wonders before the court of {} and won many to the {}.", w.persons[per].name, w.schools[s].short, w.polities[p].short, w.schools[s].name),
-                        Role::Prophet => format!("{} walked the roads of {} preaching {}, and the villages followed {}.", w.persons[per].name, w.polities[p].short, w.schools[s].name, w.persons[per].gender.them()),
-                        _ => format!("{} taught {} in the schools of {} to a generation of clerks and princes.", w.persons[per].name, w.schools[s].name, w.polities[p].short),
-                    };
+                    let text = prose::school_champion(w, p, s, per);
                     w.log(
                         1,
                         EventKind::Magic,
@@ -423,7 +377,7 @@ pub fn notables(w: &mut World) {
                     };
                     let s = super::magic::found_school(w, cap, kind, None, None);
                     let founder = w.schools[s].founder;
-                    let text = format!("{} of {} had a vision in the wilderness and returned to found {}, which {}.", w.persons[founder].name, w.cities[cap].name, w.schools[s].name, w.schools[s].doctrine);
+                    let text = prose::school_from_vision(w, s, founder, cap);
                     w.log(
                         2,
                         EventKind::Magic,
@@ -450,19 +404,10 @@ pub fn notables(w: &mut World) {
                     } else {
                         super::WarKind::Rebellion
                     };
-                    w.wars_start(
-                        rebel,
-                        p,
-                        kind,
-                        format!("the grievances of {}", w.persons[leader].name),
-                    );
-                    let text = format!(
-                        "{}, a {} of {} who had been wronged by the crown, gathered the discontented and proclaimed {}.",
-                        w.persons[leader].name,
-                        rng.pick(&["soldier", "farmer's child", "minor noble", "priest", "bandit", "tax-collector"]),
-                        w.polities[p].short,
-                        w.polities[rebel].name
-                    );
+                    let cause = format!("the grievances of {}", w.persons[leader].name);
+                    w.wars_start(rebel, p, kind, cause);
+                    let text =
+                        prose::rebellion_of_the_wronged(w, p, rebel, leader, &Pick::rolled(&rng));
                     w.log(
                         2,
                         EventKind::War,
@@ -492,18 +437,7 @@ pub fn notables(w: &mut World) {
                     None,
                 );
                 w.polities[p].dev = (w.polities[p].dev + 0.04).min(3.0);
-                let text = format!(
-                    "{} of {} {}.",
-                    w.persons[ph].name,
-                    w.polities[p].short,
-                    rng.pick(&[
-                        "reformed the calendar and the weights of the market",
-                        "wrote a treatise on the governance of cities that was copied in every court",
-                        "taught the use of the arch and the aqueduct",
-                        "compiled the laws of the realm into a single book",
-                        "mapped the stars and the roads alike"
-                    ])
-                );
+                let text = prose::reformer(w, p, ph, &Pick::rolled(&rng));
                 w.log(
                     1,
                     EventKind::Person,
@@ -530,12 +464,7 @@ pub fn notables(w: &mut World) {
             w.persons[i].died = Some(w.year);
             w.persons[i].death = "died.".to_string();
             if w.persons[i].renown >= 2.0 && w.detail.level() >= 1 {
-                let text = format!(
-                    "{} the {} died at the age of {}.",
-                    name,
-                    role.name(),
-                    age as i32
-                );
+                let text = prose::notable_died(&name, role.name(), age as i32);
                 w.log(0, EventKind::Death, &[Ref::Person(i)], None, text);
             }
         } else if per.role == Role::General && per.traits.ambition > 0.8 {
@@ -548,10 +477,7 @@ pub fn notables(w: &mut World) {
                     let old = w.polities[p].ruler;
                     if let Some(r) = old {
                         w.persons[r].died = Some(w.year);
-                        w.persons[r].death = format!(
-                            "was deposed and killed by the general {}.",
-                            w.persons[i].name
-                        );
+                        w.persons[r].death = prose::deposed_by(&w.persons[i].name.clone());
                         w.persons[r].epithet = Some("the Deposed".to_string());
                     }
                     let culture = w.polities[p].culture;
@@ -562,16 +488,8 @@ pub fn notables(w: &mut World) {
                         w.polities[p].dynasty = dyn_name;
                     }
                     let _ = culture;
-                    let text = format!(
-                        "The general {} marched on {} and took the throne of {} for {}self.",
-                        w.persons[i].name,
-                        w.polities[p]
-                            .capital
-                            .map(|c| w.cities[c].name.clone())
-                            .unwrap_or_default(),
-                        w.polities[p].short,
-                        w.persons[i].gender.them()
-                    );
+                    let capital = prose::capital_name(w, p);
+                    let text = prose::general_usurps(w, p, i, &capital);
                     let mut refs = vec![Ref::Person(i), Ref::Polity(p)];
                     if let Some(r) = old {
                         refs.push(Ref::Person(r));
@@ -631,11 +549,7 @@ pub fn wonders(w: &mut World) {
         w.cities[cap].wonders.push(name.clone());
         w.cities[cap].prosperity += 0.1;
         let ruler = w.ruler_title(p);
-        let text = match rng.below(3) {
-            0 => format!("{} raised {}. It took a generation to build and beggared the treasury, but travellers came from every land to see it.", ruler, name),
-            1 => format!("{} was completed in the reign of {}.", crate::lang::capitalize(&name), ruler),
-            _ => format!("The masons of {} finished {}, greatest of the works of {}.", w.polities[p].short, name, w.polities[p].dynasty.clone().trim_start_matches("the ").to_string()).replace("works of .", "works of the age."),
-        };
+        let text = prose::wonder_built(w, p, &name, &ruler, &Pick::rolled(&rng));
         let mut refs = vec![Ref::City(cap), Ref::Polity(p)];
         if let Some(r) = w.polities[p].ruler {
             refs.push(Ref::Person(r));
@@ -676,15 +590,12 @@ pub fn eras(w: &mut World) {
                 format!("the {} Ascendancy", w.polities[p].adj),
             ])
             .clone(),
-            format!(
-                "{} ruled a third of the settled world, and the lesser realms lived in its shadow.",
-                w.polities[p].name
-            ),
+            prose::era_of_empire(w, p),
         )
     } else if pop_change < -0.15 {
         (
             rng.pick(&["the Silent Years", "the Long Winter", "the Age of Ash", "the Dark Age"]).to_string(),
-            format!("The peoples of the world dwindled by a {} part; cities emptied and roads grew over.", if pop_change < -0.3 { "third" } else { "sixth" }),
+            prose::era_of_dying(pop_change < -0.3),
         )
     } else if warlike {
         (
@@ -695,15 +606,12 @@ pub fn eras(w: &mut World) {
                 "the Age of Iron",
             ])
             .to_string(),
-            format!(
-                "{} wars were fought in a hundred years, and no border stayed where it was drawn.",
-                wars
-            ),
+            prose::era_of_war(wars),
         )
     } else if schools >= 4 {
         (
             rng.pick(&["the Age of Wonders", "the Age of the Star-Readers", "the Age of Prophets", "the Enlightenment"]).to_string(),
-            format!("{} new schools of thought arose, and the courts of the world argued over doctrine.", schools),
+            prose::era_of_schools(schools),
         )
     } else if born > realms {
         (
@@ -713,15 +621,12 @@ pub fn eras(w: &mut World) {
                 "the Age of Banners",
             ])
             .to_string(),
-            format!(
-                "{} new realms were founded as peoples everywhere took up crowns.",
-                born
-            ),
+            prose::era_of_crowns(born),
         )
     } else if peaceful && pop_change > 0.05 {
         (
             rng.pick(&["the Long Peace", "the Age of Plenty", "the Quiet Age", "the Age of Roads"]).to_string(),
-            "Harvests were good, the roads were safe, and the chroniclers complained of having little to write.".to_string(),
+            prose::era_of_peace().to_string(),
         )
     } else {
         (
@@ -732,13 +637,10 @@ pub fn eras(w: &mut World) {
                 "the Uncertain Age",
             ])
             .to_string(),
-            "The world turned as it always had.".to_string(),
+            prose::era_ordinary().to_string(),
         )
     };
-    let text = format!(
-        "The chroniclers call the century now ending {}. {}",
-        name, desc
-    );
+    let text = prose::era_named(&name, &desc);
     w.log(3, EventKind::Era, &[], None, text);
     w.eras.push(Era {
         start: w.year - 100,

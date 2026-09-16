@@ -5,6 +5,7 @@
 //! nurtured them.
 
 use super::chronicle::{EventKind, Ref};
+use super::prose::{self, Pick};
 use super::{Role, School, SchoolKind, World};
 use crate::term::Rgb;
 
@@ -130,6 +131,11 @@ const PHILO_TENETS: &[&str] = &[
     "Kindness is the only argument.",
 ];
 
+/// The name of a practice, for prose that must refer to one.
+pub fn practice_word(practice: usize) -> &'static str {
+    PRACTICES[practice % PRACTICES.len()]
+}
+
 fn school_color(id: usize, kind: SchoolKind) -> Rgb {
     let hue = (id as f32 * 71.0
         + match kind {
@@ -199,11 +205,7 @@ pub fn found_school(
                     format!("{} {}", asp, prac),
                 ),
             };
-            let doctrine = format!(
-                "teaches that all magic is the {} of {}",
-                prac.to_lowercase(),
-                desc
-            );
+            let doctrine = prose::doctrine_arcane(prac, desc);
             let mut t: Vec<String> = Vec::new();
             for _ in 0..2 {
                 let x = rng.pick(ARCANE_TENETS).to_string();
@@ -224,19 +226,10 @@ pub fn found_school(
                 0 => (format!("the Faith of {}", deity), deity.clone()),
                 1 => (format!("the Church of {}", deity), deity.clone()),
                 2 => (format!("the Way of {}", deity), deity.clone()),
-                _ => (
-                    format!(
-                        "{}ism",
-                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
-                    ),
-                    format!(
-                        "{}ism",
-                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
-                    ),
-                ),
+                _ => (prose::ism(&fname), prose::ism(&fname)),
             };
             let short = short.trim_start_matches("the ").to_string();
-            let doctrine = format!("is a {} faith devoted to {}", prac, deity);
+            let doctrine = prose::doctrine_divine(prac, &deity);
             let mut t: Vec<String> = Vec::new();
             for _ in 0..3 {
                 let x = rng.pick(DIVINE_TENETS).to_string();
@@ -254,25 +247,13 @@ pub fn found_school(
                     format!("the {} of {}", acad, tenet),
                     format!("{} of {}", acad, tenet),
                 ),
-                1 => (
-                    format!(
-                        "{}ism",
-                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
-                    ),
-                    format!(
-                        "{}ism",
-                        fname.trim_end_matches(|c: char| "aeiou".contains(c))
-                    ),
-                ),
+                1 => (prose::ism(&fname), prose::ism(&fname)),
                 _ => (
                     format!("the {} {}", lang.adjective(&fname), acad),
                     format!("{} {}", lang.adjective(&fname), acad),
                 ),
             };
-            let doctrine = format!(
-                "holds that the good life is found in {}",
-                tenet.to_lowercase()
-            );
+            let doctrine = prose::doctrine_philosophy(tenet);
             let mut t: Vec<String> = Vec::new();
             for _ in 0..2 {
                 let x = rng.pick(PHILO_TENETS).to_string();
@@ -369,20 +350,7 @@ pub fn tick(w: &mut World) {
         let s = found_school(w, c, kind, None, None);
         let founder = w.schools[s].founder;
         let place = w.place_phrase(cell, polity);
-        let text = match kind {
-            SchoolKind::Arcane => format!(
-                "In {} {}, the mage {} gathered students and founded {}, which {}.",
-                w.cities[c].name, place, w.persons[founder].name, w.schools[s].name, w.schools[s].doctrine
-            ),
-            SchoolKind::Divine => format!(
-                "{} of {} began to preach in the streets of {}. {} {}, and its first tenet is: \"{}\"",
-                w.persons[founder].name, w.cultures[culture].name, w.cities[c].name, crate::lang::capitalize(&w.schools[s].name), w.schools[s].doctrine, w.schools[s].tenets[0]
-            ),
-            SchoolKind::Philosophical => format!(
-                "{} of {} taught in the markets of {} that \"{}\" From these lessons grew {}, which {}.",
-                w.persons[founder].name, w.cities[c].name, w.cities[c].name, w.schools[s].tenets[0], w.schools[s].name, w.schools[s].doctrine
-            ),
-        };
+        let text = prose::school_founded(w, s, c, founder, &place);
         let mut refs = vec![Ref::School(s), Ref::Person(founder), Ref::City(c)];
         if let Some(p) = polity {
             refs.push(Ref::Polity(p));
@@ -477,11 +445,7 @@ pub fn tick(w: &mut World) {
                     if v > 0.4 && rng.chance(0.04 * (0.3 + affinity as f64)) {
                         w.polities[p].school = Some(s);
                         w.schools[s].state_of.push(p);
-                        let text = match kind {
-                            SchoolKind::Arcane => format!("{} took the adepts of {} into the royal service; henceforth {} would be the magic of {}.", w.ruler_title(p), w.schools[s].short, w.schools[s].name, w.polities[p].short),
-                            SchoolKind::Divine => format!("{} was baptised into {}, and {} became the faith of {}.", w.ruler_title(p), w.schools[s].name, w.schools[s].short, w.polities[p].name),
-                            SchoolKind::Philosophical => format!("The court of {} adopted the teachings of {}; its laws were rewritten by the {}.", w.polities[p].short, w.schools[s].name, w.schools[s].kind.follower()),
-                        };
+                        let text = prose::school_adopted(w, p, s, v);
                         w.log(
                             2,
                             EventKind::Magic,
@@ -497,12 +461,7 @@ pub fn tick(w: &mut World) {
                         // Conversion.
                         w.polities[p].school = Some(s);
                         w.schools[s].state_of.push(p);
-                        let text = format!(
-                            "{} forsook {} for {}.",
-                            w.ruler_title(p),
-                            w.schools[state].name,
-                            w.schools[s].name
-                        );
+                        let text = prose::school_converted(w, p, state, s);
                         w.log(
                             2,
                             EventKind::Magic,
@@ -523,14 +482,7 @@ pub fn tick(w: &mut World) {
                             .capital
                             .map(|c| w.cities[c].name.clone())
                             .unwrap_or_default();
-                        let mut text = format!(
-                            "{} outlawed {} throughout {}; its {} were driven from {}.",
-                            w.ruler_title(p),
-                            w.schools[s].name,
-                            w.polities[p].short,
-                            w.schools[s].kind.follower(),
-                            cap
-                        );
+                        let mut text = prose::school_persecuted(w, p, s, state, &cap);
                         let mut refs = vec![Ref::School(s), Ref::Polity(p), Ref::School(state)];
                         if w.high_detail() && rng.chance(0.5) {
                             let culture = w.polities[p].culture;
@@ -543,18 +495,9 @@ pub fn tick(w: &mut World) {
                             );
                             w.persons[m].school = Some(s);
                             w.persons[m].died = Some(w.year);
-                            w.persons[m].death = format!(
-                                "was burned in the square of {} for the teachings of {}.",
-                                cap, w.schools[s].short
-                            );
+                            w.persons[m].death = prose::martyr_death(w, s, &cap);
                             w.persons[m].renown = 2.0;
-                            text.push_str(&format!(
-                                " {} was burned in the square; the {} of {} call {} a martyr.",
-                                w.persons[m].name,
-                                w.schools[s].kind.follower(),
-                                w.schools[s].short,
-                                w.persons[m].gender.them()
-                            ));
+                            text.push_str(&prose::martyr_made(w, s, m, &cap));
                             refs.push(Ref::Person(m));
                         }
                         // Persecution raises tension with states of this school.
@@ -598,28 +541,8 @@ pub fn tick(w: &mut World) {
                     }
                 }
                 let founder = w.schools[child].founder;
-                let dispute = match kind {
-                    SchoolKind::Arcane => format!(
-                        "over whether {} may be practised on the living",
-                        PRACTICES[w.schools[child].practice % PRACTICES.len()].to_lowercase()
-                    ),
-                    SchoolKind::Divine => match rng.below(3) {
-                        0 => "over the true name of the god".to_string(),
-                        1 => format!("over the tenet \"{}\"", w.schools[s].tenets[0]),
-                        _ => "over who might sit on the high seat".to_string(),
-                    },
-                    SchoolKind::Philosophical => {
-                        "over the meaning of a single sentence of the founder".to_string()
-                    }
-                };
-                let text = format!(
-                    "{} split {}. {} of {} led the dissenters out, and their teaching became known as {}.",
-                    crate::lang::capitalize(&w.schools[s].name),
-                    dispute,
-                    w.persons[founder].name,
-                    w.cities[city].name,
-                    w.schools[child].name
-                );
+                let dispute = prose::schism_dispute(w, s, child, &Pick::rolled(&rng));
+                let text = prose::schism(w, s, child, &dispute, founder, city);
                 let mut refs = vec![
                     Ref::School(child),
                     Ref::School(s),
@@ -644,11 +567,7 @@ pub fn tick(w: &mut World) {
                             w.polities[p].school = None;
                         }
                     }
-                    let text = format!(
-                        "The last {} of {} died, and its teachings were forgotten.",
-                        w.schools[s].kind.follower(),
-                        w.schools[s].name
-                    );
+                    let text = prose::school_forgotten(w, s, age);
                     w.log(1, EventKind::Magic, &[Ref::School(s)], None, text);
                 }
                 _ => {}
@@ -754,23 +673,17 @@ fn catastrophe(w: &mut World, s: usize, p: usize, cap: usize) {
         *v *= 0.3;
     }
     let ruler_dead = rng.chance(0.7);
-    let mut text = format!(
-        "The adepts of {} in {} reached too far. In a single night the city was unmade: a great working went wrong, and where {} had stood there was only glass, ash and silence. The land for miles about was blighted, and is called {}. Some {} thousand souls perished.",
-        w.schools[s].short, name, name, fname, (dead as i32).max(1)
-    );
+    let mut text = prose::catastrophe(w, s, &name, &fname, dead as i32);
     if ruler_dead {
         if let Some(r) = w.polities[p].ruler {
             let rn = w.persons[r].name.clone();
-            text.push_str(&format!(" {} died with the city.", rn));
-            super::politics::ruler_dies(w, p, format!("perished in the unmaking of {}.", name), 2);
+            text.push_str(&prose::catastrophe_ruler(&rn));
+            super::politics::ruler_dies(w, p, prose::perished_in_unmaking(&name), 2);
         }
     }
     if w.polities[p].capital.is_none() {
-        text.push_str(&format!(
-            " {} did not survive the loss.",
-            crate::lang::capitalize(&w.polities[p].name)
-        ));
-        super::politics::fall(w, p, format!("perished with {}.", name), None, 3);
+        text.push_str(&prose::catastrophe_realm_ends(w, p));
+        super::politics::fall(w, p, prose::perished_with(&name), None, 3);
     }
     w.log(
         3,

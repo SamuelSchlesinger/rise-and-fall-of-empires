@@ -3,6 +3,7 @@
 //! peoples when geography keeps them separate for long enough.
 
 use super::chronicle::{EventKind, Ref};
+use super::prose;
 use super::{PolityKind, World};
 use crate::geo::Biome;
 
@@ -188,16 +189,14 @@ pub fn culture_drift(w: &mut World) {
             w.cells[i].culture = Some(pc);
             if let Some(city) = cs.city {
                 if w.cities[city].destroyed.is_none() {
-                    let cname = w.cities[city].name.clone();
-                    let pl = w.cultures[pc].plural.clone();
-                    let old = w.cultures[c].name.clone();
+                    let text = prose::city_assimilated(w, city, p, pc, c, tenure as i32);
                     w.cities[city].culture = pc;
                     w.log(
                         0,
                         EventKind::Culture,
                         &[Ref::City(city), Ref::Culture(pc), Ref::Culture(c)],
                         Some(i),
-                        format!("The people of {} now count themselves among the {}; the {} tongue is heard there no more.", cname, pl, old),
+                        text,
                     );
                 }
             }
@@ -221,10 +220,7 @@ pub fn culture_drift(w: &mut World) {
             if let Some((&c, _)) = counts.iter().max_by_key(|(_, &v)| v) {
                 if c != pol.culture {
                     let old = pol.culture;
-                    let text = format!(
-                        "The rulers of {} had long spoken {} at court, but their subjects were {}; the realm now counts itself {}.",
-                        pol.name, w.cultures[old].name, w.cultures[c].plural, w.cultures[c].adj
-                    );
+                    let text = prose::realm_changes_culture(w, p, old, c);
                     w.polities[p].culture = c;
                     w.log(
                         1,
@@ -256,10 +252,7 @@ pub fn culture_drift(w: &mut World) {
                 .any(|ci| ci.destroyed.is_none() && ci.culture == c);
             if cu.cells == 0 && !has_polity && !has_city && w.year - cu.last_seen > 30 {
                 w.cultures[c].extinct = Some(w.year);
-                let text = format!(
-                    "The last speakers of {} died, and with them the {} passed out of the world.",
-                    w.cultures[c].lang.name, w.cultures[c].plural
-                );
+                let text = prose::culture_extinct(w, c);
                 w.log(2, EventKind::Culture, &[Ref::Culture(c)], None, text);
             }
         }
@@ -342,21 +335,7 @@ fn divergence(w: &mut World) {
                 }
             }
             let place = w.place_phrase(center, None);
-            let (name, plural, oldname) = (
-                w.cultures[nc].name.clone(),
-                w.cultures[nc].plural.clone(),
-                w.cultures[c].name.clone(),
-            );
-            let mut text = format!(
-                "Cut off from their kin, the {} folk living {} drifted in speech and custom until they were a people apart: the {}, who call themselves {}.",
-                oldname, place, plural, name
-            );
-            if let Some(&pi) = polities_changed.first() {
-                text.push_str(&format!(
-                    " {} is now a {} realm.",
-                    w.polities[pi].name, w.cultures[nc].adj
-                ));
-            }
+            let text = prose::culture_diverged(w, c, nc, &place, polities_changed.first().copied());
             let mut refs = vec![Ref::Culture(nc), Ref::Culture(c)];
             for pi in polities_changed {
                 refs.push(Ref::Polity(pi));
