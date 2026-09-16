@@ -49,8 +49,8 @@ python3 tools/termtest.py path/to/empires
 ```
 
 Checks the libc bindings against a real pseudo-terminal on Linux and macOS:
-raw-mode flags and control characters, window resizing, input without Enter,
-and exact restoration of the original settings after normal exit, SIGHUP,
+raw-mode flags and control characters, window resizing, delayed pastes, input
+without Enter, and exact restoration of the original settings after normal exit, SIGHUP,
 SIGINT and SIGTERM. Configuration and data stay in a temporary directory.
 CI runs this on Linux, Apple Silicon and Intel Macs.
 

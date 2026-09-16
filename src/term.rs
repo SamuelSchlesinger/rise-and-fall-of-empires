@@ -16,7 +16,7 @@ use std::cell::UnsafeCell;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Everything `enter` switched on, switched off again: bracketed paste, mouse
 /// reporting, attributes, the cursor and the alternate screen.
@@ -348,6 +348,8 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 /// Buffered stdin, handing out one [`Key`] at a time.
 pub struct Input {
     buf: Vec<u8>,
+    /// A paste stays data until its closing marker, including across timeouts.
+    paste: Option<Vec<u8>>,
     /// Stdin has closed: there will never be another key.
     eof: bool,
 }
@@ -357,13 +359,19 @@ impl Input {
     pub fn new() -> Input {
         Input {
             buf: Vec::new(),
+            paste: None,
             eof: false,
         }
     }
 
     /// Wait up to `timeout_ms` for a key. Returns None on timeout.
     pub fn poll_key(&mut self, timeout_ms: i32) -> Option<Key> {
-        if self.buf.is_empty() {
+        if self.paste.is_some() {
+            if let Some(key) = self.take_paste() {
+                return Some(key);
+            }
+        }
+        if self.buf.is_empty() || self.paste.is_some() {
             if self.eof {
                 // Stdin is gone. `poll` would return at once, for ever, so
                 // wait out the caller's timeout by hand instead of spinning.
@@ -391,43 +399,38 @@ impl Input {
         self.parse()
     }
 
-    /// Everything between `ESC [ 200 ~` and `ESC [ 201 ~`, gathered as one
-    /// string. The opening marker has already been consumed.
-    fn read_paste(&mut self) -> String {
+    /// Consume available paste bytes without blocking the UI. A delay must
+    /// never turn the remaining text into commands. Capture at most 256 KiB,
+    /// discarding excess bytes until the closing marker (or EOF).
+    fn take_paste(&mut self) -> Option<Key> {
         const END: &[u8] = b"\x1b[201~";
         const MAX: usize = 256 * 1024;
-        let deadline = Instant::now() + Duration::from_millis(2000);
-        let mut text: Vec<u8> = Vec::new();
-        loop {
-            if let Some(at) = find(&self.buf, END) {
-                text.extend_from_slice(&self.buf[..at]);
-                self.buf.drain(..at + END.len());
-                break;
+        let end = find(&self.buf, END);
+        // Retain enough bytes for a closing marker split across reads.
+        let take = end.unwrap_or_else(|| {
+            if self.eof {
+                self.buf.len()
+            } else {
+                self.buf.len().saturating_sub(END.len() - 1)
             }
-            // Keep the last few bytes back: the marker may be split across reads.
-            let keep = END.len() - 1;
-            if self.buf.len() > keep {
-                let take = self.buf.len() - keep;
-                text.extend_from_slice(&self.buf[..take]);
-                self.buf.drain(..take);
-            }
-            // A big paste arrives in pieces, which over a slow link can be a
-            // fair way apart; but a terminal that never closes the paste must
-            // not hang the game either.
-            if text.len() > MAX || Instant::now() >= deadline || !has_input(250) {
-                text.append(&mut self.buf);
-                break;
-            }
-            if !read_bytes(&mut self.buf) {
-                self.eof = true;
-                text.append(&mut self.buf);
-                break;
-            }
+        });
+        let text = self.paste.as_mut()?;
+        let capture = take.min(MAX.saturating_sub(text.len()));
+        text.extend_from_slice(&self.buf[..capture]);
+        self.buf
+            .drain(..take + if end.is_some() { END.len() } else { 0 });
+        if end.is_some() || self.eof {
+            let text = self.paste.take().unwrap();
+            Some(Key::Paste(String::from_utf8_lossy(&text).into_owned()))
+        } else {
+            None
         }
-        String::from_utf8_lossy(&text).into_owned()
     }
 
     fn parse(&mut self) -> Option<Key> {
+        if self.paste.is_some() {
+            return self.take_paste();
+        }
         let b0 = self.buf[0];
         if b0 == 0x1b {
             if self.buf.len() == 1 {
@@ -492,7 +495,8 @@ impl Input {
                 let first = fields.next().unwrap_or(&[]);
                 // Bracketed paste: ESC [ 200 ~ text ESC [ 201 ~
                 if b1 == b'[' && fin == b'~' && first == b"200" {
-                    return Some(Key::Paste(self.read_paste()));
+                    self.paste = Some(Vec::new());
+                    return self.take_paste();
                 }
                 let modifier = fields
                     .next()
@@ -994,6 +998,7 @@ mod tests {
     fn keys(bytes: &[u8]) -> Vec<Key> {
         let mut input = Input {
             buf: bytes.to_vec(),
+            paste: None,
             eof: true,
         };
         let mut out = Vec::new();
@@ -1102,6 +1107,31 @@ mod tests {
             vec![Key::Paste(":q\r".to_string()), Key::Char('x')],
             "a bracketed paste must be delivered whole"
         );
+    }
+
+    #[test]
+    fn a_partial_paste_stays_text_until_the_split_closing_marker() {
+        let mut input = Input::new();
+        input.buf.extend_from_slice(b"\x1b[200~");
+        assert_eq!(input.parse(), None);
+        input.buf.extend_from_slice(b":q!\r");
+        assert_eq!(input.parse(), None);
+        input.buf.extend_from_slice(b"\x1b[20");
+        assert_eq!(input.parse(), None);
+        input.buf.extend_from_slice(b"1~x");
+        assert_eq!(input.parse(), Some(Key::Paste(":q!\r".into())));
+        assert_eq!(input.parse(), Some(Key::Char('x')));
+    }
+
+    #[test]
+    fn an_oversized_paste_discards_excess_without_executing_it() {
+        let mut input = Input::new();
+        input.buf.extend_from_slice(b"\x1b[200~");
+        input.buf.extend(vec![b'a'; 256 * 1024 + 100]);
+        assert_eq!(input.parse(), None);
+        input.buf.extend_from_slice(b":q!\r\x1b[201~z");
+        assert_eq!(input.parse(), Some(Key::Paste("a".repeat(256 * 1024))));
+        assert_eq!(input.parse(), Some(Key::Char('z')));
     }
 
     #[test]

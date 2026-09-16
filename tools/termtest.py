@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check the terminal ABI against a real pty on Linux or macOS.
 
-Verifies raw mode, window-size changes, immediate keyboard input, and exact
-terminal restoration after normal exit, SIGHUP, SIGINT and SIGTERM. Uses only
+Verifies raw mode, window-size changes, delayed pastes, immediate keyboard
+input, and exact restoration after normal exit, SIGHUP, SIGINT and SIGTERM. Uses only
 the Python standard library and keeps config/data in a temporary directory.
 """
 
@@ -34,6 +34,17 @@ def read_until(fd, output, predicate, description):
             data = os.read(fd, 65536)
             if not data:
                 raise AssertionError('terminal closed before ' + description)
+            output.extend(data)
+
+
+def drain_for(fd, output, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        readable, _, _ = select.select([fd], [], [], 0.05)
+        if readable:
+            data = os.read(fd, 65536)
+            if not data:
+                return
             output.extend(data)
 
 
@@ -73,6 +84,15 @@ def check(binary, env, sig):
         read_until(master, output, lambda b: b'\x1b[43;1H' in b, 'resized frame')
 
         if sig is None:
+            # A stalled paste must remain text, even when it looks like a
+            # command. Previously a 250 ms gap ended paste mode prematurely.
+            os.write(master, b'\x1b[200~')
+            drain_for(master, output, 0.45)
+            os.write(master, b':q!\r')
+            drain_for(master, output, 0.45)
+            assert proc.poll() is None, 'delayed paste was executed as a command'
+            os.write(master, b'\x1b[201~')
+            drain_for(master, output, 0.1)
             # ZQ needs no newline: this also exercises poll/read in raw mode.
             os.write(master, b'ZQ')
         else:

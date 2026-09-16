@@ -23,6 +23,8 @@ it invalidates saved worlds' futures and every seed anyone has written down.
 
 ### Fixed
 
+- Delayed or oversized bracketed pastes remain text until their closing
+  marker, so a pause between chunks cannot turn pasted text into commands.
 - Linux-only libc bindings prevented macOS builds. The terminal backend now
   selects the correct termios layout, constants, signal set, poll signature
   and errno accessor for each platform.
