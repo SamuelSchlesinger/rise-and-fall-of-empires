@@ -104,23 +104,23 @@ pub(super) struct PollFd {
 }
 
 extern "C" {
-    pub fn tcgetattr(fd: i32, t: *mut Termios) -> i32;
-    pub fn tcsetattr(fd: i32, opt: i32, t: *const Termios) -> i32;
-    pub fn ioctl(fd: i32, req: c_ulong, ...) -> i32;
-    pub fn poll(fds: *mut PollFd, nfds: Nfds, timeout: i32) -> i32;
-    pub fn read(fd: i32, buf: *mut c_void, count: usize) -> isize;
-    pub fn write(fd: i32, buf: *const c_void, count: usize) -> isize;
-    pub fn isatty(fd: i32) -> i32;
+    pub(super) fn tcgetattr(fd: i32, t: *mut Termios) -> i32;
+    pub(super) fn tcsetattr(fd: i32, opt: i32, t: *const Termios) -> i32;
+    pub(super) fn ioctl(fd: i32, req: c_ulong, ...) -> i32;
+    pub(super) fn poll(fds: *mut PollFd, nfds: Nfds, timeout: i32) -> i32;
+    pub(super) fn read(fd: i32, buf: *mut c_void, count: usize) -> isize;
+    pub(super) fn write(fd: i32, buf: *const c_void, count: usize) -> isize;
+    pub(super) fn isatty(fd: i32) -> i32;
     /// The handler is an address, including the `SIG_DFL` and `SIG_IGN` sentinels.
-    pub fn signal(sig: i32, handler: usize) -> usize;
-    pub fn raise(sig: i32) -> i32;
-    pub fn sigemptyset(set: *mut SigSet) -> i32;
-    pub fn sigaddset(set: *mut SigSet, sig: i32) -> i32;
-    pub fn sigprocmask(how: i32, set: *const SigSet, old: *mut SigSet) -> i32;
-    pub fn _exit(code: i32) -> !;
+    pub(super) fn signal(sig: i32, handler: usize) -> usize;
+    pub(super) fn raise(sig: i32) -> i32;
+    pub(super) fn sigemptyset(set: *mut SigSet) -> i32;
+    pub(super) fn sigaddset(set: *mut SigSet, sig: i32) -> i32;
+    pub(super) fn sigprocmask(how: i32, set: *const SigSet, old: *mut SigSet) -> i32;
+    pub(super) fn _exit(code: i32) -> !;
     #[cfg_attr(target_os = "linux", link_name = "__errno_location")]
     #[cfg_attr(target_os = "macos", link_name = "__error")]
-    pub fn errno_location() -> *mut i32;
+    pub(super) fn errno_location() -> *mut i32;
 }
 
 // These constants have the same values on all supported platforms.
