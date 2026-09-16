@@ -186,10 +186,10 @@ fn key_names_round_trip() {
         Key::F(12),
     ];
     for k in keys {
-        let name = config::key_name(k);
+        let name = config::key_name(k.clone());
         assert_eq!(
             config::parse_key(&name),
-            Some(k),
+            Some(k.clone()),
             "'{}' should parse back to {:?}",
             name,
             k
