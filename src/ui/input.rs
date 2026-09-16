@@ -41,7 +41,7 @@ impl Ui {
             return self.key_prompt(k);
         }
         if self.mode == Mode::Help {
-            self.mode = self.prev_mode;
+            self.key_help(&k);
             return true;
         }
         if self.mode == Mode::Fate {
@@ -52,7 +52,13 @@ impl Ui {
         if let Some(p) = self.pending.take() {
             let n = self.take_count();
             match (p, k) {
-                ('Z', Key::Char('Z')) | ('Z', Key::Char('Q')) => return false,
+                ('Z', Key::Char('Z')) => return false,
+                // As in vim, and as `:q!` already did: ZQ walks away without
+                // writing the save file.
+                ('Z', Key::Char('Q')) => {
+                    self.save_path = None;
+                    return false;
+                }
                 ('g', Key::Char('g')) => self.go_top(n),
                 ('z', Key::Char('z')) | ('z', Key::Char('.')) => self.center_view(),
                 ('z', Key::Char('t')) => {
@@ -376,6 +382,29 @@ impl Ui {
             _ => {}
         }
         self.list_idx = self.list_idx.min(len.saturating_sub(1));
+    }
+
+    /// The help page scrolls, because it is longer than a small terminal.
+    /// Anything that is not a way of moving through it closes it again,
+    /// which keeps the old "any key returns" reflex working.
+    fn key_help(&mut self, k: &Key) {
+        let page = self.screen.h.saturating_sub(2).max(1);
+        match k {
+            Key::Down | Key::Char('j') => self.help_scroll += 1,
+            Key::Up | Key::Char('k') => self.help_scroll = self.help_scroll.saturating_sub(1),
+            Key::PageDown | Key::Ctrl('f') | Key::Char(' ') => self.help_scroll += page,
+            Key::PageUp | Key::Ctrl('b') => {
+                self.help_scroll = self.help_scroll.saturating_sub(page);
+            }
+            Key::Ctrl('d') => self.help_scroll += page / 2,
+            Key::Ctrl('u') => self.help_scroll = self.help_scroll.saturating_sub(page / 2),
+            Key::Home | Key::Char('g') => self.help_scroll = 0,
+            Key::End | Key::Char('G') => self.help_scroll = usize::MAX / 2,
+            _ => {
+                self.help_scroll = 0;
+                self.mode = self.prev_mode;
+            }
+        }
     }
 
     fn key_detail(&mut self, k: &Key) {

@@ -106,7 +106,16 @@ fn header_is_what_we_say_it_is() {
 #[test]
 fn v1_fixture_loads_and_runs() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/v1.rfe");
-    let bytes = std::fs::read(path).expect("fixture present");
+    // `Cargo.toml` keeps `tests/fixtures/` out of the published crate, so in
+    // an unpacked `.crate` this file is not there. Say so and stop, rather
+    // than failing a test the reader cannot possibly fix.
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(_) => {
+            println!("no tests/fixtures/v1.rfe here (packaged crate); skipping");
+            return;
+        }
+    };
     assert_eq!(
         u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
         1
@@ -234,4 +243,62 @@ fn errors_read_well() {
     assert!(s.contains("version 9"), "{}", s);
     let _: &dyn std::error::Error = &e;
     assert!(SaveError::NotASave.to_string().contains("save file"));
+}
+
+/// Two hundred mutations of a real save, each resealed so that the checksum
+/// waves it through and the parser itself is what gets tested. Loading may
+/// fail in any way it likes; it may not panic, hang, or try to allocate the
+/// machine out of memory.
+#[test]
+fn mutated_saves_never_panic() {
+    let mut w = small_world(25);
+    let good = ser::save(&mut w);
+    let rng = crate::rng::Rng::new(0xdead_beef_1234);
+    let mut loaded = 0;
+    for case in 0..200 {
+        let mut bad = good.clone();
+        // A handful of edits per case, biased towards the structural bytes:
+        // chunk headers, lengths and the sequence counts just behind them.
+        let edits = 1 + rng.below(4);
+        for _ in 0..edits {
+            let at = match case % 4 {
+                // Anywhere at all.
+                0 => HEADER + rng.below(bad.len() - HEADER),
+                // Inside a chunk header (tag, version or length).
+                1 => {
+                    let cs = chunks(&bad);
+                    let c = cs[rng.below(cs.len())];
+                    c.2 + rng.below(CHUNK_HEADER)
+                }
+                // The first bytes of a payload, which is where the counts are.
+                2 => {
+                    let cs = chunks(&bad);
+                    let c = cs[rng.below(cs.len())];
+                    (c.2 + CHUNK_HEADER + rng.below(8)).min(bad.len() - 1)
+                }
+                // The file header itself.
+                _ => rng.below(HEADER),
+            };
+            bad[at] = rng.below(256) as u8;
+        }
+        // Half the cases are also truncated somewhere.
+        if case % 2 == 0 {
+            let keep = rng.below(bad.len());
+            bad.truncate(keep);
+        }
+        if bad.len() > HEADER {
+            bad = reseal(bad);
+        }
+        if let Ok(mut world) = ser::load(&bad) {
+            loaded += 1;
+            // A world that loads must also be able to live: every index in it
+            // has to be in range for a tick to be safe.
+            world.tick();
+        }
+    }
+    // The test is worth little if nothing ever got through the parser.
+    assert!(
+        loaded > 0,
+        "no mutated save ever loaded; the test proves nothing"
+    );
 }

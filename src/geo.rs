@@ -220,7 +220,7 @@ pub struct Feature {
     pub kind: FeatureKind,
     /// Its name, once somebody has been there to give it one.
     pub name: Option<String>,
-    /// The polity whose language named it.
+    /// The culture whose language named it.
     pub named_by: Option<usize>,
     /// Every cell it covers.
     pub cells: Vec<usize>,

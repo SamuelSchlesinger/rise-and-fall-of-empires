@@ -3,6 +3,26 @@
 
 use crate::ui::*;
 
+/// `s` wrapped to `width`, at most `max` lines, with an ellipsis if it had
+/// to be cut short.
+///
+/// The sidebar cannot scroll, so a sentence that simply stops mid-word reads
+/// as a rendering fault. An ellipsis reads as a summary, which is what it is.
+fn fold(s: &str, width: usize, max: usize) -> Vec<String> {
+    let width = width.max(2);
+    let mut lines = term::wrap(s, width);
+    if lines.len() > max {
+        lines.truncate(max.max(1));
+        if let Some(last) = lines.last_mut() {
+            while last.chars().count() + 1 > width {
+                last.pop();
+            }
+            last.push('…');
+        }
+    }
+    lines
+}
+
 impl Ui {
     pub(super) fn render_sidebar(&mut self) {
         let (_, _, mw, mh) = self.map_rect();
@@ -33,7 +53,7 @@ impl Ui {
         y += 1;
         self.screen.text_clip(x, y, &era, tx, Style::new(dim, bg));
         y += 1;
-        for l in term::wrap(&era_desc, tx).into_iter().take(1) {
+        for l in fold(&era_desc, tx, 2) {
             self.screen
                 .text_clip(x, y, &l, tx, Style::new(Rgb(95, 95, 105), bg));
             y += 1;
@@ -58,7 +78,7 @@ impl Ui {
             self.screen
                 .text_attr(x, y, "Since you last looked", Rgb(255, 220, 120), bg, BOLD);
             y += 1;
-            for l in term::wrap(&note, tx).into_iter().take(3) {
+            for l in fold(&note, tx, 3) {
                 self.screen
                     .text_clip(x, y, &l, tx, Style::new(Rgb(235, 215, 165), bg));
                 y += 1;
@@ -92,13 +112,18 @@ impl Ui {
             y += 1;
             self.screen.text_attr(x, y, "Now", accent, bg, BOLD);
             y += 1;
+            let room = tx.saturating_sub(2);
             for (text, r) in stories {
                 let color = detail::ref_color(&self.world, r);
-                let lines = term::wrap(&text, tx.saturating_sub(2));
-                for (k, l) in lines.into_iter().take(2).enumerate() {
-                    if y >= story_floor {
-                        break;
-                    }
+                // Two rows each, or one when that is all that is left: a
+                // headline elided to fit still reads, where one that simply
+                // stops in a panel nobody can scroll reads as a fault.
+                let max = story_floor.saturating_sub(y).min(2);
+                if max == 0 {
+                    break;
+                }
+                let lines = fold(&text, room, max);
+                for (k, l) in lines.into_iter().enumerate() {
                     if k == 0 {
                         self.screen
                             .put(x, y, if self.ascii { '*' } else { '•' }, color, bg);

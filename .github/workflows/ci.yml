@@ -99,12 +99,28 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "MSRV is $v"
 
+      # Cargo 1.70 refuses a version-4 lockfile, and a newer cargo rewrites
+      # the file the moment it resolves anything. See CONTRIBUTING.md.
+      - name: Cargo.lock is still version 3
+        run: |
+          v=$(sed -n 's/^version = \([0-9]*\)$/\1/p' Cargo.lock | head -1)
+          echo "lockfile version $v"
+          if [ "$v" != "3" ]; then
+            echo "::error::Cargo.lock is version $v; the MSRV needs version 3"
+            exit 1
+          fi
+
       - name: Toolchain
         run: |
           rustup toolchain install ${{ steps.msrv.outputs.version }} \
             --profile minimal --no-self-update
 
       - run: cargo +${{ steps.msrv.outputs.version }} check --all-targets
+
+      # `check` does not build the test harness's own code paths the way a
+      # test run does; this catches an idiom in a `#[cfg(test)]` module that
+      # the MSRV cannot compile.
+      - run: cargo +${{ steps.msrv.outputs.version }} test --no-run
 
   package:
     name: cargo package

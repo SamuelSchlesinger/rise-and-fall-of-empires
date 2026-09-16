@@ -661,7 +661,12 @@ impl Input {
             '\r' | '\n' => Key::Enter,
             '\t' => Key::Tab,
             '\x7f' | '\x08' => Key::Backspace,
-            c if (c as u32) < 0x20 => Key::Ctrl((b'a' + (c as u8) - 1) as char),
+            // The ASCII control block, back to the key that made it: setting
+            // bit 6 turns 0x01 into 'A' and so on, and lowercasing gives the
+            // `Ctrl('d')` spelling the rest of the tree matches on. Done by
+            // hand it is an easy subtraction to get wrong — a NUL byte
+            // (Ctrl+Space on most terminals) underflows `b'a' + c - 1`.
+            c if (c as u32) < 0x20 => Key::Ctrl(((c as u8) | 0x40).to_ascii_lowercase() as char),
             c => Key::Char(c),
         })
     }
@@ -1074,4 +1079,195 @@ pub fn wrap(s: &str, width: usize) -> Vec<String> {
         lines.push(line);
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Drain every key an already-buffered byte string decodes to. Only
+    /// sequences that are complete in the buffer are used, so the parser
+    /// never has to go back to the real stdin.
+    fn keys(bytes: &[u8]) -> Vec<Key> {
+        let mut input = Input {
+            buf: bytes.to_vec(),
+            eof: true,
+        };
+        let mut out = Vec::new();
+        while !input.buf.is_empty() {
+            match input.parse() {
+                Some(k) => out.push(k),
+                None => break,
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn plain_characters_and_the_named_keys() {
+        assert_eq!(
+            keys(b"ab\r\t\x7f"),
+            vec![
+                Key::Char('a'),
+                Key::Char('b'),
+                Key::Enter,
+                Key::Tab,
+                Key::Backspace
+            ]
+        );
+    }
+
+    #[test]
+    fn control_characters_never_overflow() {
+        // Ctrl+D and Ctrl+U are load-bearing: half-page scrolling.
+        assert_eq!(keys(b"\x04"), vec![Key::Ctrl('d')]);
+        assert_eq!(keys(b"\x15"), vec![Key::Ctrl('u')]);
+        assert_eq!(keys(b"\x02\x06"), vec![Key::Ctrl('b'), Key::Ctrl('f')]);
+        // Every byte in the control block must decode to something rather
+        // than panicking. A NUL (Ctrl+Space on most terminals) used to
+        // underflow the arithmetic that produced the letter.
+        for b in 0u8..0x20 {
+            if b == 0x1b {
+                continue; // escape: a sequence, tested below
+            }
+            assert!(!keys(&[b]).is_empty(), "byte {:#04x} decoded to nothing", b);
+        }
+    }
+
+    #[test]
+    fn utf8_survives_the_decoder() {
+        assert_eq!(keys("é".as_bytes()), vec![Key::Char('é')]);
+        assert_eq!(keys("—x".as_bytes()), vec![Key::Char('—'), Key::Char('x')]);
+    }
+
+    #[test]
+    fn arrows_carry_their_modifiers() {
+        assert_eq!(
+            keys(b"\x1b[A\x1b[B\x1b[C\x1b[D"),
+            vec![Key::Up, Key::Down, Key::Right, Key::Left]
+        );
+        assert_eq!(keys(b"\x1b[1;2A"), vec![Key::ShiftUp]);
+        assert_eq!(keys(b"\x1b[1;5D"), vec![Key::CtrlLeft]);
+        assert_eq!(keys(b"\x1b[Z"), vec![Key::BackTab]);
+        assert_eq!(keys(b"\x1b[5~\x1b[6~"), vec![Key::PageUp, Key::PageDown]);
+        assert_eq!(keys(b"\x1b[H\x1b[F"), vec![Key::Home, Key::End]);
+    }
+
+    #[test]
+    fn sgr_mouse_reports_decode() {
+        assert_eq!(
+            keys(b"\x1b[<0;10;5M"),
+            vec![Key::Mouse(Mouse {
+                kind: MouseKind::Press(0),
+                x: 9,
+                y: 4
+            })]
+        );
+        assert_eq!(
+            keys(b"\x1b[<0;10;5m"),
+            vec![Key::Mouse(Mouse {
+                kind: MouseKind::Release,
+                x: 9,
+                y: 4
+            })]
+        );
+        assert_eq!(
+            keys(b"\x1b[<64;1;1M"),
+            vec![Key::Mouse(Mouse {
+                kind: MouseKind::WheelUp,
+                x: 0,
+                y: 0
+            })]
+        );
+        assert_eq!(
+            keys(b"\x1b[<65;1;1M"),
+            vec![Key::Mouse(Mouse {
+                kind: MouseKind::WheelDown,
+                x: 0,
+                y: 0
+            })]
+        );
+    }
+
+    #[test]
+    fn a_paste_arrives_whole() {
+        // Text that would otherwise read as ":q<Enter>" must come back as one
+        // string, so that pasting into a prompt cannot run commands.
+        let got = keys(b"\x1b[200~:q\r\x1b[201~x");
+        assert_eq!(
+            got,
+            vec![Key::Paste(":q\r".to_string()), Key::Char('x')],
+            "a bracketed paste must be delivered whole"
+        );
+    }
+
+    #[test]
+    fn rubbish_on_the_wire_does_not_panic() {
+        // Every byte, alone and behind an escape: the parser may return
+        // anything it likes, but it may not panic or loop for ever.
+        for b in 0u8..=255 {
+            let _ = keys(&[b]);
+            let _ = keys(&[0x1b, b'[', b]);
+            let _ = keys(&[0x1b, b'O', b]);
+            let _ = keys(&[b, b'x']);
+        }
+        let _ = keys(b"\x1b[<;;;;;;M");
+        let _ = keys(b"\x1b[999999999999999999999;1;1M");
+        let _ = keys(b"\x1b[200~unterminated paste");
+    }
+
+    #[test]
+    fn wrapping_keeps_every_word() {
+        let lines = wrap("the quick brown fox jumps over the lazy dog", 12);
+        assert!(lines.iter().all(|l| l.chars().count() <= 12), "{:?}", lines);
+        assert_eq!(
+            lines.join(" "),
+            "the quick brown fox jumps over the lazy dog"
+        );
+        // Blank lines in the input are kept, so paragraphs stay apart.
+        assert_eq!(wrap("a\n\nb", 10), vec!["a", "", "b"]);
+        // A word longer than the width is not lost.
+        assert_eq!(
+            wrap("antidisestablishmentarianism", 5).join(""),
+            "antidisestablishmentarianism"
+        );
+    }
+
+    #[test]
+    fn a_screen_only_writes_where_it_can() {
+        let mut s = Screen::new(10, 3);
+        // Out-of-range writes are dropped rather than panicking.
+        s.put(100, 100, 'x', Rgb(0, 0, 0), Rgb(0, 0, 0));
+        s.put(10, 0, 'x', Rgb(0, 0, 0), Rgb(0, 0, 0));
+        assert_eq!(s.cell(100, 100).ch, ' ');
+        // Text is clipped at the right edge, not wrapped onto the next row.
+        s.text(6, 1, "abcdefgh", Rgb(255, 255, 255), Rgb(0, 0, 0));
+        assert_eq!(s.cell(9, 1).ch, 'd');
+        assert_eq!(s.cell(0, 2).ch, ' ');
+        // A frame smaller than its own border is refused rather than drawn.
+        s.frame(
+            Rect::new(0, 0, 1, 1),
+            "t",
+            Style::new(Rgb(1, 1, 1), Rgb(0, 0, 0)),
+        );
+        assert_eq!(s.cell(0, 0).ch, ' ');
+    }
+
+    #[test]
+    fn colours_round_trip_through_hsv() {
+        for c in [
+            Rgb(255, 0, 0),
+            Rgb(0, 128, 64),
+            Rgb(12, 34, 56),
+            Rgb(0, 0, 0),
+        ] {
+            let (h, s, v) = c.to_hsv();
+            let back = Rgb::from_hsv(h, s, v);
+            for (a, b) in [(c.0, back.0), (c.1, back.1), (c.2, back.2)] {
+                assert!(a.abs_diff(b) <= 2, "{:?} became {:?}", c, back);
+            }
+        }
+        assert_eq!(Rgb(10, 20, 30).mix(Rgb(10, 20, 30), 5.0), Rgb(10, 20, 30));
+        assert_eq!(Rgb(200, 200, 200).scale(10.0), Rgb(255, 255, 255));
+    }
 }

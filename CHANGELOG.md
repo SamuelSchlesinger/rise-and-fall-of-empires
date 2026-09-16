@@ -121,6 +121,10 @@ history of the work that led to the first release.
   first; importance 2 and 3 are always kept.
 - **The interface was split** from one 2953-line module into `ui::input`,
   `ui::commands` and `ui::render` (map, sidebar, panels).
+- `ui::detail::detail_lines` became one function per kind of page,
+  `ui::render::render_map` one per band of the map, and `sim::magic::tick`
+  one per phase of a magical year. No behaviour changed; the same seeds
+  produce the same worlds.
 
 ### Fixed
 
@@ -130,3 +134,57 @@ history of the work that led to the first release.
   the alternate screen.
 - **Bracketed paste** is enabled and understood, so pasted text can no longer
   be run as a burst of commands.
+- **A damaged or hand-made save can no longer crash the game.** Every index a
+  save file carries — into cells, realms, cities, peoples, persons, schools,
+  wars, relics, prophecies and the chronicle — is checked against the vector
+  it points into before the world is used, and a file that fails is reported
+  as inconsistent rather than panicking somewhere far away in `recompute`.
+- **A save file can no longer ask for unbounded memory.** A record count is
+  believed only as far as the bytes left in its chunk allow, so a forty-byte
+  file claiming fifty million people is a truncation error instead of a
+  multi-gigabyte allocation. `src/ser_tests.rs` mutates a real save two
+  hundred ways and asserts that loading never panics.
+- **Ctrl+Space no longer panics** a debug build: the ASCII control block is
+  decoded by setting bit 6 rather than by an arithmetic that underflowed on
+  NUL. `src/term.rs` now has tests for the whole input parser.
+- **Bad command-line arguments are errors.** An unrecognised option, a
+  `--seed` that is not a number, a `--detail` that is not a level, a missing
+  value or a size outside the allowed range now print a message and exit 2,
+  where they used to be silently ignored or clamped. `-h` is `--help`; it
+  used to be `--height`.
+- **The help page scrolls and wraps.** It is longer than a small terminal, and
+  used to be cut off at the bottom edge and mid-word at the right edge, with
+  no way to see the rest.
+- **`--ascii` now applies to the whole frame.** Box rules, separators, bars,
+  arrows and the help page's own symbol key were still being drawn in Unicode;
+  a final pass over the cell buffer converts anything left, so the symbols the
+  help explains are the ones the map draws.
+- **The status line always says how to leave.** Below about ninety columns it
+  used to drop every key hint, including on the help page.
+- **The chronicle no longer opens mid-sentence.** Both the strip under the map
+  and the full page start on the beginning of an entry, and when a single
+  entry is taller than the panel they show its first lines rather than its
+  last.
+- **Sidebar text is elided, not cut.** The era's description, the "since you
+  last looked" note and the storyteller's headlines end in an ellipsis when
+  they do not fit, instead of stopping in the middle of a word.
+- **The `[k]` links worked nowhere**, because `k` scrolls. A realm's capital,
+  a school's home city and a relic's maker are `[K]`.
+- **`<C-Up>` and friends could not be parsed** in a config file or `:map`,
+  though `:maps` printed them: the ctrl-arrows were being read as `<C-u>`.
+- **`ZQ` now quits without saving**, as in vim and as `:q!` already did.
+- **The config file reports what it cannot honour.** An unknown theme, a
+  `zoom` or `log` outside the range its own comment gives, and `:set width`
+  or `:set height` on a world that already exists were all accepted and then
+  quietly ignored.
+- **`:layer` with no argument** switched to the political layer instead of
+  printing its usage, and **`:new` with a seed that is not a number** threw
+  the world away and started a random one.
+- **A realm on the brink is called that everywhere.** The storyteller had a
+  word of its own, "teeters", that appeared in no other panel.
+- **Recap arithmetic reads correctly.** "53 wars began, 51 ended, 4 still
+  burning" invited a subtraction that does not hold, and the digest stopped at
+  thirty lines whatever the height of the terminal, leaving a third of a tall
+  window blank.
+- Person traits and a school's following line up in columns; the headless
+  summary says "1 school", not "1 schools".

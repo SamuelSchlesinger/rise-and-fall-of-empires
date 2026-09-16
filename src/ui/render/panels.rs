@@ -33,9 +33,9 @@ impl Ui {
         let width = sw.saturating_sub(10);
         let mut lines = self.chronicle_lines(self.log_min, "", width, avail);
         self.fold_battles(&mut lines, width);
-        lines.truncate(avail);
+        let shown: Vec<(String, Rgb, u8, usize)> = Ui::chron_window(&lines, avail).to_vec();
         let mut y = y0 + h - 1;
-        for (l, c, a, idx) in lines {
+        for (l, c, a, idx) in shown {
             self.screen.text_attr(1, y, &l, c, bg, a);
             self.log_rows.push((y, idx));
             if y == y0 + 1 {
@@ -199,8 +199,9 @@ impl Ui {
                 .text(2, 2, "nothing matches", Rgb(120, 120, 130), bg);
             return;
         }
+        let from = lines.split_at(self.chron_scroll.min(lines.len())).1;
         let mut y = sh - 1;
-        for (l, c, a, idx) in lines.iter().skip(self.chron_scroll).take(avail) {
+        for (l, c, a, idx) in Ui::chron_window(from, avail) {
             self.screen.text_attr(1, y, l, *c, bg, *a);
             self.chron_rows.push((y, *idx));
             if y == 1 {
@@ -217,15 +218,40 @@ impl Ui {
         let fg = Rgb(200, 200, 205);
         self.screen
             .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
-        for (k, l) in detail::HELP.iter().enumerate().take(sh) {
+        // Folded to this terminal's width, then scrolled: the page is both
+        // wider and taller than a small window, and the last row says where
+        // in it the reader is rather than letting the text simply stop.
+        let lines = detail::help_lines(sw.saturating_sub(3));
+        let more = sh.saturating_sub(1).max(1);
+        let top = self.help_scroll.min(lines.len().saturating_sub(more));
+        self.help_scroll = top;
+        for (k, l) in lines.iter().skip(top).enumerate().take(more) {
             let (c, a) = if l.starts_with("  ") || l.is_empty() {
                 (fg, 0)
             } else {
                 (Rgb(230, 200, 120), BOLD)
             };
             self.screen
-                .text_clip(2, k, l, sw - 3, Style::attr(c, bg, a));
+                .text_clip(2, k, l, sw.saturating_sub(3), Style::attr(c, bg, a));
         }
+        let shown = top + more.min(lines.len().saturating_sub(top));
+        let note = if lines.len() > more {
+            format!(
+                "-- {}-{} of {} · j k Ctrl-d Ctrl-u scroll · any other key returns --",
+                top + 1,
+                shown,
+                lines.len()
+            )
+        } else {
+            "-- any key returns --".to_string()
+        };
+        self.screen.text_clip(
+            2,
+            sh.saturating_sub(1),
+            &note,
+            sw.saturating_sub(3),
+            Style::attr(Rgb(140, 140, 150), bg, 0),
+        );
     }
 
     /// A run of battles of one war reads as one line plus a count: the log
@@ -278,7 +304,7 @@ impl Ui {
         self.screen
             .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         let width = sw.saturating_sub(6).max(30);
-        let lines = recap::lines(&self.world, self.recap_years, self.recap_scope, width);
+        let lines = recap::lines(&self.world, self.recap_years, self.recap_scope, width, sh);
         let max_scroll = lines.len().saturating_sub(sh.saturating_sub(1));
         if self.recap_scroll > max_scroll {
             self.recap_scroll = max_scroll;

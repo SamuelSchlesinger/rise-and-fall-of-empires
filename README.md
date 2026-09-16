@@ -72,50 +72,65 @@ empires --ascii               # plain ASCII glyphs
 empires --headless 800        # no UI: print 800 years of chronicle
 ```
 
-Options: `--seed N`, `--width W --height H` (default 160×64), `--detail
-low|medium|high`, `--headless N`, `--min-importance 0-3` (headless filter),
-`--stats` (balance metrics per century, with `--headless N`), `--bench`
-(ms/year and per-phase timings, with `--headless N`), `--save FILE`,
-`--load FILE`, `--ascii`, `--no-mouse`, `--tour` (show the introductory card
-again), `--mkconfig`, `--snapshot PATH` (render one frame to PATH.txt and
-PATH.html; combine with `--layer` and `--cols/--rows`), `--version`, `--help`.
+Options: `-s, --seed N`, `-w, --width W` (40–600) and `--height H` (20–300,
+default 160×64), `-d, --detail low|medium|high`, `--headless N`,
+`-i, --min-importance 0-3` (headless filter; above 3 prints the summary line
+alone), `--stats` (balance metrics per century, with `--headless N`, default
+1500), `--bench` (ms/year and per-phase timings, with `--headless N`, default
+300), `-o, --save FILE`, `-l, --load FILE`, `--ascii`, `--no-mouse`, `--tour`
+(show the introductory card again), `--mkconfig`, `--snapshot PATH` (render
+one frame after `--headless N` years, default 300, to PATH.txt and PATH.html;
+combine with `--layer` and `--cols/--rows`), `-V, --version`, `-h, --help`.
+
+An option it does not recognise, or a value it cannot read, is an error with
+a message and exit status 2 — nothing is silently ignored or clamped.
 
 ## Playing
 
 Keys follow vim conventions: a count before a motion repeats it (`12j`,
 `3]`, `5.`), `gg`/`G` jump, `zz` centres, `zi`/`zo` zoom, `:` opens a
-command line, `/` searches, `ZZ` quits. Arrow keys, Shift/Ctrl+arrows,
-PageUp/PageDown and the mouse work too. Press `?` in the game for the
-full key list.
+command line, `/` searches, `ZZ` quits and `ZQ` quits without saving. Arrow
+keys, Shift/Ctrl+arrows, PageUp/PageDown and the mouse work too. Press `?`
+in the game for the full key list — it is the authority, and it scrolls.
 
 | key | action |
 |---|---|
 | Space, `+`/`-`, `.` | pause, change speed (0.5 to 100 years/second), step a year |
-| `h j k l` / arrows | move the cursor; `H J K L` or Shift+arrows move fast, Ctrl+arrows faster |
-| `0` `$` Home `zz` | left edge, right edge, centre of the world, centre on cursor |
+| `h j k l` / arrows | move the cursor; `H`/`L` or Shift+arrows 8 cells, `K`/`J` 4 rows, Ctrl+arrows 20 and 10 |
+| `0` `$` Home `zz` `zt` | left edge, right edge, centre of the world, centre on cursor, cursor to the top |
 | `zi` `zo` | zoom in / out (1 to 4 world cells per character; the whole world fits at 2) |
 | Tab / Shift+Tab | map layer: political, terrain, culture, mana, population, biomes |
 | Enter / `s` / Esc | open / select what is under the cursor / clear the selection |
 | `gg` or `G` | jump to the selected thing |
 | `]` `[` and `}` `{` | next / previous realm, next / previous city |
 | `t` | go to the top story in the storyteller panel |
-| `r` | a recap of the last fifty years (of the selected realm, if one is selected) |
-| `/name`, `n`, `N` | search realms, cities, people, schools, wars, places, relics; cycle matches |
+| `r` | a recap of the last fifty years (of the selected realm or city, if one is selected) |
+| `/name`, `n`, `N` | search realms, cities, peoples, people, schools, wars, places, relics; cycle matches |
 | `f` | follow: the cursor jumps to each major event as it happens |
 | `e` | lists: realms, cities, peoples, schools, persons, wars, places, relics, prophecies |
-| `c` | the full chronicle (`f` cycles importance, `/` filters by text) |
+| `c` | the full chronicle (`f` or `v` cycles importance 0–3, `/` filters by text) |
 | `x` | the Hand of Fate: intervene in the selected realm |
-| `D`, `v` | cycle simulation detail; filter the event log |
-| `?` | help |
+| `D`, `v` | cycle simulation detail; filter the event log (0–2) |
+| `?` or F1 | help |
+| `q` twice, `ZZ`, Ctrl-C | quit, saving if a save file is set; `ZQ` quits without saving |
 
-In lists and detail pages: `j`/`k` scroll, Ctrl-d/Ctrl-u half a page,
-`gg`/`G` top and bottom, `m` shows the thing on the map, Enter opens,
-bracketed letters follow links (`[r]` ruler, `[c]` people, `[k]` capital,
-`[f]` family and so on), Backspace goes back, Esc or `q` returns.
+Uppercase aliases work on the map where the lowercase key is taken by a
+motion: `C` chronicle, `R` recap, `F` follow, `X` fate, `T` top story.
 
-Mouse: click to select, click again to open, wheel to scroll, click a
-chronicle line or a sidebar entry to jump to it. Pass `--no-mouse` (or
-`:mouse`) to leave the mouse to the terminal for selecting text.
+Everywhere off the map: `j`/`k` scroll, Ctrl-d/Ctrl-u half a page,
+Ctrl-f/Ctrl-b a page, `gg`/`G` top and bottom, `m` shows the thing on the
+map, `q` or Esc goes back.
+
+In a list, Tab or `]`/`[` change tab, `n`/`N` move the cursor, Enter opens
+and `x` opens the Hand of Fate for the highlighted realm. On a detail page,
+the letter in brackets opens that link — `[r]` ruler, `[c]` people, `[K]`
+capital, `[f]` family and so on, always the key you press — Backspace
+retraces, and Enter shows the thing on the map.
+
+Mouse: click to select, click again (or right-click) to open, wheel to
+scroll, click a chronicle line or a sidebar entry to jump to it. Pass
+`--no-mouse` (or `:mouse`) to leave the mouse to the terminal for selecting
+text.
 
 ### Commands
 
@@ -128,15 +143,21 @@ chronicle line or a sidebar entry to jump to it. Pass `--no-mouse` (or
 | `:until 900`, `:step 50` | run to a year and pause; advance N years at once |
 | `:new [seed]` | start a fresh world without restarting |
 | `:story` | go to the top story |
-| `:recap [N]` | the digest of the last N years (default 50); `r` on the map does the same |
-| `:follow on`, `:log 2` | jump to major events as they happen; least importance shown in the event log |
+| `:recap [N]` | the digest of the last N years (default 50, and `N` sticks); `r` on the map does the same |
+| `:follow on`, `:log 2`, `:filter 2` | jump to major events as they happen; least importance shown in the event log, and in the chronicle |
 | `:legend` | the one-line key under the map (on by default) |
 | `:tour` | show the introductory card again |
 | `:mute battle` | hide an event kind from the feeds (toggle); `:mute` lists |
 | `:set key value`, `:map <from> <to>`, `:unmap key`, `:maps` | runtime versions of the config file |
 | `:mkconfig`, `:config` | write a commented config template; show its path |
 | `:fate N` | apply Hand of Fate option N to the selected realm |
-| `:q`, `:wq`, `:q!`, `ZZ` | quit (saving if a save file is set), save and quit, quit without saving |
+| `:q`, `:wq`, `:q!` | quit (saving if a save file is set), save and quit, quit without saving |
+
+Most have the abbreviations and synonyms you would expect — `:write`,
+`:load`, `:x` for `:wq`, `:c` for `:chronicle`, `:l` for `:layer`,
+`:goto` for `:find`. `:help` opens the same page as `?`, which lists the
+rest. `:set width` and `:set height` are refused while a world exists:
+the map is raised once and cannot be resized.
 
 ### Saving
 
@@ -160,26 +181,35 @@ on adding a field.
 `$XDG_CONFIG_HOME/empires/config`):
 
 ```
-detail = medium        # low | medium | high
-speed = 5              # years per second at start (0.5 1 2 5 10 25 50 100)
-theme = default        # default | phosphor | amber | paper | dusk
-mouse = on
-ascii = off
-autosave = 100         # years between autosaves when a save file is set (0 = off)
-width = 160
-height = 64
-log = 1                # minimum importance shown in the event log (0-3)
-follow = on            # jump the cursor to major events
-zoom = 1               # 1-4, how many world cells per character
+# detail = medium        # low | medium | high
+# speed = 5              # years per second at start; snapped to the nearest of
+#                        # 0.5 1 2 5 10 25 50 100
+# theme = default        # default | phosphor | amber | paper | dusk
+# mouse = on
+# ascii = off
+# autosave = 100         # years between autosaves when a save file is set (0 = off)
+# width = 160            # 40-600
+# height = 64            # 20-300
+# log = 1                # minimum importance shown in the event log (0-3)
+# follow = on            # jump the cursor to major events
+# zoom = 1               # 1-4, how many world cells per character
 
-tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning
+# tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning
 
-map w k                # vim-style remaps: map <S-Up> K, map <C-p> :, map ; :
+# map w k                # examples: map <S-Up> K, map <C-p> :, map ; :
 ```
 
-Every line is optional. `tune.<field>` reaches any of the simulation's
-balance constants by name — a bad name is reported when the file is read, not
-silently ignored — so the shape of the world is adjustable without rebuilding.
+Every line is optional, and the template is written commented out: uncomment
+what you want. `on`/`off`, `yes`/`no`, `true`/`false` and `1`/`0` are all
+accepted for the switches, a line may be written `key value` as well as
+`key = value`, and a leading `set ` is ignored, so lines can be pasted
+between the file and the `:set` command.
+
+Nothing here is silently ignored: an unknown setting, an unknown theme, a
+value outside the range in the comment or a `tune.<field>` that does not
+exist is reported with its line number the first time the game draws a
+frame. `tune.<field>` reaches any of the simulation's balance constants by
+name, so the shape of the world is adjustable without rebuilding.
 
 ### The storyteller
 

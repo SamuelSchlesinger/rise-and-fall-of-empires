@@ -29,6 +29,11 @@ const ASPECTS: &[(&str, &str)] = &[
     ("Ash", "endings"),
     ("Thread", "fate"),
 ];
+
+/// How many aspects there are. A school's `aspect` indexes `ASPECTS`
+/// directly, so the loader checks it against this (see `ser::validate`).
+pub const ASPECT_COUNT: usize = ASPECTS.len();
+
 const PRACTICES: &[&str] = &[
     "Binding",
     "Weaving",
@@ -310,12 +315,23 @@ impl World {
     }
 }
 
+/// A year of the schools of thought: new ones founded, the living ones
+/// spread, adopted, persecuted or split, and any realm whose state school
+/// has died left without one.
+///
+/// The three phases run in this order every year and each draws from the
+/// RNG, so moving one past another changes every world.
 pub fn tick(w: &mut World) {
-    let rng = w.rng.clone();
-    let tn = w.tuning;
-    // How many living schools already have a footing in each realm. New
-    // schools start at 0.15 influence, below the 0.2 threshold, so this does
-    // not change while towns are founding.
+    let rooted = footholds(w);
+    found_schools(w, &rooted);
+    tick_schools(w);
+    drop_dead_state_schools(w);
+}
+
+/// How many living schools already have a footing in each realm. New
+/// schools start at 0.15 influence, below the 0.2 threshold, so this does
+/// not change while towns are founding.
+fn footholds(w: &World) -> Vec<u32> {
     let mut rooted: Vec<u32> = vec![0; w.polities.len()];
     for s in w.schools.iter().filter(|s| s.alive()) {
         for (&p, &v) in s.influence.iter() {
@@ -324,7 +340,14 @@ pub fn tick(w: &mut World) {
             }
         }
     }
-    // Founding.
+    rooted
+}
+
+/// Schools founded this year, where mana runs high or a people is given
+/// to mysticism and no other school has the ground already.
+fn found_schools(w: &mut World, rooted: &[u32]) {
+    let rng = w.rng.clone();
+    let tn = w.tuning;
     let ncity = w.cities.len();
     for c in 0..ncity {
         if w.cities[c].destroyed.is_some() {
@@ -365,8 +388,13 @@ pub fn tick(w: &mut World) {
         w.log(2, EventKind::Magic, &refs, Some(cell), text);
         super::stories::artifacts_on_school(w, s);
     }
+}
 
-    // Spread, adoption, persecution, schism, extinction.
+/// Every living school for a year: spread along trade and conquest,
+/// adoption as state doctrine, persecution, schism and dying out.
+fn tick_schools(w: &mut World) {
+    let rng = w.rng.clone();
+    let tn = w.tuning;
     let nschool = w.schools.len();
     for s in 0..nschool {
         if !w.schools[s].alive() {
@@ -603,7 +631,10 @@ pub fn tick(w: &mut World) {
             }
         }
     }
-    // Drop state schools that went extinct.
+}
+
+/// A realm whose state school has died out has no state school.
+fn drop_dead_state_schools(w: &mut World) {
     for p in 0..w.polities.len() {
         if let Some(s) = w.polities[p].school {
             if !w.schools[s].alive() {

@@ -65,6 +65,11 @@ pub trait Io {
     /// yet — the first one to gain a field will (see the module docs).
     #[allow(dead_code)]
     fn ver(&self) -> u32;
+    /// How many bytes are still to come, or `usize::MAX` when writing. Every
+    /// record costs at least one byte on the wire, so this is the ceiling on
+    /// how many of anything the rest of the input could possibly describe —
+    /// which is what stops a crafted count from being believed (see [`seq`]).
+    fn remaining(&self) -> usize;
     /// Visit one byte.
     fn u8(&mut self, v: &mut u8);
     /// Visit a length-prefixed run of bytes.
@@ -135,6 +140,9 @@ impl Io for Writer {
     fn ver(&self) -> u32 {
         self.ver
     }
+    fn remaining(&self) -> usize {
+        usize::MAX
+    }
     fn u8(&mut self, v: &mut u8) {
         self.buf.push(*v);
     }
@@ -160,13 +168,18 @@ pub struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> &'a [u8] {
-        if self.pos + n > self.buf.len() {
-            self.err = true;
-            self.pos = self.buf.len();
-            return &[];
-        }
-        let s = &self.buf[self.pos..self.pos + n];
-        self.pos += n;
+        // `checked_add`, because `n` can come from the file: a length that
+        // wrapped round would otherwise look like a short, legal read.
+        let end = match self.pos.checked_add(n) {
+            Some(e) if e <= self.buf.len() => e,
+            _ => {
+                self.err = true;
+                self.pos = self.buf.len();
+                return &[];
+            }
+        };
+        let s = &self.buf[self.pos..end];
+        self.pos = end;
         s
     }
 }
@@ -177,6 +190,9 @@ impl<'a> Io for Reader<'a> {
     }
     fn ver(&self) -> u32 {
         self.ver
+    }
+    fn remaining(&self) -> usize {
+        self.buf.len().saturating_sub(self.pos)
     }
     fn u8(&mut self, v: &mut u8) {
         let s = self.take(1);
@@ -227,17 +243,32 @@ fn opt_bool<S: Io>(s: &mut S, v: &mut Option<bool>) {
     opt(s, v, Io::bool);
 }
 
+/// Visit a length-prefixed list of records.
+///
+/// When reading, the count is believed only as far as the bytes left in the
+/// chunk allow: every record costs at least one byte, so a file cannot ask
+/// for more elements than it has bytes. Without that clamp a forty-byte file
+/// claiming fifty million people would have the loader reserve gigabytes
+/// before discovering there was nothing to fill them with.
 fn seq<S: Io, T>(s: &mut S, v: &mut Vec<T>, blank: impl Fn() -> T, f: impl Fn(&mut S, &mut T)) {
     let mut n = v.len() as u32;
     s.u32(&mut n);
     if s.reading() {
         v.clear();
-        let n = (n as usize).min(50_000_000);
+        let want = n as usize;
+        let n = want.min(s.remaining());
         v.reserve(n);
         for _ in 0..n {
             let mut t = blank();
             f(s, &mut t);
             v.push(t);
+        }
+        if n < want {
+            // The count outran the file. One more byte, which cannot be
+            // there, so the read is reported as truncated rather than
+            // quietly coming back short.
+            let mut b = 0u8;
+            s.u8(&mut b);
         }
     } else {
         for t in v.iter_mut() {
@@ -1355,11 +1386,217 @@ pub fn load(bytes: &[u8]) -> Result<World, SaveError> {
             })
         }
     }
-    if w.terrain.w == 0 || w.terrain.h == 0 || w.cells.len() != w.terrain.w * w.terrain.h {
-        return Err(SaveError::Inconsistent);
-    }
+    validate(&w)?;
     w.recompute();
     Ok(w)
+}
+
+/// Check that the world a file describes is one the rest of the tree can
+/// safely assume: a map with a size, and every stored index inside the
+/// vector it points into.
+///
+/// Entities refer to one another by index and nothing revalidates them
+/// afterwards, so a single out-of-range number in a damaged or hand-made
+/// file would otherwise become a panic somewhere far away — in `recompute`,
+/// or on a detail page opened an hour later. This is the one place that
+/// belief is checked, which is what lets every other index in the tree stay
+/// a plain `[..]`.
+fn validate(w: &World) -> Result<(), SaveError> {
+    let bad = || SaveError::Inconsistent;
+    let area = w.terrain.w.checked_mul(w.terrain.h).ok_or_else(bad)?;
+    if w.terrain.w == 0 || w.terrain.h == 0 || w.cells.len() != area {
+        return Err(bad());
+    }
+    let (cells, races, cultures, cities) = (
+        w.cells.len(),
+        w.races.len(),
+        w.cultures.len(),
+        w.cities.len(),
+    );
+    let (polities, persons, schools, wars) = (
+        w.polities.len(),
+        w.persons.len(),
+        w.schools.len(),
+        w.wars.len(),
+    );
+    let ok = |i: usize, n: usize| if i < n { Ok(()) } else { Err(bad()) };
+    let opt = |i: Option<usize>, n: usize| match i {
+        Some(i) if i >= n => Err(bad()),
+        _ => Ok(()),
+    };
+    let every = |v: &[usize], n: usize| {
+        if v.iter().all(|&i| i < n) {
+            Ok(())
+        } else {
+            Err(bad())
+        }
+    };
+
+    // Terrain's parallel arrays must all be the size of the map, or the
+    // per-cell reads in `recompute` and the renderer run off the end.
+    for n in [
+        w.terrain.elev.len(),
+        w.terrain.temp.len(),
+        w.terrain.moist.len(),
+        w.terrain.biome.len(),
+        w.terrain.river.len(),
+        w.terrain.flow.len(),
+        w.terrain.fertility.len(),
+        w.terrain.minerals.len(),
+        w.terrain.mana.len(),
+        w.terrain.coast.len(),
+        w.terrain.region.len(),
+        w.terrain.river_feat.len(),
+        w.terrain.landmass.len(),
+    ] {
+        if n != cells {
+            return Err(bad());
+        }
+    }
+    for f in &w.terrain.features {
+        opt(f.named_by, cultures)?;
+        every(&f.cells, cells)?;
+        ok(f.center.0, w.terrain.w)?;
+        ok(f.center.1, w.terrain.h)?;
+    }
+    let features = w.terrain.features.len();
+
+    for c in &w.cells {
+        opt(c.owner, polities)?;
+        opt(c.culture, cultures)?;
+        opt(c.city, cities)?;
+    }
+    for (i, r) in w.races.iter().enumerate() {
+        if r.id != i {
+            return Err(bad());
+        }
+        ok(r.home, cells)?;
+    }
+    for (i, c) in w.cultures.iter().enumerate() {
+        if c.id != i {
+            return Err(bad());
+        }
+        ok(c.race, races)?;
+        opt(c.parent, cultures)?;
+        ok(c.home, cells)?;
+    }
+    for (i, c) in w.cities.iter().enumerate() {
+        if c.id != i {
+            return Err(bad());
+        }
+        ok(c.cell, cells)?;
+        ok(c.culture, cultures)?;
+        opt(c.polity, polities)?;
+        opt(c.founder, persons)?;
+    }
+    for (i, p) in w.polities.iter().enumerate() {
+        if p.id != i {
+            return Err(bad());
+        }
+        ok(p.culture, cultures)?;
+        opt(p.capital, cities)?;
+        opt(p.ruler, persons)?;
+        opt(p.parent, polities)?;
+        opt(p.school, schools)?;
+        every(&p.cities, cities)?;
+        every(&p.wars, wars)?;
+        every(&p.rulers, persons)?;
+        every(&p.generals, persons)?;
+        for &q in p.tension.keys().chain(p.truce.keys()) {
+            ok(q, polities)?;
+        }
+        for &c in p.culture_counts.keys() {
+            ok(c, cultures)?;
+        }
+        for &(q, _) in &p.neighbors {
+            ok(q, polities)?;
+        }
+    }
+    for (i, p) in w.persons.iter().enumerate() {
+        if p.id != i {
+            return Err(bad());
+        }
+        ok(p.culture, cultures)?;
+        ok(p.race, races)?;
+        opt(p.polity, polities)?;
+        opt(p.school, schools)?;
+        opt(p.city, cities)?;
+        opt(p.parent, persons)?;
+    }
+    for (i, s) in w.schools.iter().enumerate() {
+        if s.id != i {
+            return Err(bad());
+        }
+        ok(s.founder, persons)?;
+        ok(s.home_city, cities)?;
+        ok(s.aspect, crate::sim::magic::ASPECT_COUNT)?;
+        opt(s.parent, schools)?;
+        every(&s.state_of, polities)?;
+        for &q in s.influence.keys() {
+            ok(q, polities)?;
+        }
+    }
+    for (i, x) in w.wars.iter().enumerate() {
+        if x.id != i {
+            return Err(bad());
+        }
+        ok(x.attacker, polities)?;
+        ok(x.defender, polities)?;
+    }
+    for p in &w.plagues {
+        every(&p.polities, polities)?;
+    }
+    for (i, a) in w.artifacts.iter().enumerate() {
+        if a.id != i {
+            return Err(bad());
+        }
+        opt(a.maker, persons)?;
+        opt(a.origin, polities)?;
+        opt(a.lost_at, cells)?;
+        match a.holder {
+            Holder::Polity(q) => ok(q, polities)?,
+            Holder::Person(q) => ok(q, persons)?,
+            Holder::City(q) => ok(q, cities)?,
+            Holder::Lost => {}
+        }
+    }
+    for (i, p) in w.prophecies.iter().enumerate() {
+        if p.id != i {
+            return Err(bad());
+        }
+        ok(p.seer, persons)?;
+        match p.kind {
+            ProphecyKind::RealmFalls(q)
+            | ProphecyKind::CrownOfEmpire(q)
+            | ProphecyKind::RulerMurdered(q) => ok(q, polities)?,
+            ProphecyKind::CityBurns(c, _) => ok(c, cities)?,
+            ProphecyKind::FaithSpreads(s, _) => ok(s, schools)?,
+            ProphecyKind::RelicReturns(a, q) => {
+                ok(a, w.artifacts.len())?;
+                ok(q, polities)?;
+            }
+        }
+    }
+    for e in &w.chronicle.events {
+        opt(e.loc, cells)?;
+        for r in &e.refs {
+            match *r {
+                Ref::Polity(i) => ok(i, polities)?,
+                Ref::City(i) => ok(i, cities)?,
+                Ref::Culture(i) => ok(i, cultures)?,
+                Ref::Person(i) => ok(i, persons)?,
+                Ref::School(i) => ok(i, schools)?,
+                Ref::War(i) => ok(i, wars)?,
+                Ref::Race(i) => ok(i, races)?,
+                Ref::Feature(i) => ok(i, features)?,
+                Ref::Artifact(i) => ok(i, w.artifacts.len())?,
+            }
+        }
+    }
+    for &c in w.battlefield_names.keys() {
+        ok(c, cells)?;
+    }
+    Ok(())
 }
 
 /// Walk the chunks of a current-version file, skipping the tags we do not know.

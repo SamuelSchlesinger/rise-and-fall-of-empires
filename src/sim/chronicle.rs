@@ -91,7 +91,7 @@ impl EventKind {
 pub struct Event {
     /// The year it happened.
     pub year: i32,
-    /// 0 for a footnote, 4 for an age-defining event.
+    /// 0 for a footnote, 3 for an age-defining event.
     pub importance: u8,
     /// What sort of thing it was.
     pub kind: EventKind,

@@ -55,6 +55,49 @@ struct Args {
     tour: bool,
 }
 
+/// Complain on stderr and stop. Bad arguments are the user's to fix, so the
+/// message says what was wrong and points at `--help` rather than carrying on
+/// with a value nobody asked for.
+fn fail(msg: &str) -> ! {
+    eprintln!("empires: {}", msg);
+    eprintln!("Try 'empires --help' for the full list of options.");
+    std::process::exit(2);
+}
+
+/// The text `--help` prints. Also the answer to a mistyped flag, in spirit:
+/// every option the binary accepts is listed here, short forms included.
+const USAGE: &str = "\
+empires — rise and fall of empires
+
+  -s, --seed N          world seed (default: the current time)
+  -w, --width W         map width, 40-600 (default 160)
+      --height H        map height, 20-300 (default 64)
+  -d, --detail L        low | medium | high (default medium)
+      --headless N      run N years without a UI and print the chronicle
+      --stats           with --headless N (default 1500): balance metrics per
+                        century instead of the chronicle
+      --bench           with --headless N (default 300): ms/year and per-phase
+                        timings
+  -l, --load FILE       continue a saved world
+  -o, --save FILE       save to FILE (autosaves every 100 years and on quit;
+                        in headless mode, once at the end)
+  -i, --min-importance  hide headless events below this importance, 0-3
+                        (default 1; above 3 prints the summary line alone)
+      --ascii           use plain ASCII glyphs
+      --no-mouse        do not capture the mouse (keeps the terminal's own
+                        text selection)
+      --tour            show the introductory card again
+      --mkconfig        write a commented config template to
+                        ~/.config/empires/config
+      --snapshot PATH   render one frame after --headless N years (default 300)
+                        to PATH.txt and PATH.html
+      --layer L         layer for the snapshot: political, terrain, culture,
+                        mana, population, biomes
+      --cols C          terminal width for the snapshot, 20-1000 (default 160)
+      --rows R          terminal height for the snapshot, 5-1000 (default 45)
+  -V, --version         print the version and exit
+  -h, --help            print this message and exit";
+
 fn parse_args(cfg: &config::Config) -> Args {
     let mut a = Args {
         seed: std::time::SystemTime::now()
@@ -81,48 +124,62 @@ fn parse_args(cfg: &config::Config) -> Args {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < args.len() {
-        let next = |i: &mut usize| -> Option<String> {
+        let flag = args[i].clone();
+        // The next argument, or a complaint naming the flag that wanted one.
+        let value = |i: &mut usize| -> String {
             *i += 1;
-            args.get(*i).cloned()
+            match args.get(*i) {
+                Some(v) => v.clone(),
+                None => fail(&format!("{} needs a value", flag)),
+            }
         };
-        match args[i].as_str() {
-            "--seed" | "-s" => a.seed = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.seed),
-            "--width" | "-w" => {
-                a.width = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.width);
-            }
-            "--height" | "-h" => {
-                a.height = next(&mut i)
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(a.height);
-            }
-            "--detail" | "-d" => {
-                a.detail = match next(&mut i).as_deref() {
-                    Some("low") => Detail::Low,
-                    Some("high") => Detail::High,
-                    _ => Detail::Medium,
+        // The next argument parsed as `T`, or a complaint saying what it
+        // should have looked like. Silently falling back to a default here is
+        // how `--seed abc` used to become a different world every run.
+        macro_rules! number {
+            ($i:expr, $t:ty, $what:expr) => {{
+                let raw = value($i);
+                match raw.parse::<$t>() {
+                    Ok(v) => v,
+                    Err(_) => fail(&format!("{} {}: expected {}", args[*$i - 1], raw, $what)),
                 }
+            }};
+        }
+        match args[i].as_str() {
+            "--seed" | "-s" => a.seed = number!(&mut i, u64, "a whole number"),
+            "--width" | "-w" => a.width = number!(&mut i, usize, "a whole number"),
+            "--height" => a.height = number!(&mut i, usize, "a whole number"),
+            "--detail" | "-d" => {
+                let v = value(&mut i);
+                a.detail = match v.as_str() {
+                    "low" => Detail::Low,
+                    "medium" => Detail::Medium,
+                    "high" => Detail::High,
+                    _ => fail(&format!("--detail {}: expected low, medium or high", v)),
+                };
             }
-            "--headless" | "--years" => {
-                a.headless = Some(next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(500));
-            }
-            "--min-importance" | "-i" => {
-                a.min_importance = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(1);
-            }
+            "--headless" | "--years" => a.headless = Some(number!(&mut i, i32, "a year count")),
+            // Not range-checked: importance runs 0 to 3, so anything above
+            // that is a legitimate way of asking for the summary line alone.
+            "--min-importance" | "-i" => a.min_importance = number!(&mut i, u8, "a whole number"),
             "--ascii" => a.ascii = true,
             "--tour" => a.tour = true,
             "--stats" => a.stats = true,
             "--bench" => a.bench = true,
-            "--load" | "-l" => a.load = next(&mut i),
-            "--save" | "-o" => a.save = next(&mut i),
+            "--load" | "-l" => a.load = Some(value(&mut i)),
+            "--save" | "-o" => a.save = Some(value(&mut i)),
             "--no-mouse" => a.mouse = false,
-            "--snapshot" => a.snapshot = next(&mut i),
-            "--layer" => a.layer = next(&mut i).unwrap_or_else(|| "political".into()),
-            "--cols" => a.cols = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(160),
-            "--rows" => a.rows = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(45),
+            "--snapshot" => a.snapshot = Some(value(&mut i)),
+            "--layer" => a.layer = value(&mut i),
+            "--cols" => a.cols = number!(&mut i, usize, "a column count"),
+            "--rows" => a.rows = number!(&mut i, usize, "a row count"),
             "--mkconfig" => {
                 match config::write_template() {
                     Ok(p) => println!("wrote {}", p.display()),
-                    Err(e) => println!("{}", e),
+                    Err(e) => {
+                        eprintln!("empires: {}", e);
+                        std::process::exit(1);
+                    }
                 }
                 std::process::exit(0);
             }
@@ -130,18 +187,35 @@ fn parse_args(cfg: &config::Config) -> Args {
                 println!("empires {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
-            "--help" => {
-                println!(
-                    "empires — rise and fall of empires\n\n  --seed N          world seed (default: time)\n  --width W         map width (default 160)\n  --height H        map height (default 64)\n  --detail L        low | medium | high (default medium)\n  --headless N      run N years without a UI and print the chronicle\n  --stats           with --headless N: print balance metrics per century instead of the chronicle\n  --bench           with --headless N (default 300): print ms/year and per-phase timings\n  --load FILE       continue a saved world\n  --save FILE       save to FILE (autosaves every 100 years and on quit; in headless mode, at the end)\n  --min-importance  0-3, filter for headless output (default 1)\n  --ascii           use plain ASCII glyphs\n  --no-mouse        do not capture the mouse (keeps the terminal's own text selection)\n  --tour            show the introductory card again\n  --mkconfig        write a commented config template to ~/.config/empires/config\n  --snapshot PATH   render one frame after --headless N years to PATH.txt and PATH.html\n  --layer L         layer for the snapshot (political, terrain, culture, mana, population, biomes)\n  --cols C --rows R terminal size for the snapshot\n  -V, --version     print the version and exit\n  --help            print this message and exit"
-                );
+            "--help" | "-h" => {
+                println!("{}", USAGE);
                 std::process::exit(0);
             }
-            _ => {}
+            other => fail(&format!("unrecognised option '{}'", other)),
         }
         i += 1;
     }
-    a.width = a.width.clamp(40, 600);
-    a.height = a.height.clamp(20, 300);
+    // Checked after the whole line has been read, because these four can also
+    // come from the config file, and a bad value there deserves the same
+    // complaint rather than a silent clamp.
+    let range = |name: &str, v: usize, lo: usize, hi: usize| -> usize {
+        if v < lo || v > hi {
+            fail(&format!(
+                "{} {}: must be between {} and {}",
+                name, v, lo, hi
+            ));
+        }
+        v
+    };
+    a.width = range("map width", a.width, 40, 600);
+    a.height = range("map height", a.height, 20, 300);
+    // A snapshot's terminal is ours to invent, but a zero-column screen has
+    // nothing to draw on and a huge one is a request to allocate the machine.
+    a.cols = range("snapshot columns", a.cols, 20, 1000);
+    a.rows = range("snapshot rows", a.rows, 5, 1000);
+    if a.headless.is_some_and(|y| y < 0) {
+        fail("--headless must not be negative");
+    }
     a
 }
 
@@ -221,19 +295,24 @@ fn main() {
                 Err(e) => eprintln!("empires: {}", e),
             }
         }
+        // "1 school", not "1 schools": the summary is the only thing a
+        // headless run always prints, so it may as well read properly.
+        let n = |count: usize, one: &str, many: &str| {
+            format!("{} {}", count, if count == 1 { one } else { many })
+        };
         eprintln!(
-            "seed {} | {} years in {:.2}s ({:.2} ms/year) | {} events | pop {:.0}k | {} realms alive of {} | {} cities | {} cultures | {} schools",
+            "seed {} | {} years in {:.2}s ({:.2} ms/year) | {} | pop {:.0}k | {} alive of {} | {} | {} | {}",
             world.seed,
             years,
             elapsed.as_secs_f64(),
             elapsed.as_secs_f64() * 1000.0 / years.max(1) as f64,
-            world.chronicle.len(),
+            n(world.chronicle.len(), "event", "events"),
             world.stats.pop,
-            world.stats.polities_alive,
+            n(world.stats.polities_alive, "realm", "realms"),
             world.polities.len(),
-            world.stats.cities_alive,
-            world.stats.cultures_alive,
-            world.stats.schools_alive
+            n(world.stats.cities_alive, "city", "cities"),
+            n(world.stats.cultures_alive, "culture", "cultures"),
+            n(world.stats.schools_alive, "school", "schools"),
         );
         return;
     }

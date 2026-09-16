@@ -210,7 +210,7 @@ pub fn here_sentence(w: &World, cell: usize) -> String {
 pub fn legend(layer: Layer, ascii: bool) -> String {
     let s = match layer {
         Layer::Political => {
-            "colours are realms · brighter edges are borders · @ capital · # city · × ruins · ! this year's news"
+            "colours are realms · brighter edges are borders · @ capital · # city · × ruins · ! a recent event"
         }
         Layer::Terrain => {
             "the bare land · ▲ mountains · ♣ forest · : desert · ≈ rivers · @ and # are cities"

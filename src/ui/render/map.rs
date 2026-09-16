@@ -35,6 +35,38 @@ impl Ui {
 
     pub(super) fn render_map(&mut self) {
         let (mx, my, mw, mh) = self.map_rect();
+        let marks = self.recent_marks();
+        self.draw_cells(&marks);
+        self.draw_scroll_hints(mx, my, mw, mh);
+        // Labels last: a scroll hint may hide behind a name, but a name
+        // must never be broken by one.
+        self.render_map_labels(mx, my, mw, mh);
+        self.render_legend(mx, my, mw, mh);
+    }
+
+    /// Where the last two years' notable events happened, for the markers
+    /// the map stamps over the terrain.
+    fn recent_marks(&self) -> Vec<(usize, u8)> {
+        let mut marks: Vec<(usize, u8)> = Vec::new();
+        let year = self.world.year;
+        for e in self.world.chronicle.events.iter().rev() {
+            if e.year < year - 1 {
+                break;
+            }
+            if e.importance >= 2 {
+                if let Some(l) = e.loc {
+                    marks.push((l, e.importance));
+                }
+            }
+        }
+        marks
+    }
+
+    /// The grid itself: one character per zoom block, coloured by the
+    /// current layer and overlaid with rivers, cities, borders, event
+    /// markers and the cursor.
+    fn draw_cells(&mut self, marks: &[(usize, u8)]) {
+        let (mx, my, mw, mh) = self.map_rect();
         let (ox, oy) = self.view;
         let tw = self.world.terrain.w;
         let th = self.world.terrain.h;
@@ -50,19 +82,6 @@ impl Ui {
             Some(Ref::School(s)) => Some(s),
             _ => None,
         };
-        // Recent event markers.
-        let mut marks: Vec<(usize, u8)> = Vec::new();
-        let year = self.world.year;
-        for e in self.world.chronicle.events.iter().rev() {
-            if e.year < year - 1 {
-                break;
-            }
-            if e.importance >= 2 {
-                if let Some(l) = e.loc {
-                    marks.push((l, e.importance));
-                }
-            }
-        }
         let max_pop = 8.0f32;
         let z = self.zoom;
         for sy in 0..mh {
@@ -93,7 +112,7 @@ impl Ui {
                                     best_city = true;
                                 }
                             }
-                            for &(l, imp) in &marks {
+                            for &(l, imp) in marks {
                                 if l == j {
                                     mark = Some(mark.unwrap_or(0).max(imp));
                                 }
@@ -102,7 +121,7 @@ impl Ui {
                     }
                 } else {
                     has_cursor = (x0, y0) == self.cursor;
-                    for &(l, imp) in &marks {
+                    for &(l, imp) in marks {
                         if l == i {
                             mark = Some(mark.unwrap_or(0).max(imp));
                         }
@@ -245,7 +264,14 @@ impl Ui {
                 self.screen.put_attr(mx + sx, my + sy, ch, fg, bg, attr);
             }
         }
-        // Scroll hints.
+    }
+
+    /// Arrows along the edges the map carries on past.
+    fn draw_scroll_hints(&mut self, mx: usize, my: usize, mw: usize, mh: usize) {
+        let (ox, oy) = self.view;
+        let tw = self.world.terrain.w;
+        let th = self.world.terrain.h;
+        let z = self.zoom;
         let hint = Rgb(180, 180, 180);
         let dark = Rgb(20, 20, 24);
         if ox > 0 {
@@ -268,10 +294,6 @@ impl Ui {
                 self.screen.put(mx + sx, my + mh - 1, 'v', hint, dark);
             }
         }
-        // Labels last: a scroll hint may hide behind a name, but a name
-        // must never be broken by one.
-        self.render_map_labels(mx, my, mw, mh);
-        self.render_legend(mx, my, mw, mh);
     }
 
     /// Write each sizeable realm's short name beside its capital, where it

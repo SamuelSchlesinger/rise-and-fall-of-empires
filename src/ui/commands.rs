@@ -219,12 +219,20 @@ impl Ui {
                 self.say(&format!("advanced {} years", n));
             }
             "new" | "world" => {
-                let seed = arg.parse::<u64>().unwrap_or_else(|_| {
-                    std::time::SystemTime::now()
+                // No argument means "surprise me"; an argument that is not a
+                // number is a typo, and throwing a world away over a typo is
+                // not a thing to do quietly.
+                let seed = match arg.parse::<u64>() {
+                    Ok(s) => s,
+                    Err(_) if arg.is_empty() => std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
-                        .unwrap_or(1)
-                });
+                        .unwrap_or(1),
+                    Err(_) => {
+                        self.say(&format!(":new {}: a seed is a whole number", arg));
+                        return Cmd::Done;
+                    }
+                };
                 let (w, h, d) = (
                     self.world.terrain.w,
                     self.world.terrain.h,
@@ -420,11 +428,26 @@ impl Ui {
                 let v = it.next().unwrap_or("").trim().to_string();
                 if k.is_empty() {
                     self.say(&format!("theme {}  speed {}  detail {}  zoom {}  log {}  autosave {}  mouse {}  ascii {}  follow {}", self.theme.name(), SPEEDS[self.speed_idx], self.world.detail.name(), self.zoom, self.log_min, self.autosave, self.mouse, self.ascii, self.follow));
+                } else if k == "width" || k == "height" {
+                    // The map was raised when the world was made and there is
+                    // no resizing it. Saying so beats reporting success and
+                    // changing nothing.
+                    self.say(&format!(
+                        "{} is fixed once a world exists: set it in the config file or with --{}",
+                        k, k
+                    ));
                 } else {
                     let mut c = Config::default();
                     match c.set(&k, &v) {
                         Ok(()) => {
                             self.apply_config(&c);
+                            // `apply_config` is the view's business and knows
+                            // nothing about the world, so the balance
+                            // constants are applied here rather than being
+                            // accepted and quietly dropped.
+                            for (field, value) in &c.tunes {
+                                let _ = self.world.tuning.set(field, *value);
+                            }
                             self.say(&format!("{} = {}", k, v));
                         }
                         Err(e) => self.say(&e.to_string()),

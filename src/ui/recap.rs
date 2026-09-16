@@ -42,8 +42,13 @@ fn touches(w: &World, e: usize, p: usize) -> bool {
     w.chronicle.events[e].refs.contains(&Ref::Polity(p))
 }
 
-/// `years` back from now, for the whole world or one realm.
-pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Line> {
+/// `years` back from now, for the whole world or one realm, laid out for a
+/// `width` by `height` page.
+///
+/// The height is what the digest spends: it fills the page it is given and
+/// says "there was more" when it runs out, rather than stopping at a fixed
+/// thirty lines and leaving the bottom third of a tall terminal blank.
+pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize, height: usize) -> Vec<Line> {
     let since = (w.year - years.max(1)).max(0);
     let mut out: Vec<Line> = Vec::new();
     let title = match only {
@@ -164,11 +169,14 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
         }
         sections.push(Section {
             label: "Wars",
+            // Deliberately not "began minus ended": wars that ended in this
+            // window may have started before it, and the ones still burning
+            // may have too, so the three numbers do not subtract.
             head: format!(
-                "{} began, {} ended, {} still burning.",
+                "{} began and {} ended; {} being fought now.",
                 count(begun.len(), "war"),
-                ended.len(),
-                burning.len()
+                count(ended.len(), "war"),
+                count(burning.len(), "war")
             ),
             items,
             color: Rgb(240, 110, 100),
@@ -413,8 +421,10 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize) -> Vec<Li
     // its heading, and the detail underneath shares what is left.
     let lw = 12usize;
     let body = width.saturating_sub(lw + 4).max(24);
-    const BUDGET: usize = 30;
-    let spare = BUDGET.saturating_sub(sections.len() * 2);
+    // Two rows per section go on its heading and the blank line after it;
+    // the rest is shared out between them.
+    let budget = height.saturating_sub(4).clamp(12, 80);
+    let spare = budget.saturating_sub(sections.len() * 2);
     let per_section = (spare / sections.len().max(1)).max(1);
     let mut cut = false;
     for s in sections {
@@ -490,15 +500,15 @@ mod tests {
             w.tick();
         }
         for years in [10, 50, 100, 1000] {
-            let ls = lines(&w, years, None, 100);
-            assert!(ls.len() <= 40, "{} lines for {} years", ls.len(), years);
+            let ls = lines(&w, years, None, 100, 44);
+            assert!(ls.len() <= 44, "{} lines for {} years", ls.len(), years);
             for l in &ls {
                 assert!(l.text.chars().count() <= 100, "{}", l.text);
             }
         }
         // And for one realm.
         if let Some(&p) = w.living_polities().first() {
-            let ls = lines(&w, 100, Some(p), 100);
+            let ls = lines(&w, 100, Some(p), 100, 44);
             assert!(!ls.is_empty());
             assert!(ls[0].text.contains("THE LAST 100 YEARS"));
         }
@@ -507,7 +517,7 @@ mod tests {
     #[test]
     fn an_empty_world_still_says_something() {
         let w = World::new(3, 40, 20, Detail::Low);
-        let ls = lines(&w, 50, None, 80);
+        let ls = lines(&w, 50, None, 80, 24);
         assert!(ls.len() >= 3);
     }
 }

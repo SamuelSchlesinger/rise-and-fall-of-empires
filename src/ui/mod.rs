@@ -74,6 +74,12 @@ impl Layer {
     }
     pub fn from_name(s: &str) -> Option<Layer> {
         let s = s.to_lowercase();
+        // Matching is by prefix, and every name starts with the empty
+        // string: without this, a bare `:layer` would silently switch to
+        // political instead of printing the usage line.
+        if s.is_empty() {
+            return None;
+        }
         Layer::all().into_iter().find(|l| {
             l.name().starts_with(&s)
                 || (s == "magic" && *l == Layer::Magic)
@@ -108,6 +114,9 @@ pub struct Ui {
     pub list_scroll: usize,
     pub detail_scroll: usize,
     pub chron_scroll: usize,
+    /// How far down the help page the reader has scrolled. It is longer than
+    /// a small terminal, so it has to be able to move.
+    pub help_scroll: usize,
     pub chron_min: u8,
     pub log_min: u8,
     pub ascii: bool,
@@ -189,12 +198,12 @@ pub const TOUR: &[&str] = &[
     "This is a world, and it is already running.",
     "",
     "The map is the whole of it: colours are realms, @ is a capital, # a city,",
-    "! something that happened this year. The line under the map says what the",
+    "× ruins and ! a recent event. The line under the map says what the",
     "colours mean; the panel on the right says what the cursor is sitting on.",
     "",
     "Space  pause time             Enter  open whatever is under the cursor",
     "h j k l  move the cursor      r      a recap of the last fifty years",
-    "Tab    another map layer      ?      every other key",
+    "Tab    another map layer      ?      help: every other key",
     "",
     "Nothing here needs you. Press any key and watch.",
 ];
@@ -409,6 +418,7 @@ impl Ui {
             list_scroll: 0,
             detail_scroll: 0,
             chron_scroll: 0,
+            help_scroll: 0,
             chron_min: 1,
             log_min: 1,
             ascii,
@@ -960,11 +970,15 @@ impl Ui {
             if pol.cells > 40 && pol.stability < 0.25 {
                 out.push((
                     pol.cells as f32 * 0.05 + (0.25 - pol.stability) * 40.0,
+                    // The vocabulary from `words::stability`, not a word of
+                    // its own: the sidebar, the lists and the pages all have
+                    // to call 19% the same thing. The number is on the
+                    // realm's own page; this is a headline.
                     format!(
-                        "{} teeters: stability {:.0}%, {} at war",
+                        "{} is {}{}",
                         pol.name,
-                        pol.stability * 100.0,
-                        if pol.at_war() { "and" } else { "not" }
+                        words::stability(pol.stability),
+                        if pol.at_war() { ", and at war" } else { "" }
                     ),
                     Ref::Polity(p),
                 ));
@@ -1107,4 +1121,130 @@ pub fn event_style(kind: EventKind, importance: u8) -> (Rgb, u8) {
         _ => 0,
     };
     (c, attr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::Detail;
+
+    fn world() -> World {
+        let mut w = World::new(7, 60, 30, Detail::Medium);
+        for _ in 0..150 {
+            w.tick();
+        }
+        w
+    }
+
+    fn frame(ascii: bool, mode: Mode, cols: usize, rows: usize) -> Ui {
+        let mut ui = Ui::new(world(), ascii, false, cols, rows);
+        ui.paused = true;
+        ui.selected = ui.world.living_polities().first().copied().map(Ref::Polity);
+        ui.mode = mode;
+        ui.compose();
+        ui
+    }
+
+    fn text(ui: &Ui) -> String {
+        let mut s = String::new();
+        for y in 0..ui.screen.h {
+            for x in 0..ui.screen.w {
+                s.push(ui.screen.cell(x, y).ch);
+            }
+            s.push('\n');
+        }
+        s
+    }
+
+    const MODES: [Mode; 6] = [
+        Mode::Map,
+        Mode::List,
+        Mode::Detail,
+        Mode::Chronicle,
+        Mode::Help,
+        Mode::Recap,
+    ];
+
+    /// `--ascii` is a promise about the whole frame, not about the glyphs one
+    /// widget happens to remember to convert.
+    #[test]
+    fn ascii_frames_contain_no_unicode() {
+        for mode in MODES {
+            for (cols, rows) in [(160, 45), (80, 24), (60, 20)] {
+                let ui = frame(true, mode, cols, rows);
+                let out = text(&ui);
+                if let Some(c) = out.chars().find(|c| !c.is_ascii() && *c != '\n') {
+                    panic!(
+                        "{:?} at {}x{} drew {:?} ({:#x}) in --ascii mode",
+                        mode, cols, rows, c, c as u32
+                    );
+                }
+            }
+        }
+    }
+
+    /// However small the terminal, the status line has to say how to get out.
+    #[test]
+    fn every_frame_says_how_to_leave() {
+        for mode in MODES {
+            for (cols, rows) in [(160, 45), (80, 24), (60, 20), (40, 10), (20, 5)] {
+                let ui = frame(false, mode, cols, rows);
+                let last: String = (0..ui.screen.w)
+                    .map(|x| ui.screen.cell(x, ui.screen.h - 1).ch)
+                    .collect();
+                assert!(
+                    last.contains(":q") || last.contains("returns") || last.contains("back"),
+                    "{:?} at {}x{} offers no way out: {:?}",
+                    mode,
+                    cols,
+                    rows,
+                    last.trim_end()
+                );
+            }
+        }
+    }
+
+    /// Small terminals must render at all — this is the size sweep the pty
+    /// harness cannot reach, since it cannot make a window twenty columns wide.
+    #[test]
+    fn odd_terminal_sizes_render() {
+        for mode in MODES {
+            for (cols, rows) in [(20, 5), (24, 6), (31, 9), (40, 10), (79, 23), (200, 60)] {
+                let ui = frame(false, mode, cols, rows);
+                assert_eq!(ui.screen.w, cols);
+                assert_eq!(ui.screen.h, rows);
+            }
+        }
+    }
+
+    /// The chronicle is drawn from the bottom up, and the row it stops at
+    /// must be the start of an entry: a panel opening on the tail of a
+    /// wrapped sentence reads as a fragment with no year and no subject.
+    #[test]
+    fn the_chronicle_never_opens_mid_sentence() {
+        for (cols, rows) in [(160, 45), (80, 24), (60, 20), (40, 12)] {
+            for mode in [Mode::Map, Mode::Chronicle] {
+                let ui = frame(false, mode, cols, rows);
+                let rows_seen = if mode == Mode::Map {
+                    &ui.log_rows
+                } else {
+                    &ui.chron_rows
+                };
+                let Some(&(top, _)) = rows_seen.last() else {
+                    continue;
+                };
+                let line: String = (0..ui.screen.w)
+                    .map(|x| ui.screen.cell(x, top).ch)
+                    .collect();
+                assert!(
+                    line.trim_start().starts_with(|c: char| c.is_ascii_digit()),
+                    "{:?} at {}x{} opens on a continuation line: {:?}",
+                    mode,
+                    cols,
+                    rows,
+                    line.trim_end()
+                );
+            }
+        }
+    }
 }

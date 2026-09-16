@@ -206,15 +206,37 @@ impl Config {
                 });
             }
             "speed" => self.speed = Some(v.parse().map_err(|_| bad("a number"))?),
-            "theme" => self.theme = Some(v.to_lowercase()),
+            // Checked here rather than shrugged off later: the point of the
+            // config file is that a name it does not know is reported.
+            "theme" => {
+                let name = v.to_lowercase();
+                if crate::theme::Theme::from_name(&name).is_none() {
+                    return Err(bad("default, phosphor, amber, paper or dusk"));
+                }
+                self.theme = Some(name);
+            }
             "mouse" => self.mouse = Some(parse_bool(v).ok_or_else(|| bad("on or off"))?),
             "ascii" => self.ascii = Some(parse_bool(v).ok_or_else(|| bad("on or off"))?),
             "autosave" => self.autosave = Some(v.parse().map_err(|_| bad("a number of years"))?),
             "width" => self.width = Some(v.parse().map_err(|_| bad("a number"))?),
             "height" => self.height = Some(v.parse().map_err(|_| bad("a number"))?),
-            "log" => self.log = Some(v.parse().map_err(|_| bad("0-3"))?),
+            // The ranges the template advertises, enforced. Both used to be
+            // parsed as bare numbers and silently clamped on the way in.
+            "log" => {
+                let n: u8 = v.parse().map_err(|_| bad("0-3"))?;
+                if n > 3 {
+                    return Err(bad("0-3"));
+                }
+                self.log = Some(n);
+            }
             "follow" => self.follow = Some(parse_bool(v).ok_or_else(|| bad("on or off"))?),
-            "zoom" => self.zoom = Some(v.parse().map_err(|_| bad("1-4"))?),
+            "zoom" => {
+                let n: usize = v.parse().map_err(|_| bad("1-4"))?;
+                if !(1..=4).contains(&n) {
+                    return Err(bad("1-4"));
+                }
+                self.zoom = Some(n);
+            }
             _ => match k.strip_prefix("tune.") {
                 Some(field) => {
                     let value: f64 = v.parse().map_err(|_| bad("a number"))?;
@@ -243,8 +265,20 @@ pub fn parse_key(s: &str) -> Option<Key> {
     let inner = s.strip_prefix('<')?.strip_suffix('>')?;
     let lower = inner.to_lowercase();
     if let Some(rest) = lower.strip_prefix("c-") {
-        let c = rest.chars().next()?;
-        return Some(Key::Ctrl(c));
+        // The ctrl-arrows are keys in their own right, not control
+        // characters, so they have to be recognised before the fallback
+        // below — which otherwise turns `<C-Up>` into `<C-u>`.
+        match rest {
+            "up" => return Some(Key::CtrlUp),
+            "down" => return Some(Key::CtrlDown),
+            "left" => return Some(Key::CtrlLeft),
+            "right" => return Some(Key::CtrlRight),
+            _ => {}
+        }
+        let mut it = rest.chars();
+        let c = it.next()?;
+        // `<C-foo>` is a mistake, not Ctrl+F: say so rather than guess.
+        return it.next().is_none().then_some(Key::Ctrl(c));
     }
     let shift = lower.starts_with("s-");
     let base = if shift { &lower[2..] } else { lower.as_str() };
@@ -277,7 +311,6 @@ pub fn parse_key(s: &str) -> Option<Key> {
                 Key::Right
             }
         }
-        "c-up" => Key::CtrlUp,
         "enter" | "cr" | "return" => Key::Enter,
         "esc" | "escape" => Key::Esc,
         "tab" => {
@@ -339,7 +372,7 @@ pub fn key_name(k: &Key) -> String {
 }
 
 /// The commented config file `--mkconfig` writes.
-pub const TEMPLATE: &str = "# Rise and Fall of Empires configuration\n# Settings take `key = value`; keys can be remapped vim-style with `map <from> <to>`.\n\n# detail = medium        # low | medium | high\n# speed = 5              # years per second at start (0.5 1 2 5 10 25 50 100)\n# theme = default        # default | phosphor | amber | paper | dusk\n# mouse = on\n# ascii = off\n# autosave = 100         # years between autosaves when a save file is set (0 = off)\n# width = 160\n# height = 64\n# log = 1                # minimum importance shown in the event log (0-3)\n# follow = on            # jump the cursor to major events\n# zoom = 1               # 1-4, how many world cells per character\n\n# tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning\n\n# map w k                # examples: map <S-Up> K, map <C-p> :, map ; :\n";
+pub const TEMPLATE: &str = "# Rise and Fall of Empires configuration\n# Settings take `key = value`; keys can be remapped vim-style with `map <from> <to>`.\n# Uncomment what you want. A value outside the range in the comment, or a name\n# this build does not know, is reported when the game starts.\n\n# detail = medium        # low | medium | high\n# speed = 5              # years per second at start; snapped to the nearest of\n#                        # 0.5 1 2 5 10 25 50 100\n# theme = default        # default | phosphor | amber | paper | dusk\n# mouse = on\n# ascii = off\n# autosave = 100         # years between autosaves when a save file is set (0 = off)\n# width = 160            # 40-600\n# height = 64            # 20-300\n# log = 1                # minimum importance shown in the event log (0-3)\n# follow = on            # jump the cursor to major events\n# zoom = 1               # 1-4, how many world cells per character\n\n# tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning\n\n# map w k                # examples: map <S-Up> K, map <C-p> :, map ; :\n";
 
 /// Write [`TEMPLATE`] to [`config_path`] and return where it landed.
 ///
@@ -355,4 +388,153 @@ pub fn write_template() -> Result<PathBuf, TemplateError> {
     std::fs::create_dir_all(config_dir())?;
     std::fs::write(&path, TEMPLATE)?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every key `key_name` can print must parse back to the key it named.
+    /// `:maps` prints these names, so a name that does not round-trip is one
+    /// a reader cannot copy into their config file.
+    #[test]
+    fn key_names_round_trip() {
+        let keys = [
+            Key::Char('j'),
+            Key::Char(' '),
+            Key::Char('<'),
+            Key::Ctrl('d'),
+            Key::Up,
+            Key::Down,
+            Key::Left,
+            Key::Right,
+            Key::ShiftUp,
+            Key::ShiftDown,
+            Key::ShiftLeft,
+            Key::ShiftRight,
+            Key::CtrlUp,
+            Key::CtrlDown,
+            Key::CtrlLeft,
+            Key::CtrlRight,
+            Key::PageUp,
+            Key::PageDown,
+            Key::Home,
+            Key::End,
+            Key::Enter,
+            Key::Esc,
+            Key::Tab,
+            Key::BackTab,
+            Key::Backspace,
+            Key::Delete,
+            Key::F(1),
+            Key::F(12),
+        ];
+        for k in keys {
+            let name = key_name(&k);
+            assert_eq!(
+                parse_key(&name),
+                Some(k.clone()),
+                "{:?} prints as {} which parses back as {:?}",
+                k,
+                name,
+                parse_key(&name)
+            );
+        }
+    }
+
+    #[test]
+    fn nonsense_key_names_are_refused() {
+        for s in ["<C-foo>", "<nope>", "<>", "<C->", "<S-nope>"] {
+            assert_eq!(parse_key(s), None, "{} should not parse", s);
+        }
+    }
+
+    #[test]
+    fn settings_reject_values_they_cannot_honour() {
+        let mut c = Config::default();
+        // Ranges the template advertises are enforced, not clamped later.
+        assert!(c.set("zoom", "0").is_err());
+        assert!(c.set("zoom", "5").is_err());
+        assert!(c.set("zoom", "4").is_ok());
+        assert!(c.set("log", "4").is_err());
+        assert!(c.set("log", "3").is_ok());
+        assert!(c.set("theme", "bogus").is_err());
+        assert!(c.set("theme", "Paper").is_ok());
+        assert!(c.set("detail", "sideways").is_err());
+        assert!(c.set("nosuchthing", "1").is_err());
+        assert!(c.set("tune.no_such_field", "1").is_err());
+    }
+
+    /// Every setting the template shows must be one `set` accepts, and every
+    /// value it shows must be one `set` takes. A template that does not load
+    /// is worse than none.
+    #[test]
+    fn the_template_is_a_valid_config() {
+        let mut c = Config::default();
+        let mut seen = 0;
+        for raw in TEMPLATE.lines() {
+            let line = raw.trim_start_matches('#').trim();
+            let line = line.split('#').next().unwrap_or("").trim();
+            // A line is a setting only if what comes before the `=` is one
+            // bare name; the rest of the file is prose about the file.
+            let is_setting = line.split_once('=').is_some_and(|(k, _)| {
+                let k = k.trim();
+                !k.is_empty()
+                    && k.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+            });
+            if line.is_empty() || !(is_setting || line.starts_with("map ")) {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("map ") {
+                let mut it = rest.split_whitespace();
+                assert!(
+                    it.next().and_then(parse_key).is_some(),
+                    "template map line does not parse: {}",
+                    raw
+                );
+                seen += 1;
+                continue;
+            }
+            let (k, v) = line.split_once('=').expect(raw);
+            assert!(
+                c.set(k.trim(), v.trim()).is_ok(),
+                "template line is not a setting this build accepts: {}",
+                raw
+            );
+            seen += 1;
+        }
+        assert!(seen > 10, "only {} template lines were checked", seen);
+    }
+
+    /// The README reproduces the template. It has drifted from it before —
+    /// showing settings uncommented, and ranges the parser did not enforce —
+    /// so the two are checked against each other rather than by eye.
+    #[test]
+    fn the_readme_quotes_the_template_it_has() {
+        let readme = include_str!("../README.md");
+        let mut checked = 0;
+        for l in TEMPLATE.lines() {
+            let l = l.trim_end();
+            let body = l.trim_start_matches('#').trim_start();
+            // Only the settings themselves and the remap example; the file's
+            // own header prose is the README's to word as it likes.
+            let names_a_setting = body.split_once('=').is_some_and(|(k, _)| {
+                let k = k.trim();
+                !k.is_empty()
+                    && k.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+            });
+            if !(names_a_setting || body.starts_with("map ")) {
+                continue;
+            }
+            checked += 1;
+            assert!(
+                readme.contains(l),
+                "README.md does not show this line of the config template:\n  {}",
+                l
+            );
+        }
+        assert!(checked > 10, "only {} template lines were checked", checked);
+    }
 }

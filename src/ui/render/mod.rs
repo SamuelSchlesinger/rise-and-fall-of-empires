@@ -7,6 +7,48 @@ mod sidebar;
 
 use crate::ui::*;
 
+/// The ASCII stand-in for a glyph `--ascii` must not print.
+///
+/// The map's own biome glyphs are chosen by [`biome_style`] as it draws, and
+/// the pairs below agree with it (`♣` is the forest's `T`, since that is what
+/// the help page's symbol key means by it). Anything unrecognised becomes a
+/// `?`, which is at least visibly a stand-in rather than a broken cell.
+fn ascii_glyph(ch: char) -> char {
+    match ch {
+        '─' | '━' | '╌' => '-',
+        '│' | '┃' | '╎' => '|',
+        '┌' | '┐' | '└' | '┘' | '├' | '┤' | '┬' | '┴' | '┼' => '+',
+        '█' | '▓' | '■' | '▪' => '#',
+        '▒' => '+',
+        '░' => '.',
+        '•' | '◦' => '*',
+        '·' => '|',
+        '≈' => '~',
+        '▲' | '△' | '^' => '^',
+        '♣' => 'T',
+        '♠' => 't',
+        '∩' => 'n',
+        '¤' => '%',
+        '×' => 'x',
+        '↑' => '+',
+        '↓' => '-',
+        '→' => '>',
+        '←' => '<',
+        '▶' | '▸' => '>',
+        '◀' | '◂' => '<',
+        '▼' => 'v',
+        '…' => '.',
+        '—' | '–' => '-',
+        '“' | '”' => '"',
+        '‘' | '’' => '\'',
+        '≥' => '>',
+        '≤' => '<',
+        '°' => 'o',
+        c if c.is_ascii() => c,
+        _ => '?',
+    }
+}
+
 impl Ui {
     pub(super) fn render(&mut self) {
         self.compose();
@@ -41,6 +83,18 @@ impl Ui {
             for c in self.screen.cells_mut() {
                 c.fg = t.map(c.fg, false);
                 c.bg = t.map(c.bg, true);
+            }
+        }
+        if self.ascii {
+            // A last sweep, in the same spirit as the theme pass above.
+            // Individual widgets pick ASCII glyphs as they draw, but `--ascii`
+            // is a promise about the whole frame, and box rules, separators
+            // and the help page's own symbol key were all still coming out in
+            // Unicode. Doing it here means a new widget cannot break it.
+            for c in self.screen.cells_mut() {
+                if !c.ch.is_ascii() {
+                    c.ch = ascii_glyph(c.ch);
+                }
             }
         }
     }
@@ -133,19 +187,32 @@ impl Ui {
             Mode::List => "Tab tabs  j/k  Enter open  m map  / filter  x fate  Esc back",
             Mode::Detail => "j/k scroll  letters follow links  m map  Backspace back  ] [ realms  Esc back",
             Mode::Chronicle => "j/k scroll  f importance  / filter  click a line to jump  Esc back",
-            Mode::Help => "any key to return",
+            Mode::Help => "j/k scroll  any other key returns",
             Mode::Fate => "1-6 choose  Esc cancel",
             Mode::Recap => "j/k scroll  :recap N for a longer look  Esc back",
         };
-        let mut hx = sw.saturating_sub(hints.chars().count() + 1);
+        // Progressively shorter hints, because a terminal with no room for
+        // the full set is exactly the one whose reader most needs to be told
+        // how to get out. The last is two words long and always drawn.
         let mut hints = hints;
-        if hx <= x + 2 {
-            hints = "? help  :q quit";
+        let mut hx = sw.saturating_sub(hints.chars().count() + 1);
+        for shorter in ["? help  :q quit", "? :q"] {
+            if hx > x + 2 {
+                break;
+            }
+            hints = shorter;
             hx = sw.saturating_sub(hints.chars().count() + 1);
         }
-        if hx > x + 2 {
-            self.screen.text(hx, y, hints, Rgb(170, 170, 180), bg);
+        // Still no room beside what is already there: give the hints the end
+        // of the line anyway and let the seed and the frame rate go instead.
+        // Painting over the tail of a truncated line beats leaving the reader
+        // with no way out on screen at all.
+        if hx <= x + 2 {
+            hx = sw.saturating_sub(hints.chars().count().min(sw));
         }
+        self.screen
+            .fill(Rect::new(hx, y, sw - hx, 1), ' ', Style::new(fg, bg));
+        self.screen.text(hx, y, hints, Rgb(170, 170, 180), bg);
     }
 
     /// Remember what the viewer missed while they were off the map, and
@@ -200,6 +267,40 @@ impl Ui {
     /// The newest chronicle entries, wrapped to `width` and newest first, as
     /// `(line, colour, attributes, event index)`. Stops once `need` lines are
     /// gathered. The event log and the chronicle page both draw from this.
+    /// The indent [`Ui::chronicle_lines`] puts on a wrapped continuation
+    /// line, where a first line carries the year instead.
+    pub(super) const CHRON_CONT: &'static str = "       ";
+
+    /// Whether a chronicle row is the start of an entry rather than the
+    /// middle of a wrapped one.
+    pub(super) fn chron_head(l: &str) -> bool {
+        !l.starts_with(Ui::CHRON_CONT)
+    }
+
+    /// Which of the chronicle's rows to draw in `avail` rows of panel.
+    ///
+    /// The rows come newest first and are drawn bottom-up, so the end of the
+    /// slice is the panel's top row. Cutting there at an arbitrary point
+    /// opened the panel on the tail of a wrapped sentence — no year, no
+    /// subject, half an idea. So the slice ends on the start of an entry;
+    /// and when no whole entry fits at all, it shows the newest entry from
+    /// its first line down rather than its last lines.
+    pub(super) fn chron_window(
+        rows: &[(String, Rgb, u8, usize)],
+        avail: usize,
+    ) -> &[(String, Rgb, u8, usize)] {
+        if rows.is_empty() || avail == 0 {
+            return &[];
+        }
+        let head = |i: &usize| Ui::chron_head(&rows[*i].0);
+        let top = (0..rows.len().min(avail))
+            .rev()
+            .find(head)
+            .or_else(|| (0..rows.len()).find(head))
+            .unwrap_or(rows.len() - 1);
+        &rows[(top + 1).saturating_sub(avail)..=top]
+    }
+
     fn chronicle_lines(
         &self,
         min: u8,
@@ -222,7 +323,7 @@ impl Ui {
                 let prefix = if k == 0 {
                     format!("{:>5}  ", e.year)
                 } else {
-                    "       ".to_string()
+                    Ui::CHRON_CONT.to_string()
                 };
                 lines.push((format!("{}{}", prefix, l), color, attr, idx));
             }
