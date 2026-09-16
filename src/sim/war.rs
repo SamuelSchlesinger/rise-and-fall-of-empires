@@ -7,6 +7,14 @@ use super::prose::{self, Pick};
 use super::{Role, SchoolKind, War, WarKind, World};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Years a war must have run before it can be called hopeless.
+const HOPELESS_MIN_YEARS: i32 = 2;
+/// Field strength, as a share of the other side's, below which a war is
+/// hopeless: one host is worth less than a seventh of the other.
+const HOPELESS_RATIO: f32 = 0.15;
+/// An army this small cannot prosecute a war at all.
+const NEGLIGIBLE_ARMY: f32 = 1.0;
+
 impl World {
     /// The war being fought between `p` and `q`, if any. A polity's `wars`
     /// holds only its live ones, so this reads a handful of ids rather than
@@ -302,11 +310,7 @@ pub fn resolve_wars(w: &mut World) {
         let d_front = front.get(&(d, a)).cloned().unwrap_or_default();
         let has_front = !a_front.is_empty() && !d_front.is_empty();
         if has_front {
-            let rounds = if w.detail.level() >= 1 && rng.chance(0.4) {
-                2
-            } else {
-                1
-            };
+            let rounds = if rng.chance(0.4) { 2 } else { 1 };
             for round in 0..rounds {
                 if !w.wars[wid].alive() || !w.polities[a].alive() || !w.polities[d].alive() {
                     break;
@@ -331,6 +335,20 @@ pub fn resolve_wars(w: &mut World) {
         };
         if !has_front {
             p_peace += 0.2;
+        }
+        // A war nobody can win is a war somebody stops fighting. Once one
+        // side has been hopelessly outmatched in the field for a couple of
+        // years, or the attacker has no army worth the name, peace comes
+        // quickly — otherwise a realm with two soldiers prosecutes a
+        // seven-year war against sixty-seven.
+        if years >= HOPELESS_MIN_YEARS {
+            let (sa, sd) = (strength(w, a, &[]), strength(w, d, &[]));
+            if sa.min(sd) < sa.max(sd) * HOPELESS_RATIO {
+                p_peace += 0.5;
+            }
+            if w.polities[a].army < NEGLIGIBLE_ARMY {
+                p_peace += 0.35;
+            }
         }
         let kind = w.wars[wid].kind;
         if matches!(
@@ -469,7 +487,7 @@ fn battle(
                     refs.push(Ref::City(city));
                     importance = 2;
                     taken += 1;
-                } else if w.detail.level() >= 1 && rng.chance(0.3) {
+                } else if rng.chance(0.3) {
                     text.push_str(&prose::siege_withstood(w, city));
                     w.cities[city].walls = (walls - 0.05).max(0.0);
                 }
@@ -518,13 +536,13 @@ fn battle(
             }
         }
     }
-    if w.high_detail() && importance == 1 && rng.chance(0.25) {
-        text.push_str(&prose::battle_flourish(
-            w,
-            winner,
-            loser,
-            &Pick::rolled(&rng),
-        ));
+    // The draws happen whatever the detail; only whether the line is
+    // written depends on it (see `Detail`).
+    if importance == 1 && rng.chance(0.25) {
+        let flourish = prose::battle_flourish(w, winner, loser, &Pick::rolled(&rng));
+        if w.high_detail() {
+            text.push_str(&flourish);
+        }
     }
     if quiet && importance < 2 {
         return;
@@ -602,7 +620,7 @@ fn make_peace(w: &mut World, wid: usize) {
         WarKind::Rebellion | WarKind::CivilWar | WarKind::Succession => {
             if score < -0.4 {
                 // Rebels crushed.
-                let cause = prose::rebellion_crushed(w, a, d, years);
+                let cause = prose::rebellion_crushed(w, a, d, kind, years);
                 let leader = w.polities[a].ruler;
                 politics::fall(w, a, &cause, Some(d), 2);
                 if let Some(l) = leader {

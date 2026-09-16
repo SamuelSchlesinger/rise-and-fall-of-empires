@@ -379,6 +379,212 @@ fn tiny_worlds_run_without_panicking() {
     }
 }
 
+/// Detail is a verbosity setting: it decides what gets written down and
+/// nothing else. Low, medium and high must therefore live exactly the same
+/// history from the same seed, down to the state of the RNG, and differ
+/// only in how many events came out of it.
+#[test]
+fn detail_changes_only_what_is_written() {
+    let mut worlds: Vec<World> = [Detail::Low, Detail::Medium, Detail::High]
+        .iter()
+        .map(|&d| World::new(19, 48, 24, d))
+        .collect();
+    for w in worlds.iter_mut() {
+        run(w, 200);
+    }
+    for w in &worlds[1..] {
+        assert_eq!(
+            summary_without_events(w),
+            summary_without_events(&worlds[0])
+        );
+        assert_eq!(populations(w), populations(&worlds[0]));
+        assert_eq!(w.rng.state(), worlds[0].rng.state());
+    }
+    // And the point of the setting: more detail, more written down.
+    assert!(
+        worlds[2].chronicle.len() > worlds[1].chronicle.len(),
+        "high detail should write more than medium"
+    );
+    assert!(
+        worlds[1].chronicle.len() > worlds[0].chronicle.len(),
+        "medium detail should write more than low"
+    );
+}
+
+/// [`summary`] without the event count, which detail is allowed to change.
+fn summary_without_events(w: &World) -> String {
+    let s = summary(w);
+    match s.rfind(" events ") {
+        Some(at) => s[..at].to_string(),
+        None => s,
+    }
+}
+
+/// Two living realms may not answer to the same name: "Bordering Zhi
+/// (wary), Zhi (calm)" is not a thing a reader can act on.
+#[test]
+fn living_realms_have_distinct_short_names() {
+    for seed in [4u64, 11, 42] {
+        let mut w = world(seed);
+        run(&mut w, 600);
+        let mut seen: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for p in w.living_polities() {
+            let key = w.polities[p].short.to_lowercase();
+            assert!(
+                !key.trim().is_empty(),
+                "seed {}: realm {} has no name",
+                seed,
+                p
+            );
+            if let Some(&other) = seen.get(&key) {
+                panic!(
+                    "seed {}: realms {} ({}) and {} ({}) both answer to '{}'",
+                    seed, other, w.polities[other].name, p, w.polities[p].name, key
+                );
+            }
+            seen.insert(key, p);
+        }
+        // And the full name must agree with the short one, or a ruler's
+        // title names a realm the map has never heard of.
+        for p in w.living_polities() {
+            let pol = &w.polities[p];
+            if pol.kind != crate::sim::PolityKind::Tribe {
+                assert!(
+                    pol.name.contains(&pol.short) || pol.name.contains(&pol.adj),
+                    "seed {}: '{}' is not recognisably '{}'",
+                    seed,
+                    pol.name,
+                    pol.short
+                );
+            }
+        }
+    }
+}
+
+/// A world does not call two of its centuries by the same name.
+#[test]
+fn era_names_are_unique_within_a_world() {
+    for seed in [4u64, 11, 42] {
+        let mut w = world(seed);
+        run(&mut w, 1200);
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for e in &w.eras {
+            assert!(
+                seen.insert(e.name.as_str()),
+                "seed {}: '{}' names two centuries",
+                seed,
+                e.name
+            );
+        }
+        assert!(w.eras.len() >= 10, "seed {}: too few eras to judge", seed);
+    }
+}
+
+/// Plurals every count in the chronicle should have been through: a bare
+/// "1" followed by a plural noun. "31 years" is fine; "1 years" is not.
+const PLURALS_OF_ONE: &[&str] = &[
+    "1 years",
+    "1 entries",
+    "1 battles",
+    "1 lands",
+    "1 cities",
+    "1 wars",
+    "1 realms",
+    "1 generals",
+    "1 nobles",
+    "1 schools",
+    "1 times",
+];
+
+/// Whether `text` says "one" of something in digits, with the plural noun.
+/// Only a standalone 1 counts, so "31 years" is left alone.
+fn says_one_as_a_plural(text: &str) -> Option<&'static str> {
+    let bytes = text.as_bytes();
+    PLURALS_OF_ONE.iter().copied().find(|&bad| {
+        let mut from = 0;
+        while let Some(at) = text[from..].find(bad) {
+            let at = from + at;
+            if at == 0 || !bytes[at - 1].is_ascii_digit() {
+                return true;
+            }
+            from = at + 1;
+        }
+        false
+    })
+}
+
+/// Counts in the chronicle go through `prose::count` and `prose::years`, so
+/// "1 years of fighting" and "1 entries" cannot get out.
+#[test]
+fn no_event_says_one_of_anything_in_digits() {
+    let mut w = world(23);
+    run(&mut w, 400);
+    assert!(w.chronicle.len() > 200, "too little history to judge");
+    for e in &w.chronicle.events {
+        assert!(
+            says_one_as_a_plural(&e.text).is_none(),
+            "year {}: {:?} in {:?}",
+            e.year,
+            says_one_as_a_plural(&e.text),
+            e.text
+        );
+    }
+    // The explanations are read the same way, so they are held to it too.
+    for p in w.living_polities() {
+        for f in crate::sim::explain::stability_factors(&w, p) {
+            assert!(says_one_as_a_plural(&f.text).is_none(), "{}", f.text);
+        }
+        assert!(says_one_as_a_plural(crate::sim::explain::stability_drift(&w, p)).is_none());
+    }
+    for x in 0..w.wars.len() {
+        let v = crate::sim::explain::war_view(&w, x);
+        for r in v.reasons.iter().chain(std::iter::once(&v.peace)) {
+            assert!(says_one_as_a_plural(r).is_none(), "{}", r);
+        }
+    }
+    for i in 0..w.persons.len() {
+        let s = crate::sim::explain::standing(&w, i);
+        assert!(says_one_as_a_plural(&s).is_none(), "{}", s);
+    }
+}
+
+/// A queen is not a king. A kingdom whose tongue calls its ruler an
+/// emperor still crowns a queen when the ruler is a woman.
+#[test]
+fn honorifics_follow_gender() {
+    use crate::sim::{Gender, PolityKind};
+    let mut w = world(31);
+    run(&mut w, 300);
+    assert!(!w.living_polities().is_empty());
+    for p in w.living_polities() {
+        let kind = w.polities[p].kind;
+        let (f, m) = (w.honorific(p, Gender::F), w.honorific(p, Gender::M));
+        // No realm ever calls a woman "King" or a man "Queen".
+        assert_ne!(f, "King", "realm {} titles a woman King", p);
+        assert_ne!(m, "Queen", "realm {} titles a man Queen", p);
+        assert_ne!(f, "Emperor");
+        assert_ne!(m, "Empress");
+        if kind == PolityKind::Empire {
+            assert_eq!((f.as_str(), m.as_str()), ("Empress", "Emperor"));
+        }
+        // A kingdom is a kingdom, whatever word its language reaches for.
+        if kind == PolityKind::Kingdom {
+            let lang = &w.cultures[w.polities[p].culture].lang;
+            if matches!(lang.honorific.as_str(), "Emperor" | "Empress") {
+                assert_eq!((f.as_str(), m.as_str()), ("Queen", "King"));
+            }
+        }
+    }
+    // Every honorific in the world is one a person could be addressed by.
+    for p in w.living_polities() {
+        for g in [Gender::F, Gender::M, Gender::N] {
+            let h = w.honorific(p, g);
+            assert!(!h.is_empty());
+            assert!(h.chars().next().unwrap().is_uppercase(), "{}", h);
+        }
+    }
+}
+
 /// A tiny world left running long enough for realms to rise, fall and run out
 /// of cities altogether, and then saved and reloaded.
 #[test]

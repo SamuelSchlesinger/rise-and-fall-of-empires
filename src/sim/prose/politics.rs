@@ -481,7 +481,9 @@ pub fn realm_fell(w: &World, p: usize, cause: &str, cities_built: usize) -> Stri
     text
 }
 
-/// A great realm breaks into pieces. No draw.
+/// A great realm breaks into pieces. Draws no random number: the variant
+/// comes from the year and the realm, so the loudest sentence in the
+/// chronicle is not the same one every time.
 pub fn shattered(
     w: &World,
     p: usize,
@@ -498,12 +500,28 @@ pub fn shattered(
             now, capital
         )
     };
-    format!(
-        "{} shattered, its throne too weak to hold its provinces. Its governors and generals each crowned themselves, and from its ruin rose {}. {}",
-        cap(old_name),
-        join_names(successor_names),
-        remnant
-    )
+    let risen = join_names(successor_names);
+    let opening = match Pick::stable(w.year, p).index(4) {
+        0 => format!(
+            "{} shattered, its throne too weak to hold its provinces. Its governors and generals each crowned themselves, and from its ruin rose {}.",
+            cap(old_name),
+            risen
+        ),
+        1 => format!(
+            "The provinces of {} stopped waiting for orders that never came. Within a year the tax rolls were being read out in the names of {}.",
+            old_name, risen
+        ),
+        2 => format!(
+            "{} came apart along every seam it had ever been sewn along. Where one realm had been there were now {}.",
+            cap(old_name),
+            risen
+        ),
+        _ => format!(
+            "No single blow broke {}: the garrisons simply began to obey the nearest lord instead of the furthest. Out of that habit came {}.",
+            old_name, risen
+        ),
+    };
+    format!("{} {}", opening, remnant)
 }
 
 /// A realm with nothing left to divide. No draw.

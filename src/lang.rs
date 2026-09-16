@@ -336,7 +336,10 @@ impl Language {
             ("y", "j"),
             ("j", "y"),
         ];
-        let nshift = 1 + rng.below(3);
+        // Two or three shifts, not one: a daughter language that differs in
+        // a single consonant coins names its parent could have coined, and
+        // a coastline of "Zh-" peoples is the result.
+        let nshift = 2 + rng.below(2);
         for _ in 0..nshift {
             let (from, to) = *rng.pick(shifts);
             for o in l.onsets.iter_mut() {
@@ -364,11 +367,28 @@ impl Language {
                 l.onset_w.push(rng.range(0.5, 1.5));
             }
         }
-        // Vowel shift.
-        if rng.chance(0.5) {
+        // Vowel shift. Two thirds of the time the whole vowel set goes,
+        // which is what makes a daughter tongue sound like another people
+        // rather than the same people with a lisp. The weights are rolled
+        // again with it, since they have to match the set's length.
+        // Indexed rather than `pick(pick(..))`: old compilers (MSRV 1.70)
+        // cannot infer through the nested deref coercion.
+        if rng.chance(0.65) {
+            let set: &[&str] = VOWEL_SETS[rng.below(VOWEL_SETS.len())];
+            l.vowels = set.iter().map(std::string::ToString::to_string).collect();
+            l.vowel_w = l
+                .vowels
+                .iter()
+                .map(|v| {
+                    if v.len() == 1 {
+                        rng.range(0.8, 2.5)
+                    } else {
+                        rng.range(0.2, 0.6)
+                    }
+                })
+                .collect();
+        } else {
             let i = rng.below(l.vowels.len());
-            // Indexed rather than `pick(pick(..))`: old compilers (MSRV 1.70) cannot
-            // infer through the nested deref coercion. Same single draw as `pick`.
             let set: &[&str] = VOWEL_SETS[rng.below(VOWEL_SETS.len())];
             let nv = *rng.pick(set);
             l.vowels[i] = nv.to_string();

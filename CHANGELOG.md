@@ -74,6 +74,25 @@ history of the work that led to the first release.
 
 ### Changed
 
+- *World-changing.* **A pass over balance, names and the loudest sentences.**
+  Retuned fragmentation, decadence, expansion, sieges, truces, prophecy
+  deadlines and the two disaster chances against the `--stats` harness; the
+  empire threshold now uses the world's settled land as a *cap* rather than a
+  floor, so the chiefdom-kingdom-empire ladder is climbable again; a waning
+  school of thought is absorbed into a larger school of its own kind instead
+  of lingering for ever; and development keeps raising the capacity of land
+  and cities past its old ceiling, so the late centuries mean denser realms
+  rather than a world that stops at year 900. Two living realms can no longer
+  share a name, a republic goes by its capital's name as its own prose
+  already assumed, daughter languages drift further from their parents, and
+  hopeless wars now end. Realm shatterings, city fires, arcane catastrophes
+  and the conquest epitaph have four phrasings each, and a world never calls
+  two of its centuries by the same name.
+- *World-changing.* **`--detail` no longer changes the simulation.** It is a
+  verbosity setting: low, medium and high produce exactly the same world from
+  the same seed and differ only in the least important event the chronicle
+  keeps and in the extra line of colour high adds. Every draw that detail used
+  to gate now happens at every level.
 - *World-changing.* **Balance and tuning.** Every balance-relevant number now
   lives in `sim::tuning::Tuning` instead of as a literal at its use site, and
   the values were retuned against the `--stats` harness so that great powers
@@ -128,6 +147,23 @@ history of the work that led to the first release.
 
 ### Fixed
 
+- **A great realm's epitaph undercounts its cities** ("ruled 599 lands and one
+  city"): the peak land figure was paired with a death-time city count.
+  `Polity` now tracks `peak_cities`, saved in version 2 of the `poly` section.
+- **A queen is not a king.** A kingdom whose language calls its ruler an
+  emperor used to title a woman "King".
+- **"1 years of fighting", "1 years".** Every count in the simulation's prose
+  and explanations goes through `prose::count` / `prose::years`.
+- **A realm known by two names.** A republic was named after its capital while
+  its short name stayed a coined word, so "Consul X of Tessek" never matched
+  "the Republic of Ilmen". A realm's short name is now whatever proper noun
+  its full name is built around, and no two living realms share one.
+- **Hopeless wars.** A realm with an army of two could prosecute a seven-year
+  war against sixty-seven. Once one side has been outmatched in the field for
+  a couple of years, or the attacker's army is negligible, peace comes
+  quickly — and "the rising" is now said only of a rising, not of a civil war
+  or a disputed succession.
+- **A lost relic** no longer offers `[h]` to open a holder that is not there.
 - **Terminal restoration.** The saved termios state is kept in sound statics,
   the panic hook can read it without allocating or blocking, and SIGINT,
   SIGTERM and SIGHUP restore the terminal instead of leaving it in raw mode on

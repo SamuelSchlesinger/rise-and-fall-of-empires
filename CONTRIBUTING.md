@@ -50,6 +50,24 @@ In practice:
   That is what makes split borrows of the world safe; do not "fix" it.
 - Never use wall-clock time, the environment or the terminal size as an input
   to the simulation. The UI may read them; `sim` may not.
+- **`Detail` is a verbosity setting, not a simulation setting.** `low`,
+  `medium` and `high` must produce the same world from the same seed, so
+  detail may decide only what is *written*: `Detail::min_importance` filters
+  what `World::log` keeps, and `World::high_detail` may add a flourish to a
+  sentence that has already been composed. It may never gate a draw, skip a
+  phase, or change a probability. Where a flourish needs a random choice, make
+  the draw unconditionally and let detail decide whether to append the text:
+
+  ```rust
+  // Right: the same draw at every level, a longer sentence at high.
+  let flourish = prose::battle_flourish(w, winner, loser, &Pick::rolled(&rng));
+  if w.high_detail() {
+      text.push_str(&flourish);
+  }
+  ```
+
+  `tests::detail_changes_only_what_is_written` runs the three levels side by
+  side and compares the populations, the aggregates and the RNG state.
 
 Any change that alters the random draws — a new `rng` call, a reordered loop, a
 retuned constant — **changes every seed's history**. That is allowed, and

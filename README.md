@@ -85,6 +85,21 @@ combine with `--layer` and `--cols/--rows`), `-V, --version`, `-h, --help`.
 An option it does not recognise, or a value it cannot read, is an error with
 a message and exit status 2 — nothing is silently ignored or clamped.
 
+### Detail levels
+
+`--detail low|medium|high` (and `:detail`, and the `D` key) decides **how much
+of the history gets written down, and nothing else.** All three levels produce
+exactly the same world from the same seed: the same realms rise, the same wars
+are fought, the same people are born. What changes is the chronicle. Low keeps
+only what an age would remember (importance 2 and 3), medium keeps the ordinary
+run of events as well, and high keeps the trivia too and adds a closing line of
+colour to a battle or a ruler's death. A 500-year world at seed 11 is 830
+entries at low, 2,634 at medium and 2,744 at high — with identical populations,
+realms, cities and cultures at the end of it.
+
+Medium is the default. Low is worth having when you want the chronicle to read
+as a list of turning points rather than a diary.
+
 ## Playing
 
 Keys follow vim conventions: a count before a motion repeats it (`12j`,

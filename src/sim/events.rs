@@ -179,10 +179,6 @@ pub fn disasters(w: &mut World) {
 }
 
 pub fn notables(w: &mut World) {
-    let rate = w.detail_rate();
-    if rate <= 0.0 {
-        return;
-    }
     let rng = w.rng.clone();
     let tn = w.tuning;
     for p in w.living_polities() {
@@ -190,7 +186,7 @@ pub fn notables(w: &mut World) {
         if pol.cells < 6 {
             continue;
         }
-        if !rng.chance(tn.notable_chance * rate) {
+        if !rng.chance(tn.notable_chance) {
             continue;
         }
         let at_war = pol.at_war();
@@ -452,7 +448,7 @@ pub fn notables(w: &mut World) {
             let name = per.full_name();
             w.persons[i].died = Some(w.year);
             w.persons[i].death = "died.".to_string();
-            if w.persons[i].renown >= 2.0 && w.detail.level() >= 1 {
+            if w.persons[i].renown >= 2.0 {
                 let text = prose::notable_died(&name, role.name(), age as i32);
                 w.log(0, EventKind::Death, &[Ref::Person(i)], None, text);
             }
@@ -524,6 +520,38 @@ pub fn wonders(w: &mut World) {
     }
 }
 
+/// An era name the world has not used before.
+///
+/// One draw picks a starting point in the family, and the rest of the
+/// family is then walked in order for a name that is free — so a world
+/// exhausts its "Warring Age", "Age of Blood" and "Century of Spears"
+/// before any of them comes round again, and when even those are gone the
+/// century is numbered: "the Second Warring Age".
+fn unique_era_name(w: &World, options: &[String], pick: &Pick) -> String {
+    let taken = |n: &str| w.eras.iter().any(|e| e.name == n);
+    let start = pick.index(options.len());
+    for k in 0..options.len() {
+        let cand = &options[(start + k) % options.len()];
+        if !taken(cand) {
+            return cand.clone();
+        }
+    }
+    let base = &options[start];
+    let stem = base.strip_prefix("the ").unwrap_or(base);
+    for n in 2..=12 {
+        let cand = format!("the {} {}", prose::cap(&prose::ordinal_word(n)), stem);
+        if !taken(&cand) {
+            return cand;
+        }
+    }
+    base.clone()
+}
+
+/// The strings of a family of era names, for [`unique_era_name`].
+fn family(names: &[&str]) -> Vec<String> {
+    names.iter().map(|s| (*s).to_string()).collect()
+}
+
 pub fn eras(w: &mut World) {
     if w.year % 100 != 0 || w.year == 0 {
         return;
@@ -544,46 +572,57 @@ pub fn eras(w: &mut World) {
     let schools = w.century_schools;
     let born = w.century_polities_born;
     let realms = living.len().max(4) as u32;
-    let warlike = wars > realms * 2 && wars > 15;
+    // What counts as a warlike or a quiet century is relative to how many
+    // realms there are to quarrel: forty wars among sixty realms is a quiet
+    // age, and among ten realms it is carnage.
+    let warlike = wars > realms * 2 && wars > 30;
     let peaceful = wars * 2 < realms;
-    // One realm holding better than a third of the world's land names the age.
+    // One realm holding better than a third of the world's land names the
+    // age. The tests of what a century was about are tried in order, and a
+    // crop of new schools of thought is the weakest of them: a century that
+    // was also a century of war, of collapse or of new crowns is named for
+    // those instead, and it takes a good many schools to speak for a
+    // hundred years on its own.
     let hegemon = biggest.filter(|&p| share > 0.35 && w.polities[p].kind == PolityKind::Empire);
-    let (name, desc) = if let Some(p) = hegemon {
+    let pick = Pick::rolled(&rng);
+    let flavour = Pick::stable(w.year, (wars + schools + born) as usize);
+    let (names, desc) = if let Some(p) = hegemon {
         (
-            prose::era_name_empire(w, p, &Pick::rolled(&rng)),
-            prose::era_of_empire(w, p),
+            prose::era_names_empire(w, p),
+            prose::era_of_empire(w, p, &flavour),
         )
     } else if pop_change < -0.15 {
         (
-            prose::era_name_dying(&Pick::rolled(&rng)),
-            prose::era_of_dying(pop_change < -0.3),
+            family(prose::ERA_NAMES_DYING),
+            prose::era_of_dying(pop_change < -0.3, &flavour),
         )
     } else if warlike {
         (
-            prose::era_name_war(&Pick::rolled(&rng)),
-            prose::era_of_war(wars),
+            family(prose::ERA_NAMES_WAR),
+            prose::era_of_war(wars, &flavour),
         )
-    } else if schools >= 4 {
+    } else if born * 2 > realms && born >= 8 {
         (
-            prose::era_name_schools(&Pick::rolled(&rng)),
-            prose::era_of_schools(schools),
+            family(prose::ERA_NAMES_CROWNS),
+            prose::era_of_crowns(born, &flavour),
         )
-    } else if born > realms {
+    } else if schools >= 7 {
         (
-            prose::era_name_crowns(&Pick::rolled(&rng)),
-            prose::era_of_crowns(born),
+            family(prose::ERA_NAMES_SCHOOLS),
+            prose::era_of_schools(schools, &flavour),
         )
     } else if peaceful && pop_change > 0.05 {
         (
-            prose::era_name_peace(&Pick::rolled(&rng)),
-            prose::era_of_peace().to_string(),
+            family(prose::ERA_NAMES_PEACE),
+            prose::era_of_peace(&flavour),
         )
     } else {
         (
-            prose::era_name_ordinary(&Pick::rolled(&rng)),
-            prose::era_ordinary().to_string(),
+            family(prose::ERA_NAMES_ORDINARY),
+            prose::era_ordinary(&flavour),
         )
     };
+    let name = unique_era_name(w, &names, &pick);
     let text = prose::era_named(&name, &desc);
     w.log(3, EventKind::Era, &[], None, text);
     w.eras.push(Era {

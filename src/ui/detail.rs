@@ -1571,11 +1571,13 @@ fn relic_page(
         out.push(line(l, FG, 0));
     }
     out.push(line("", FG, 0));
-    out.push(line(
-        format!("[h] Held by   {}", w.artifact_holder_name(a)),
-        LINK,
-        0,
-    ));
+    // A lost relic has no holder to open, so it is not offered as a link.
+    let held = w.artifact_holder_name(a);
+    if ar.holder == crate::sim::Holder::Lost {
+        out.push(line(format!("    Held by   {}", held), FG, 0));
+    } else {
+        out.push(line(format!("[h] Held by   {}", held), LINK, 0));
+    }
     if let Some(m) = ar.maker {
         out.push(line(
             format!("[K] Maker     {}", w.persons[m].full_name()),

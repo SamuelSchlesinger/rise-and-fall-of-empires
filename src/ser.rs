@@ -61,9 +61,9 @@ pub trait Io {
     /// True when this traversal is filling the world in from bytes.
     fn reading(&self) -> bool;
     /// The record version of the section being visited: the current one when
-    /// writing, the one the file carries when reading. No record needs it
-    /// yet — the first one to gain a field will (see the module docs).
-    #[allow(dead_code)]
+    /// writing, the one the file carries when reading. `polity` reads it to
+    /// tell a version-1 file, which has no `peak_cities`, from a later one
+    /// (see the module docs).
     fn ver(&self) -> u32;
     /// How many bytes are still to come, or `usize::MAX` when writing. Every
     /// record costs at least one byte on the wire, so this is the ceiling on
@@ -702,6 +702,11 @@ fn polity<S: Io>(s: &mut S, p: &mut Polity) {
     vec_usize(s, &mut p.cities);
     s.usize(&mut p.peak_cells);
     s.i32(&mut p.peak_year);
+    if s.ver() >= 2 {
+        // Absent from version-1 files: a realm loaded from one keeps 0
+        // until `recompute` sees how many cities it holds.
+        s.usize(&mut p.peak_cities);
+    }
     s.f32(&mut p.stability);
     s.f32(&mut p.treasury);
     s.f32(&mut p.army);
@@ -758,6 +763,7 @@ fn blank_polity() -> Polity {
         pop: 0.0,
         cities: Vec::new(),
         peak_cells: 0,
+        peak_cities: 0,
         peak_year: 0,
         stability: 0.5,
         treasury: 0.0,
@@ -1219,7 +1225,7 @@ sections! {
     T_RACE = b"race", 1, races;
     T_CULT = b"cult", 1, cultures;
     T_CITY = b"city", 1, cities;
-    T_POLY = b"poly", 1, polities;
+    T_POLY = b"poly", 2, polities;
     T_PERS = b"pers", 1, persons;
     T_SCHL = b"schl", 1, schools;
     T_WARS = b"wars", 1, wars;

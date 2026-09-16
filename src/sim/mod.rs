@@ -26,8 +26,14 @@ fn io_err(what: &str, e: &std::io::Error) -> crate::ser::SaveError {
     crate::ser::SaveError::Io(std::io::Error::new(e.kind(), format!("{}: {}", what, e)))
 }
 
-/// How much the simulation bothers to remember. Lower detail drops the
-/// small events and the optional narrative flourishes, and runs faster.
+/// How much of what happens gets written down.
+///
+/// Detail is a *verbosity* setting and nothing more: it decides the least
+/// important event the chronicle keeps ([`Detail::min_importance`]) and
+/// whether the optional flourishes are appended to a sentence. It never
+/// gates a draw from the world's RNG and never changes what happens, so
+/// the same seed gives the same history at low, medium and high — only the
+/// telling of it is longer or shorter. `src/tests.rs` checks that.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Detail {
     Low,
@@ -44,7 +50,7 @@ impl Detail {
             Detail::High => "high",
         }
     }
-    /// 0, 1 or 2: how much optional work a subsystem should do.
+    /// 0, 1 or 2: how talkative this level is.
     pub fn level(self) -> u8 {
         match self {
             Detail::Low => 0,
@@ -60,13 +66,11 @@ impl Detail {
             Detail::High => Detail::Low,
         }
     }
-    /// Minimum importance of events that get written at this level.
+    /// Minimum importance of events that get written at this level: the
+    /// more talkative the level, the smaller the events it keeps. This is
+    /// the whole of what detail does to the world.
     pub fn min_importance(self) -> u8 {
-        match self {
-            Detail::Low => 2,
-            Detail::Medium => 1,
-            Detail::High => 0,
-        }
+        2 - self.level()
     }
 }
 
@@ -241,6 +245,10 @@ pub struct Polity {
     pub pop: f64,
     pub cities: Vec<usize>,
     pub peak_cells: usize,
+    /// The most cities the realm ever held at once. Kept beside
+    /// [`Polity::peak_cells`] so that an epitaph pairs a peak with a peak
+    /// rather than a high-water mark with a death-bed count.
+    pub peak_cities: usize,
     pub peak_year: i32,
     pub stability: f32,
     pub treasury: f32,
@@ -863,18 +871,11 @@ impl World {
         Some(self.chronicle.push(ev))
     }
 
-    /// Whether the world is running at the highest detail.
+    /// Whether the world is running at the highest detail, which is the one
+    /// thing detail may be asked: whether to append a flourish to a
+    /// sentence. It must never gate a draw from the RNG (see [`Detail`]).
     pub fn high_detail(&self) -> bool {
         self.detail == Detail::High
-    }
-
-    /// Multiplier for optional narrative activity (notables, flourishes).
-    pub fn detail_rate(&self) -> f64 {
-        match self.detail {
-            Detail::Low => 0.0,
-            Detail::Medium => 0.4,
-            Detail::High => 1.0,
-        }
     }
 
     // -- naming helpers -----------------------------------------------------
@@ -922,13 +923,15 @@ impl World {
             PolityKind::Theocracy => "Hierarch".to_string(),
             PolityKind::Magocracy => "Archmage".to_string(),
             PolityKind::Horde => "Khan".to_string(),
+            // A kingdom does not style its ruler an emperor, whatever the
+            // tongue's own word is, so an imperial honorific falls back to
+            // the royal one — by gender, not blindly to "King".
             PolityKind::Kingdom => match (lang.honorific.as_str(), g) {
                 ("King", Gender::F) => "Queen".to_string(),
                 ("Queen", Gender::M) => "King".to_string(),
                 ("Prince", Gender::F) => "Princess".to_string(),
-                ("Emperor", Gender::F) => "Empress".to_string(),
-                ("Empress", Gender::M) => "Emperor".to_string(),
-                ("Emperor", _) | ("Empress", _) => "King".to_string(),
+                ("Emperor" | "Empress", Gender::F) => "Queen".to_string(),
+                ("Emperor" | "Empress", _) => "King".to_string(),
                 (h, _) => h.to_string(),
             },
         }
@@ -1211,6 +1214,9 @@ impl World {
             if p.cells > p.peak_cells {
                 p.peak_cells = p.cells;
                 p.peak_year = self.year;
+            }
+            if p.cities.len() > p.peak_cities {
+                p.peak_cities = p.cities.len();
             }
         }
         for c in self.cultures.iter_mut() {
