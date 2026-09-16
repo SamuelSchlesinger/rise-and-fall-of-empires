@@ -239,7 +239,11 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
             let cu = &w.cultures[c];
             out.push((format!("the {}", cu.plural), cu.color));
             out.push((
-                format!("a {} people · {} lands", w.races[cu.race].adj, cu.cells),
+                format!(
+                    "{} people · {} lands",
+                    crate::sim::prose::a(&w.races[cu.race].adj),
+                    cu.cells
+                ),
                 FG,
             ));
             out.push((format!("speak {}", cu.lang.name), DIMC));
@@ -735,17 +739,19 @@ fn realm_page(
 ) {
     let pol = &w.polities[p];
     out.push(line(pol.name.to_uppercase(), pol.color, BOLD));
+    // The article has to agree with whatever word comes next, which is an
+    // adjective coined from a language that knows nothing about English.
     let status = match pol.fell {
         Some(y) => format!(
-            "A {} that {}; founded {}, fell {}.",
-            pol.kind.name(),
+            "{} that {}; founded {}, fell {}.",
+            crate::sim::prose::cap_a(pol.kind.name()),
             pol.fall_cause.trim_end_matches('.'),
             pol.founded,
             y
         ),
         None => format!(
-            "A {} {} founded in year {}.",
-            w.cultures[pol.culture].adj,
+            "{} {} founded in year {}.",
+            crate::sim::prose::cap_a(&w.cultures[pol.culture].adj),
             pol.kind.name(),
             pol.founded
         ),
@@ -1109,8 +1115,10 @@ fn people_page(w: &World, cu: usize, r: Ref, width: usize, w2: usize, out: &mut 
     ));
     let race = &w.races[c.race];
     let mut desc = format!(
-        "A {} people. They speak {} and call themselves {}.",
-        race.adj, c.lang.name, c.name
+        "{} people. They speak {} and call themselves {}.",
+        crate::sim::prose::cap_a(&race.adj),
+        c.lang.name,
+        c.name
     );
     if let Some(y) = c.extinct {
         desc.push_str(&format!(" They vanished from the world in year {}.", y));
@@ -1558,8 +1566,8 @@ fn relic_page(
     let ar = &w.artifacts[a];
     out.push(line(ar.name.to_uppercase(), Rgb(255, 200, 80), BOLD));
     let mut desc = format!(
-        "A {}, {}. Made in year {}",
-        ar.kind.word().to_lowercase(),
+        "{}, {}. Made in year {}",
+        crate::sim::prose::cap_a(&ar.kind.word().to_lowercase()),
         ar.description,
         ar.made
     );
@@ -1604,7 +1612,11 @@ fn relic_page(
 fn place_page(w: &World, f: usize, r: Ref, width: usize, w2: usize, out: &mut Vec<Line>) {
     let ft = &w.terrain.features[f];
     out.push(line(ft.display().to_uppercase(), LINK, BOLD));
-    let mut desc = format!("A {} of {} cells.", ft.kind.label(), ft.cells.len());
+    let mut desc = format!(
+        "{} of {} cells.",
+        crate::sim::prose::cap_a(ft.kind.label()),
+        ft.cells.len()
+    );
     if let Some(c) = ft.named_by {
         desc.push_str(&format!(" Named by the {}.", w.cultures[c].plural));
     }

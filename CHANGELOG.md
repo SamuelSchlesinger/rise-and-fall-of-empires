@@ -163,6 +163,9 @@ history of the work that led to the first release.
   a couple of years, or the attacker's army is negligible, peace comes
   quickly — and "the rising" is now said only of a rising, not of a civil war
   or a disputed succession.
+- **"A Ighoi kingdom".** The realm, people, relic and place pages wrote a bare
+  "A" in front of a word coined by a language that knows nothing about
+  English; they go through `prose::a` / `prose::cap_a` now.
 - **A lost relic** no longer offers `[h]` to open a holder that is not there.
 - **Terminal restoration.** The saved termios state is kept in sound statics,
   the panic hook can read it without allocating or blocking, and SIGINT,
