@@ -82,6 +82,39 @@ fn round_trip_is_exact() {
     assert_eq!(texts(&loaded), texts(&w));
 }
 
+/// `peak_cities` is the first field a section has gained since the chunked
+/// format was written, so it is also the first exercise of the rule: the
+/// `poly` section is at version 2, the value round-trips, and a version-1
+/// file — which cannot carry it — still loads and simply starts at zero.
+#[test]
+fn a_realms_peak_cities_survive_a_round_trip() {
+    let mut w = small_world(120);
+    let peaks: Vec<usize> = w.polities.iter().map(|p| p.peak_cities).collect();
+    assert!(
+        peaks.iter().any(|&n| n > 1),
+        "no realm ever held two cities, so this proves nothing"
+    );
+    for p in &w.polities {
+        assert!(
+            p.peak_cities >= p.cities.len(),
+            "{} holds more cities than it ever peaked at",
+            p.name
+        );
+    }
+    let bytes = ser::save(&mut w);
+    let loaded = ser::load(&bytes).expect("loads");
+    let back: Vec<usize> = loaded.polities.iter().map(|p| p.peak_cities).collect();
+    assert_eq!(back, peaks);
+    // The section says version 2, which is what tells an older build to skip
+    // the chunk rather than read the new field as something else.
+    let ver = chunks(&bytes)
+        .into_iter()
+        .find(|c| &c.0 == b"poly")
+        .expect("the realms are in there")
+        .1;
+    assert_eq!(ver, 2);
+}
+
 #[test]
 fn header_is_what_we_say_it_is() {
     let mut w = small_world(5);

@@ -267,14 +267,30 @@ pub fn capital_lost(w: &World, loser: usize) -> String {
     )
 }
 
-/// Why a realm ended: it was conquered.
+/// Why a realm ended: it was conquered. Draws no random number; the
+/// variant comes from the year and the realm that fell, so the commonest
+/// epitaph in the chronicle is not the same sentence every century.
 pub fn conquered_by(w: &World, loser: usize, winner: usize, city: &str) -> String {
-    format!(
-        "{} conquered by {} with the fall of {}.",
-        realm_was(w, loser),
-        realm_full(w, winner),
-        city
-    )
+    let was = realm_was(w, loser);
+    let by = realm_full(w, winner);
+    match Pick::stable(w.year, loser).index(4) {
+        0 => format!("{} conquered by {} with the fall of {}.", was, by, city),
+        1 => format!(
+            "{} swallowed by {} when {} fell and there was nothing behind it.",
+            was, by, city
+        ),
+        2 => format!(
+            "{} ended at {}: {} took the city, and the realm went with it.",
+            was, city, by
+        ),
+        _ => format!(
+            "{} extinguished by {}; {} was the last of {} cities to fall.",
+            was,
+            by,
+            city,
+            realm_its(w, loser)
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,14 +302,50 @@ pub fn war_ended(war_name: &str, result: &str) -> String {
     format!("{} {}", cap(war_name), result)
 }
 
-/// A rising put down. `cause` phrasing for the rebel realm's end.
-pub fn rebellion_crushed(w: &World, rebel: usize, defender: usize, years_fought: i32) -> String {
-    format!(
-        "{} crushed by {} after {} of fighting.",
-        realm_was(w, rebel),
-        realm_full(w, defender),
-        years(years_fought.max(1) as i64)
-    )
+/// What an internal war's attacker is called, so that a civil war is not
+/// described as a rising and a war of succession is not described as
+/// either. Only these three kinds have an insurgent side at all; every
+/// other war is between two realms that each have a right to be there.
+pub fn insurgent(kind: WarKind) -> &'static str {
+    match kind {
+        WarKind::Rebellion => "the rising",
+        WarKind::CivilWar => "the rebels",
+        WarKind::Succession => "the claimant",
+        _ => "the attacker",
+    }
+}
+
+/// A rising, a civil war or a claim put down. `cause` phrasing for the
+/// defeated realm's end.
+pub fn rebellion_crushed(
+    w: &World,
+    rebel: usize,
+    defender: usize,
+    kind: WarKind,
+    years_fought: i32,
+) -> String {
+    let span = years(years_fought.max(1) as i64);
+    let by = realm_full(w, defender);
+    match kind {
+        WarKind::Rebellion => format!(
+            "{} crushed by {} after {} of fighting.",
+            realm_was(w, rebel),
+            by,
+            span
+        ),
+        WarKind::CivilWar => format!(
+            "{} put down by {} after {} of fighting between one half of the realm and the other.",
+            realm_was(w, rebel),
+            by,
+            span
+        ),
+        _ => format!(
+            "{} beaten by {} after {} of war, and the claim died with it.",
+            realm_was(w, rebel),
+            by,
+            span
+        ),
+    }
 }
 
 /// The rebels won and took the old realm's seat.

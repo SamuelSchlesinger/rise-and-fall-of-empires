@@ -175,9 +175,9 @@ impl Ui {
         let filter = self.chron_filter.to_lowercase();
         let title = if filter.is_empty() {
             format!(
-                " The Chronicle of the World — importance ≥{} ({} entries) ",
+                " The Chronicle of the World — importance ≥{} ({}) ",
                 self.chron_min,
-                self.world.chronicle.len()
+                crate::sim::prose::count(self.world.chronicle.len() as i64, "entry")
             )
         } else {
             format!(

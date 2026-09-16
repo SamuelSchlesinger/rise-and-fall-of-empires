@@ -363,7 +363,17 @@ fn found_schools(w: &mut World, rooted: &[u32]) {
             * (mana as f64 - 0.25).max(0.0)
             * (0.5 + vals.mysticism as f64 * 2.0)
             + tn.school_found_open_rate * (0.5 + vals.openness as f64);
-        let p = base * (w.cities[c].pop as f64 / 3.0).min(2.0) / (1.0 + existing as f64);
+        // A realm with an established doctrine is poor soil: a new teaching
+        // has the temples, the schools and the crown against it from the
+        // first day. Without this every realm ends up with a school of its
+        // own and the world fills with them.
+        let established = polity
+            .map(|p| w.polities[p].school.is_some())
+            .unwrap_or(false);
+        let mut p = base * (w.cities[c].pop as f64 / 3.0).min(2.0) / (1.0 + existing as f64);
+        if established {
+            p *= 0.2;
+        }
         if !rng.chance(p) {
             continue;
         }
@@ -520,7 +530,9 @@ fn tick_schools(w: &mut World) {
                             .unwrap_or_default();
                         let mut text = prose::school_persecuted(w, p, s, state, &cap);
                         let mut refs = vec![Ref::School(s), Ref::Polity(p), Ref::School(state)];
-                        if w.high_detail() && rng.chance(0.5) {
+                        // A martyr is a person in the world, not a flourish,
+                        // so this happens at every detail level.
+                        if rng.chance(0.5) {
                             let culture = w.polities[p].culture;
                             let m = w.new_person(
                                 culture,
@@ -551,7 +563,10 @@ fn tick_schools(w: &mut World) {
         }
         // Schism.
         let age = w.year - w.schools[s].founded;
-        if age > tn.school_schism_min_age && adherents >= 2 && rng.chance(tn.school_schism_chance) {
+        if age > tn.school_schism_min_age
+            && adherents >= tn.school_schism_min_adherents
+            && rng.chance(tn.school_schism_chance)
+        {
             let home = w.schools[s].home_city;
             // Pick a city in an adherent polity other than the home.
             let candidates: Vec<usize> = influence
@@ -591,22 +606,24 @@ fn tick_schools(w: &mut World) {
                 w.log(2, EventKind::Magic, &refs, Some(w.cities[city].cell), text);
             }
         }
-        // Extinction.
+        // Waning, absorption and extinction. `fading_since` is the year the
+        // school last stood above `school_absorb_threshold` anywhere, which
+        // is the clock both the absorption and the extinction rules read.
         let maxv = influence.iter().map(|(_, v)| *v).fold(0.0, f32::max);
-        if maxv < tn.school_extinction_threshold && age > 10 {
-            match w.schools[s].fading_since {
-                None => w.schools[s].fading_since = Some(w.year),
-                Some(y) if w.year - y > tn.school_fading_years => {
-                    w.schools[s].extinct = Some(w.year);
-                    for p in 0..w.polities.len() {
-                        if w.polities[p].school == Some(s) {
-                            w.polities[p].school = None;
-                        }
+        if maxv < tn.school_absorb_threshold && age > 10 {
+            let waning_since = *w.schools[s].fading_since.get_or_insert(w.year);
+            let waned = w.year - waning_since;
+            if maxv < tn.school_extinction_threshold && waned > tn.school_fading_years {
+                w.schools[s].extinct = Some(w.year);
+                for p in 0..w.polities.len() {
+                    if w.polities[p].school == Some(s) {
+                        w.polities[p].school = None;
                     }
-                    let text = prose::school_forgotten(w, s, age);
-                    w.log(1, EventKind::Magic, &[Ref::School(s)], None, text);
                 }
-                _ => {}
+                let text = prose::school_forgotten(w, s, age);
+                w.log(1, EventKind::Magic, &[Ref::School(s)], None, text);
+            } else if waned > tn.school_absorb_years {
+                absorb(w, s, waned);
             }
         } else {
             w.schools[s].fading_since = None;
@@ -631,6 +648,88 @@ fn tick_schools(w: &mut World) {
             }
         }
     }
+}
+
+/// Take a waning school into a larger school of its own kind, if one holds
+/// its home ground.
+///
+/// Schools are founded far more often than they die, so without this the
+/// world ends up with a hundred half-forgotten orders nobody follows. A
+/// faith that has faded everywhere while a bigger faith owns the city that
+/// raised it does not linger for centuries: its remaining followers are
+/// counted among the larger one, which is what the influence merge says.
+fn absorb(w: &mut World, s: usize, waned: i32) {
+    let kind = w.schools[s].kind;
+    // Home ground: the realm holding the city where it began, and failing
+    // that the realm where it still has most of what it has left. Both are
+    // tried, in that order, because a school whose birthplace has changed
+    // hands is not thereby immortal.
+    let mut grounds: Vec<usize> = Vec::new();
+    if let Some(g) = w.cities[w.schools[s].home_city].polity {
+        if w.polities[g].alive() {
+            grounds.push(g);
+        }
+    }
+    // Wherever its last followers are counts as its ground too: a teaching
+    // driven out of the city that raised it is not thereby safe for ever.
+    for &g in w.schools[s].influence.keys() {
+        if w.polities[g].alive() && !grounds.contains(&g) {
+            grounds.push(g);
+        }
+    }
+    if grounds.is_empty() {
+        return;
+    }
+    let mine = w.schools[s].total_influence();
+    let mut best: Option<(usize, f32)> = None;
+    for t in 0..w.schools.len() {
+        if t == s || !w.schools[t].alive() || w.schools[t].kind != kind {
+            continue;
+        }
+        let here = grounds
+            .iter()
+            .map(|g| w.schools[t].influence.get(g).copied().unwrap_or(0.0))
+            .fold(0.0, f32::max);
+        let total = w.schools[t].total_influence();
+        if here < w.tuning.school_absorb_dominance || total <= mine {
+            continue;
+        }
+        // Ties break on the lower id, so the choice does not depend on the
+        // order the map happens to hand things back in.
+        if best.map_or(true, |(_, bt)| total > bt) {
+            best = Some((t, total));
+        }
+    }
+    let into = match best {
+        Some((t, _)) => t,
+        None => return,
+    };
+    let home = grounds[0];
+    let moved: Vec<(usize, f32)> = w.schools[s]
+        .influence
+        .iter()
+        .map(|(&p, &v)| (p, v))
+        .collect();
+    for (p, v) in moved {
+        let e = w.schools[into].influence.entry(p).or_insert(0.0);
+        *e = (*e + v * 0.5).min(1.0);
+    }
+    for p in 0..w.polities.len() {
+        if w.polities[p].school == Some(s) {
+            w.polities[p].school = Some(into);
+            w.schools[into].state_of.push(p);
+        }
+    }
+    w.schools[s].extinct = Some(w.year);
+    w.schools[s].influence.clear();
+    let text = prose::school_absorbed(w, s, into, waned);
+    w.log(
+        1,
+        EventKind::Magic,
+        &[Ref::School(s), Ref::School(into), Ref::Polity(home)],
+        w.capital_cell(home),
+        text,
+    );
 }
 
 /// A realm whose state school has died out has no state school.

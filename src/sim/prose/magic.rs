@@ -173,6 +173,39 @@ pub fn schism(
     )
 }
 
+/// A waning school is taken into a larger one of its own kind. Draws no
+/// random number: the variant comes from the year and the school.
+pub fn school_absorbed(w: &World, s: usize, into: usize, waned: i32) -> String {
+    let gone = school_full(w, s);
+    let big = school_full(w, into);
+    let follower = w.schools[s].kind.follower();
+    match Pick::stable(w.year, s).index(4) {
+        0 => format!(
+            "{} had kept no congregation of its own for {}. Its last {} were counted among {}, and the two were one teaching thereafter.",
+            cap(&gone),
+            years(waned.max(1) as i64),
+            follower,
+            big
+        ),
+        1 => format!(
+            "The remaining {} of {} gave up the distinction and went over to {}, whose houses had long outnumbered theirs.",
+            follower,
+            school_the(w, s),
+            big
+        ),
+        2 => format!(
+            "After {} of decline, {} was absorbed into {}; its books were copied into the greater library and its name kept only as a chapter heading.",
+            years(waned.max(1) as i64),
+            gone,
+            big
+        ),
+        _ => format!(
+            "Nobody disputed the merger of {} into {}: there was nothing left to dispute it with.",
+            gone, big
+        ),
+    }
+}
+
 /// A school with no followers left.
 pub fn school_forgotten(w: &World, s: usize, age: i32) -> String {
     format!(
@@ -183,7 +216,9 @@ pub fn school_forgotten(w: &World, s: usize, age: i32) -> String {
     )
 }
 
-/// An arcane order unmakes the city that raised it. No draw.
+/// An arcane order unmakes the city that raised it. Draws no random
+/// number: the variant comes from the year and the school, so the loudest
+/// thing that can happen to a city does not read the same way twice.
 pub fn catastrophe(
     w: &World,
     s: usize,
@@ -191,14 +226,29 @@ pub fn catastrophe(
     blight_name: &str,
     dead_thousands: i32,
 ) -> String {
-    format!(
-        "The adepts of {} in {} reached too far. In a single night the city was unmade: a great working went wrong, and where {} had stood there was only glass, ash and silence. The land for miles about was blighted and is called {}. Some {} thousand souls perished.",
-        school_the(w, s),
-        city_name,
-        city_name,
-        blight_name,
-        dead_thousands.max(1)
-    )
+    let order = school_the(w, s);
+    let dead = dead_thousands.max(1);
+    match Pick::stable(w.year, s).index(4) {
+        0 => format!(
+            "The adepts of {} in {} reached too far. In a single night the city was unmade: a great working went wrong, and where {} had stood there was only glass, ash and silence. The land for miles about was blighted and is called {}. Some {} thousand souls perished.",
+            order, city_name, city_name, blight_name, dead
+        ),
+        1 => format!(
+            "Something the adepts of {} were holding in {} got away from them. The light over the city was seen from the coast; by morning there was no city, only a plain of glass that is called {}. Some {} thousand souls perished.",
+            order, city_name, blight_name, dead
+        ),
+        2 => format!(
+            "{} kept its deepest working under {}, and the working ended. The ground took the towers, the towers took the streets, and what was left is named {}. Some {} thousand souls perished, and no body was ever recovered.",
+            cap(&order),
+            city_name,
+            blight_name,
+            dead
+        ),
+        _ => format!(
+            "For three days the adepts of {} would not say what they had begun beneath {}. On the fourth the question stopped mattering: the city went out like a lamp, and the blighted country about it is called {}. Some {} thousand souls perished.",
+            order, city_name, blight_name, dead
+        ),
+    }
 }
 
 /// The ruler who died with the unmade city.

@@ -10,75 +10,150 @@ use std::collections::BTreeMap;
 // Naming
 // ---------------------------------------------------------------------------
 
+/// How many fresh coinings to try before qualifying a name that a living
+/// realm already answers to.
+const NAME_TRIES: usize = 6;
+
+/// A realm's full name together with the short name it goes by.
+///
+/// The two must agree: "Consul Aro of Tessek" is nonsense if the realm is
+/// "the Republic of Ilmen", so whenever the full name is built around the
+/// capital's name, that becomes the short name too.
+pub struct Naming {
+    /// The full name: "the Republic of Ilmen".
+    pub name: String,
+    /// The one word the realm is known by afterwards: "Ilmen".
+    pub short: String,
+}
+
+/// Coin a full name for a realm of this kind.
+///
+/// `capital_name` is passed only when the capital's name is free for the
+/// realm to take as its own short name; otherwise the variants built
+/// around a capital fall back to `short`, so no two living realms end up
+/// sharing a name. Draws exactly once, as it always did.
 pub fn make_name(
     w: &World,
     kind: PolityKind,
     short: &str,
     culture: usize,
     capital_name: Option<&str>,
-) -> String {
+) -> Naming {
     let lang = &w.cultures[culture].lang;
     let adj = lang.adjective(short);
     let rng = &w.rng;
     let cap = capital_name.unwrap_or(short);
-    match kind {
-        PolityKind::Tribe => format!("the {}", lang.demonym(short)),
-        PolityKind::Chiefdom => rng
-            .pick(&[
-                format!("the {} Chiefdom", adj),
-                format!("the {} Clans", adj),
-                format!("the Chiefdom of {}", cap),
-            ])
-            .clone(),
-        PolityKind::Kingdom => rng
-            .pick(&[
-                format!("the Kingdom of {}", short),
-                format!("the {} Kingdom", adj),
-                format!("the Realm of {}", short),
-                format!("the Crown of {}", short),
-                format!("the Kingdom of {}", cap),
-            ])
-            .clone(),
-        PolityKind::Empire => rng
-            .pick(&[
-                format!("the {} Empire", adj),
-                format!("the Empire of {}", short),
-                format!("the {} Dominion", adj),
-                format!("the {} Imperium", adj),
-            ])
-            .clone(),
-        PolityKind::Republic => rng
-            .pick(&[
-                format!("the Republic of {}", cap),
-                format!("the {} League", adj),
-                format!("the Free Cities of {}", short),
-                format!("the {} Commonwealth", adj),
-            ])
-            .clone(),
-        PolityKind::Theocracy => rng
-            .pick(&[
-                format!("the Holy {} Realm", adj),
-                format!("the {} Theocracy", adj),
-                format!("the See of {}", cap),
-                format!("the Blessed Land of {}", short),
-            ])
-            .clone(),
-        PolityKind::Magocracy => rng
-            .pick(&[
-                format!("the {} Conclave", adj),
-                format!("the Magisterium of {}", short),
-                format!("the {} Covenant", adj),
-                format!("the Towers of {}", cap),
-            ])
-            .clone(),
-        PolityKind::Horde => rng
-            .pick(&[
-                format!("the {} Horde", adj),
-                format!("the Horde of {}", short),
-                format!("the {} Riders", adj),
-            ])
-            .clone(),
+    // Each variant carries the proper noun it is built around, which is the
+    // short name the realm will go by.
+    let variants: Vec<(String, &str)> = match kind {
+        PolityKind::Tribe => vec![(format!("the {}", lang.demonym(short)), short)],
+        PolityKind::Chiefdom => vec![
+            (format!("the {} Chiefdom", adj), short),
+            (format!("the {} Clans", adj), short),
+            (format!("the Chiefdom of {}", cap), cap),
+        ],
+        PolityKind::Kingdom => vec![
+            (format!("the Kingdom of {}", short), short),
+            (format!("the {} Kingdom", adj), short),
+            (format!("the Realm of {}", short), short),
+            (format!("the Crown of {}", short), short),
+            (format!("the Kingdom of {}", cap), cap),
+        ],
+        PolityKind::Empire => vec![
+            (format!("the {} Empire", adj), short),
+            (format!("the Empire of {}", short), short),
+            (format!("the {} Dominion", adj), short),
+            (format!("the {} Imperium", adj), short),
+        ],
+        PolityKind::Republic => vec![
+            (format!("the Republic of {}", cap), cap),
+            (format!("the {} League", adj), short),
+            (format!("the Free Cities of {}", short), short),
+            (format!("the {} Commonwealth", adj), short),
+        ],
+        PolityKind::Theocracy => vec![
+            (format!("the Holy {} Realm", adj), short),
+            (format!("the {} Theocracy", adj), short),
+            (format!("the See of {}", cap), cap),
+            (format!("the Blessed Land of {}", short), short),
+        ],
+        PolityKind::Magocracy => vec![
+            (format!("the {} Conclave", adj), short),
+            (format!("the Magisterium of {}", short), short),
+            (format!("the {} Covenant", adj), short),
+            (format!("the Towers of {}", cap), cap),
+        ],
+        PolityKind::Horde => vec![
+            (format!("the {} Horde", adj), short),
+            (format!("the Horde of {}", short), short),
+            (format!("the {} Riders", adj), short),
+        ],
+    };
+    let chosen = rng.pick(&variants);
+    Naming {
+        name: chosen.0.clone(),
+        short: chosen.1.to_string(),
     }
+}
+
+/// Whether a living realm other than `except` already answers to `s`.
+pub fn short_taken(w: &World, s: &str, except: Option<usize>) -> bool {
+    let lower = s.to_lowercase();
+    w.polities
+        .iter()
+        .any(|p| p.alive() && Some(p.id) != except && p.short.to_lowercase() == lower)
+}
+
+/// A coined short name no living realm is using. Tries fresh coinings
+/// first, since a new word is better than a qualified one, and only then
+/// marks the name to tell the two realms apart.
+fn unique_short(w: &World, culture: usize, except: Option<usize>) -> String {
+    let mut s = w.cultures[culture].lang.name(&w.rng);
+    for _ in 0..NAME_TRIES {
+        if !short_taken(w, &s, except) {
+            return s;
+        }
+        s = w.cultures[culture].lang.name(&w.rng);
+    }
+    distinguish(w, &s, except)
+}
+
+/// `"Zhi"` when there is already a Zhi becomes `"New Zhi"`, then
+/// `"Upper Zhi"`, and at the very last `"Zhi the Second"`.
+fn distinguish(w: &World, base: &str, except: Option<usize>) -> String {
+    const MARKS: [&str; 6] = ["New", "Upper", "Lower", "Greater", "Lesser", "Far"];
+    if !short_taken(w, base, except) {
+        return base.to_string();
+    }
+    for m in MARKS {
+        let cand = format!("{} {}", m, base);
+        if !short_taken(w, &cand, except) {
+            return cand;
+        }
+    }
+    for n in 2..=12 {
+        let cand = format!("{} the {}", base, prose::cap(&prose::ordinal_word(n)));
+        if !short_taken(w, &cand, except) {
+            return cand;
+        }
+    }
+    base.to_string()
+}
+
+/// Name a realm: a full name and a short name that agree with each other
+/// and that no other living realm is already using. `short` must itself be
+/// free, which is what [`unique_short`] and the realm's existing name are.
+fn name_realm(
+    w: &World,
+    p: usize,
+    kind: PolityKind,
+    short: &str,
+    culture: usize,
+    capital_name: Option<&str>,
+) -> Naming {
+    // Only offer the capital's name if the realm could take it as its own.
+    let cap = capital_name.filter(|c| !short_taken(w, c, Some(p)));
+    make_name(w, kind, short, culture, cap)
 }
 
 fn dynasty_name(w: &World, culture: usize, founder_name: &str) -> String {
@@ -133,17 +208,16 @@ pub fn claim(w: &mut World, p: usize, cell: usize) {
     if let Some(c) = w.cells[cell].city {
         w.cities[c].polity = Some(p);
     }
-    // Discover and name features.
-    if w.detail.level() >= 1 {
-        if let Some(f) = w.terrain.feature_at(cell) {
-            if w.terrain.features[f].name.is_none() {
-                w.feature_name(f, Some(p));
-            }
+    // Discover and name features. Naming coins a word, so it happens at
+    // every detail level or the three would not share a history.
+    if let Some(f) = w.terrain.feature_at(cell) {
+        if w.terrain.features[f].name.is_none() {
+            w.feature_name(f, Some(p));
         }
-        if let Some(r) = w.terrain.river_at(cell) {
-            if w.terrain.features[r].name.is_none() {
-                w.feature_name(r, Some(p));
-            }
+    }
+    if let Some(r) = w.terrain.river_at(cell) {
+        if w.terrain.features[r].name.is_none() {
+            w.feature_name(r, Some(p));
         }
     }
 }
@@ -159,7 +233,7 @@ pub fn found_polity(
     leader: Option<usize>,
 ) -> usize {
     let id = w.polities.len();
-    let short = w.cultures[culture].lang.name(&w.rng);
+    let short = unique_short(w, culture, None);
     let color = w.polity_color(id);
     let ruler = match leader {
         Some(l) => l,
@@ -198,6 +272,7 @@ pub fn found_polity(
         pop: 0.0,
         cities: Vec::new(),
         peak_cells: 0,
+        peak_cities: 0,
         peak_year: w.year,
         stability: 0.6,
         treasury: 5.0,
@@ -240,7 +315,12 @@ pub fn found_polity(
     };
     w.polities[id].capital = Some(cap);
     let cap_name = w.cities[cap].name.clone();
-    w.polities[id].name = make_name(w, kind, &short, culture, Some(&cap_name));
+    let naming = name_realm(w, id, kind, &short, culture, Some(&cap_name));
+    let adj = w.cultures[culture].lang.adjective(&naming.short);
+    let pol = &mut w.polities[id];
+    pol.name = naming.name;
+    pol.short = naming.short;
+    pol.adj = adj;
     w.century_polities_born += 1;
     id
 }
@@ -574,10 +654,13 @@ pub fn found_cities(w: &mut World) {
                 continue;
             }
             let t = &w.terrain;
+            // Crowded country recommends itself: a dense interior is as good
+            // a place for a town as an empty coast, which is what keeps new
+            // towns coming once the shorelines are full.
             let s = t.fertility[i]
                 + t.river[i] as f32 * 0.3
                 + if t.coast[i] { 0.5 } else { 0.0 }
-                + w.cells[i].pop * 0.3
+                + w.cells[i].pop * tn.city_site_pop_weight
                 + t.minerals[i] * 0.3;
             if s > best_s {
                 best_s = s;
@@ -713,7 +796,12 @@ pub fn economy(w: &mut World) {
         if nb_dev > pol.dev {
             ddev += (nb_dev - pol.dev) * 0.004 * (0.5 + vals.openness);
         }
-        pol.dev = (pol.dev + ddev).clamp(0.0, 3.0);
+        // Past the soft cap a realm still improves, only slowly, so the
+        // late centuries mean denser land rather than a world that stops.
+        if pol.dev > tn.dev_soft_cap && ddev > 0.0 {
+            ddev *= tn.dev_overflow_rate;
+        }
+        pol.dev = (pol.dev + ddev).clamp(0.0, tn.dev_hard_cap);
         // Seafaring.
         if !pol.seafaring {
             let coastal_city = cities.iter().any(|&c| w.terrain.coast[w.cities[c].cell]);
@@ -857,8 +945,10 @@ pub fn ruler_dies(w: &mut World, p: usize, cause: &str, importance: u8) {
     w.persons[r].death = cause.to_string();
     let length = w.year - w.polities[p].reign_start;
     let mut text = prose::ruler_died(w, p, r, cause, length);
+    // The draw happens whatever the detail: only whether the extra line is
+    // written depends on it (see `Detail`).
+    let flourish = prose::ruler_death_flourish(w, p, r, length, &Pick::rolled(&w.rng.clone()));
     if w.high_detail() {
-        let flourish = prose::ruler_death_flourish(w, p, r, length, &Pick::rolled(&w.rng.clone()));
         text.push_str(&flourish);
     }
     w.log(
@@ -1215,12 +1305,14 @@ pub fn fall(
         1
     }
     .max(importance_floor);
+    // The epitaph pairs the peak land with the peak number of cities: a
+    // realm that lost everything before it died still ruled what it ruled.
     let cities_built = w
         .cities
         .iter()
         .filter(|c| c.founder == Some(p))
         .count()
-        .max(w.polities[p].cities.len());
+        .max(w.polities[p].peak_cities);
     let text = prose::realm_fell(w, p, cause, cities_built);
     let mut refs = vec![Ref::Polity(p)];
     if let Some(a) = absorbed_by {
@@ -1347,7 +1439,14 @@ fn kind_changes(w: &mut World, p: usize) {
         | PolityKind::Republic
         | PolityKind::Theocracy
         | PolityKind::Magocracy => {
-            let empire_cells = (w.tuning.empire_min_cells as usize).max(w.stats.owned_cells / 8);
+            // The share of the world a realm must hold caps the bar rather
+            // than raising it: `empire_min_cells` is the ambition, and on a
+            // map too small or too crowded for it the bar comes down to
+            // whoever is genuinely dominant. Without the cap the constant
+            // was dead by mid-game and nothing ever became an empire.
+            let share = w.stats.owned_cells / w.tuning.empire_share_divisor.max(1) as usize;
+            let floor = (w.tuning.empire_min_cells / 3).max(1) as usize;
+            let empire_cells = (w.tuning.empire_min_cells as usize).min(share.max(floor));
             if pol.cells >= empire_cells
                 && (pol.conquered >= 2 || pol.cultures_within >= 3)
                 && pol.stability > 0.4
@@ -1384,12 +1483,19 @@ fn kind_changes(w: &mut World, p: usize) {
     }
     let short = w.polities[p].short.clone();
     let cap_name = w.polities[p].capital.map(|c| w.cities[c].name.clone());
-    let name = make_name(w, new, &short, culture, cap_name.as_deref());
+    let naming = name_realm(w, p, new, &short, culture, cap_name.as_deref());
+    let name = naming.name.clone();
+    let new_short = naming.short;
+    let new_adj = w.cultures[culture].lang.adjective(&new_short);
     let oldname = w.polities[p].name.clone();
     let ruler = w.ruler_short(p);
     let pol = &mut w.polities[p];
     pol.kind = new;
     pol.name = name.clone();
+    // A name built around the capital renames the realm itself, so that
+    // "Consul Aro of Ilmen" and "the Republic of Ilmen" are the same place.
+    pol.short = new_short;
+    pol.adj = new_adj;
     pol.last_kind_change = w.year;
     if new.has_dynasty() && pol.dynasty.is_empty() {
         if let Some(r) = pol.ruler {
@@ -1484,8 +1590,12 @@ fn fragment(w: &mut World, p: usize) {
         let short = pol.short.clone();
         let culture = pol.culture;
         let cap_name = w.cities[capital].name.clone();
-        let name = make_name(w, PolityKind::Kingdom, &short, culture, Some(&cap_name));
-        w.polities[p].name = name;
+        let naming = name_realm(w, p, PolityKind::Kingdom, &short, culture, Some(&cap_name));
+        let adj = w.cultures[culture].lang.adjective(&naming.short);
+        let pol = &mut w.polities[p];
+        pol.name = naming.name;
+        pol.short = naming.short;
+        pol.adj = adj;
     }
     let names: Vec<String> = successors
         .iter()

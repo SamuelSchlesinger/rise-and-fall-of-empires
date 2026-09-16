@@ -114,7 +114,10 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         &mut out,
         -pol.exhaustion * tn.stability_exhaustion_weight,
         if pol.at_war() {
-            format!("war-weary after {} years of fighting", war_years(w, p))
+            format!(
+                "war-weary after {} of fighting",
+                crate::sim::prose::years(war_years(w, p) as i64)
+            )
         } else {
             "still weary from the last war".into()
         },
@@ -300,10 +303,9 @@ pub fn war_view(w: &World, wid: usize) -> WarView {
     if ga != gd {
         let (who, n) = if ga > gd { (&an, ga) } else { (&dn, gd) };
         reasons.push(format!(
-            "{} has {} general{} of note to command",
+            "{} has {} of note to command",
             who,
-            n,
-            if n == 1 { "" } else { "s" }
+            crate::sim::prose::count(n as i64, "general")
         ));
     }
     if (da - dd).abs() > 0.08 {
@@ -333,11 +335,10 @@ pub fn war_view(w: &World, wid: usize) -> WarView {
             (&dn, -war.cells_taken)
         };
         reasons.push(format!(
-            "{} battle{} fought, and {} holds {} lands it did not hold before",
-            war.battles,
-            if war.battles == 1 { "" } else { "s" },
+            "{} fought, and {} holds {} it did not hold before",
+            crate::sim::prose::count(war.battles as i64, "battle"),
             who,
-            n
+            crate::sim::prose::count(n as i64, "land")
         ));
     }
 
@@ -356,7 +357,8 @@ pub fn war_view(w: &World, wid: usize) -> WarView {
     let peace = if rebellion {
         if war.score < -0.4 {
             format!(
-                "Were it settled now, the rising would be crushed and {} would be no more.",
+                "Were it settled now, {} would be beaten and {} would be no more.",
+                crate::sim::prose::insurgent(war.kind),
                 w.polities[a].name
             )
         } else if war.score > 0.8 && w.polities[a].cells > w.polities[d].cells {

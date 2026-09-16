@@ -114,6 +114,9 @@ pub struct Tuning {
     pub city_spacing_y: i32,
     /// Site score a candidate must beat before a town is built there.
     pub city_site_min_score: f32,
+    /// How much the people already living on a cell recommend it as a site,
+    /// so that a crowded interior can raise a town and not only the coast.
+    pub city_site_pop_weight: f32,
 
     // -- economy -----------------------------------------------------------
     /// Tax taken from a city's people and prosperity each year.
@@ -134,6 +137,13 @@ pub struct Tuning {
     pub army_build_rate_war: f32,
     /// Base yearly gain in development.
     pub dev_growth_rate: f32,
+    /// Development past which further gains slow to a crawl.
+    pub dev_soft_cap: f32,
+    /// Development a realm can never pass, however long it lives.
+    pub dev_hard_cap: f32,
+    /// What development growth is multiplied by above the soft cap, so that
+    /// a long-settled realm keeps improving without running away.
+    pub dev_overflow_rate: f32,
     /// How fast a city's prosperity moves toward its target.
     pub prosperity_adjust_rate: f32,
 
@@ -222,6 +232,13 @@ pub struct Tuning {
     pub fragment_cooldown: i32,
     /// Cells a kingdom needs before it can call itself an empire.
     pub empire_min_cells: i32,
+    /// The settled world divided by this is a *cap* on that threshold, not a
+    /// floor: where nobody could ever reach [`Tuning::empire_min_cells`] the
+    /// bar comes down to whoever is genuinely dominant, so the
+    /// chiefdom-kingdom-empire ladder stays climbable at every map size. A
+    /// third of `empire_min_cells` is the floor, so an almost empty young
+    /// world does not crown empires over a handful of villages.
+    pub empire_share_divisor: i32,
 
     // -- diplomacy and war -------------------------------------------------
     /// Base yearly growth of tension along a border.
@@ -302,12 +319,24 @@ pub struct Tuning {
     pub school_schism_chance: f64,
     /// A school must be this old before it can split.
     pub school_schism_min_age: i32,
+    /// A school needs this many realms following it before a schism is worth
+    /// the name. Without a floor, every new splinter is immediately large
+    /// enough to splinter again and the world fills with sects.
+    pub school_schism_min_adherents: usize,
     /// Chance an adherent realm follows the dissenters in a schism.
     pub school_schism_share: f64,
     /// Influence below which a school is considered to be fading.
     pub school_extinction_threshold: f32,
     /// Years a school may fade before its teachings are forgotten.
     pub school_fading_years: i32,
+    /// Highest influence anywhere at which a school counts as waning, and so
+    /// may be taken into a larger school of its own kind.
+    pub school_absorb_threshold: f32,
+    /// Years a school must have been waning before it can be absorbed.
+    pub school_absorb_years: i32,
+    /// Influence a larger school of the same kind needs over the waning
+    /// school's home realm before it can absorb it.
+    pub school_absorb_dominance: f32,
     /// Yearly chance an arcane state doctrine unmakes the city that raised it.
     pub arcane_catastrophe_chance: f64,
 
@@ -384,14 +413,14 @@ impl Default for Tuning {
             pop_starve_rate: 0.08,
             pop_overshoot_rate: 0.15,
             cell_capacity_factor: 5.0,
-            cell_capacity_dev_weight: 0.7,
+            cell_capacity_dev_weight: 1.1,
             migration_pressure: 0.55,
             migration_min_pop: 0.25,
             migration_share: 0.08,
             migration_fill_ratio: 0.7,
             city_growth_rate: 0.03,
             city_capacity_factor: 1.6,
-            city_capacity_dev_weight: 1.2,
+            city_capacity_dev_weight: 1.7,
             city_overshoot_rate: 0.1,
             assimilation_rate: 0.004,
             culture_shift_chance: 0.03,
@@ -403,16 +432,16 @@ impl Default for Tuning {
             polity_form_radius_x: 5,
             polity_form_radius_y: 3,
             expand_budget_base: 0.7,
-            expand_budget_pop_factor: 0.14,
+            expand_budget_pop_factor: 0.19,
             expand_ambition_base: 0.5,
             expand_stability_base: 0.4,
             expand_war_penalty: 0.5,
             expand_max_claims: 6,
             expand_terrain_cost_weight: 0.35,
-            expand_distance_penalty: 1.5,
+            expand_distance_penalty: 1.2,
             expand_distance_cost_weight: 0.5,
             expand_reach_base: 9.0,
-            expand_reach_dev_weight: 14.0,
+            expand_reach_dev_weight: 19.0,
             expand_fertility_weight: 1.4,
             // cities
             city_found_chance: 0.2,
@@ -420,6 +449,7 @@ impl Default for Tuning {
             city_spacing_x: 5,
             city_spacing_y: 3,
             city_site_min_score: 0.6,
+            city_site_pop_weight: 0.75,
             // economy
             city_income_factor: 0.08,
             cell_income_factor: 0.012,
@@ -430,6 +460,9 @@ impl Default for Tuning {
             army_build_rate_peace: 0.12,
             army_build_rate_war: 0.25,
             dev_growth_rate: 0.0022,
+            dev_soft_cap: 3.0,
+            dev_hard_cap: 5.0,
+            dev_overflow_rate: 0.3,
             prosperity_adjust_rate: 0.08,
             // stability and decadence
             admin_capacity_base: 16.0,
@@ -441,14 +474,14 @@ impl Default for Tuning {
             stability_overextension_weight: 0.25,
             stability_foreign_weight: 0.2,
             stability_exhaustion_weight: 0.3,
-            stability_decadence_weight: 0.35,
+            stability_decadence_weight: 0.44,
             stability_adjust_rate: 0.1,
             exhaustion_war_growth: 0.035,
             exhaustion_peace_decay: 0.03,
-            decadence_growth: 0.0045,
+            decadence_growth: 0.006,
             decadence_wisdom_relief: 0.002,
             decadence_empire_mult: 1.6,
-            decadence_min_age: 70,
+            decadence_min_age: 50,
             // rulers
             ruler_death_base: 0.0015,
             ruler_death_age_weight: 0.09,
@@ -457,7 +490,7 @@ impl Default for Tuning {
             ruler_assassination_unrest_weight: 0.02,
             succession_smooth_base: 0.6,
             succession_smooth_stability_weight: 0.35,
-            notable_chance: 0.02,
+            notable_chance: 0.008,
             notable_death_base: 0.004,
             notable_death_age_weight: 0.08,
             general_usurp_chance: 0.06,
@@ -469,11 +502,12 @@ impl Default for Tuning {
             revolt_cooldown: 8,
             split_min_share: 0.12,
             split_max_share: 0.35,
-            fragment_stability_threshold: 0.15,
+            fragment_stability_threshold: 0.2,
             fragment_min_cells: 45,
-            fragment_chance: 0.3,
+            fragment_chance: 0.35,
             fragment_cooldown: 5,
             empire_min_cells: 180,
+            empire_share_divisor: 8,
             // diplomacy and war
             tension_base_growth: 0.008,
             tension_foreign_culture: 0.02,
@@ -485,16 +519,16 @@ impl Default for Tuning {
             tension_decay: 0.015,
             tension_decay_mult: 0.97,
             war_declare_threshold: 0.65,
-            war_declare_chance: 0.08,
+            war_declare_chance: 0.06,
             war_declare_ambition_weight: 0.15,
             war_boldness_base: 0.7,
-            truce_years_min: 8,
+            truce_years_min: 14,
             truce_years_random: 12,
             battle_swing_base: 0.07,
             battle_swing_margin_weight: 0.2,
             battle_loser_casualties: 0.08,
             battle_winner_casualties: 0.04,
-            siege_capture_chance: 0.5,
+            siege_capture_chance: 0.62,
             city_sack_chance: 0.3,
             city_sack_cruelty_weight: 0.5,
             ruler_battle_death_loser: 0.035,
@@ -503,21 +537,25 @@ impl Default for Tuning {
             peace_exhaustion_weight: 0.15,
             peace_min_years: 3,
             // schools of thought
-            school_found_mana_rate: 0.0015,
-            school_found_open_rate: 0.0004,
+            school_found_mana_rate: 0.00035,
+            school_found_open_rate: 0.00008,
             school_influence_growth: 0.007,
             school_state_bonus: 0.012,
             school_influence_decay: 0.009,
             school_spread_rate: 0.002,
-            school_adopt_chance: 0.04,
+            school_adopt_chance: 0.05,
             school_convert_chance: 0.05,
             school_persecution_chance: 0.06,
             school_schism_chance: 0.006,
             school_schism_min_age: 60,
+            school_schism_min_adherents: 4,
             school_schism_share: 0.45,
             school_extinction_threshold: 0.04,
             school_fading_years: 15,
-            arcane_catastrophe_chance: 0.0012,
+            school_absorb_threshold: 0.85,
+            school_absorb_years: 10,
+            school_absorb_dominance: 0.15,
+            arcane_catastrophe_chance: 0.0005,
             // disasters
             plague_chance: 0.0035,
             plague_cell_deaths: 0.12,
@@ -526,15 +564,15 @@ impl Default for Tuning {
             famine_chance: 0.006,
             famine_cell_survival: 0.88,
             famine_city_survival: 0.9,
-            city_disaster_chance: 0.0025,
+            city_disaster_chance: 0.0015,
             city_disaster_survival: 0.8,
             omen_chance: 0.006,
             wonder_chance: 0.03,
             wonder_min_treasury: 120.0,
             wonder_cost: 100.0,
             // stories
-            prophecy_deadline_min: 60,
-            prophecy_deadline_range: 140,
+            prophecy_deadline_min: 90,
+            prophecy_deadline_range: 200,
             artifact_found_chance: 0.004,
             artifact_lost_chance: 0.0015,
             artifact_per_polity_cap: 2,
@@ -604,6 +642,7 @@ impl Tuning {
             "city_spacing_x" => self.city_spacing_x = v as i32,
             "city_spacing_y" => self.city_spacing_y = v as i32,
             "city_site_min_score" => self.city_site_min_score = v as f32,
+            "city_site_pop_weight" => self.city_site_pop_weight = v as f32,
             // economy
             "city_income_factor" => self.city_income_factor = v as f32,
             "cell_income_factor" => self.cell_income_factor = v as f32,
@@ -614,6 +653,9 @@ impl Tuning {
             "army_build_rate_peace" => self.army_build_rate_peace = v as f32,
             "army_build_rate_war" => self.army_build_rate_war = v as f32,
             "dev_growth_rate" => self.dev_growth_rate = v as f32,
+            "dev_soft_cap" => self.dev_soft_cap = v as f32,
+            "dev_hard_cap" => self.dev_hard_cap = v as f32,
+            "dev_overflow_rate" => self.dev_overflow_rate = v as f32,
             "prosperity_adjust_rate" => self.prosperity_adjust_rate = v as f32,
             // stability and decadence
             "admin_capacity_base" => self.admin_capacity_base = v as f32,
@@ -662,6 +704,7 @@ impl Tuning {
             "fragment_chance" => self.fragment_chance = v,
             "fragment_cooldown" => self.fragment_cooldown = v as i32,
             "empire_min_cells" => self.empire_min_cells = v as i32,
+            "empire_share_divisor" => self.empire_share_divisor = (v.max(1.0)) as i32,
             // diplomacy and war
             "tension_base_growth" => self.tension_base_growth = v as f32,
             "tension_foreign_culture" => self.tension_foreign_culture = v as f32,
@@ -702,9 +745,15 @@ impl Tuning {
             "school_persecution_chance" => self.school_persecution_chance = v,
             "school_schism_chance" => self.school_schism_chance = v,
             "school_schism_min_age" => self.school_schism_min_age = v as i32,
+            "school_schism_min_adherents" => {
+                self.school_schism_min_adherents = v.max(2.0) as usize;
+            }
             "school_schism_share" => self.school_schism_share = v,
             "school_extinction_threshold" => self.school_extinction_threshold = v as f32,
             "school_fading_years" => self.school_fading_years = v as i32,
+            "school_absorb_threshold" => self.school_absorb_threshold = v as f32,
+            "school_absorb_years" => self.school_absorb_years = v as i32,
+            "school_absorb_dominance" => self.school_absorb_dominance = v as f32,
             "arcane_catastrophe_chance" => self.arcane_catastrophe_chance = v,
             // disasters
             "plague_chance" => self.plague_chance = v,

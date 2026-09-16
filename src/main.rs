@@ -72,7 +72,13 @@ empires — rise and fall of empires
   -s, --seed N          world seed (default: the current time)
   -w, --width W         map width, 40-600 (default 160)
       --height H        map height, 20-300 (default 64)
-  -d, --detail L        low | medium | high (default medium)
+  -d, --detail L        how much of the history gets written down:
+                        low | medium | high (default medium). It is a
+                        verbosity setting only — all three produce exactly
+                        the same world from the same seed, and differ in
+                        the smallest events they keep (importance 2, 1 and
+                        0) and in the extra line of colour high adds to a
+                        battle or a ruler's death.
       --headless N      run N years without a UI and print the chronicle
       --stats           with --headless N (default 1500): balance metrics per
                         century instead of the chronicle
