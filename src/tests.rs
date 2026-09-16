@@ -94,6 +94,51 @@ fn same_seed_same_history() {
     );
 }
 
+/// The owner index has to agree with the cells themselves at every moment a
+/// subsystem might read it, not only after `recompute`.
+#[test]
+fn owner_index_matches_the_map() {
+    let mut w = world(5);
+    for _ in 0..200 {
+        w.tick();
+        for p in 0..w.polities.len() {
+            let want: Vec<usize> = (0..w.cells.len())
+                .filter(|&i| w.cells[i].owner == Some(p))
+                .collect();
+            assert_eq!(w.cells_of(p), want, "realm {} in year {}", p, w.year);
+        }
+    }
+}
+
+/// Compaction drops the small old events, keeps the great ones, and leaves
+/// the by-ref index pointing at the right entries.
+#[test]
+fn chronicle_compaction_keeps_the_great_events() {
+    let mut w = world(13);
+    w.tuning.chronicle_cap = 400;
+    run(&mut w, 400);
+    assert!(w.chronicle.dropped > 0, "nothing was ever dropped");
+    assert!(w.chronicle.len() <= 400 + w.chronicle.dropped);
+    let mut refs: Vec<crate::sim::chronicle::Ref> = Vec::new();
+    for e in &w.chronicle.events {
+        assert!(
+            e.importance >= 1,
+            "an importance-0 event survived a full cap"
+        );
+        refs.extend(e.refs.iter().copied());
+    }
+    refs.sort();
+    refs.dedup();
+    for r in refs {
+        for &id in w.chronicle.for_ref(r) {
+            assert!(
+                w.chronicle.events[id].refs.contains(&r),
+                "stale by-ref entry after compaction"
+            );
+        }
+    }
+}
+
 #[test]
 fn different_seeds_differ() {
     let mut a = world(7);

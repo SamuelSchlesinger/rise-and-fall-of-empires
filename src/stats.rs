@@ -1,6 +1,7 @@
-//! Balance metrics for headless runs: how the world behaves per century.
+//! Balance metrics for headless runs: how the world behaves per century,
+//! and the profiler that says where a year of simulation goes.
 
-use crate::sim::{PolityKind, World};
+use crate::sim::{PolityKind, World, PHASES};
 
 pub fn run(world: &mut World, years: i32) {
     println!(
@@ -123,4 +124,66 @@ pub fn run(world: &mut World, years: i32) {
         world.chronicle.len(),
         world.ticks_ms
     );
+}
+
+/// Run `years` years with the per-phase profiler on and print where the time
+/// went. Rough resident memory is read from /proc where it exists.
+pub fn bench(world: &mut World, years: i32) {
+    world.prof.on = true;
+    let t0 = std::time::Instant::now();
+    for _ in 0..years {
+        world.tick();
+    }
+    let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
+    let years_f = years.max(1) as f64;
+    println!(
+        "{}x{} = {} cells | {} years | {:.3} ms/year total",
+        world.terrain.w,
+        world.terrain.h,
+        world.cells.len(),
+        years,
+        elapsed / years_f
+    );
+    let mut rows: Vec<(f64, &str)> = PHASES
+        .iter()
+        .enumerate()
+        .map(|(i, name)| (world.prof.ms[i], *name))
+        .collect();
+    rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    let accounted: f64 = rows.iter().map(|r| r.0).sum();
+    for (ms, name) in &rows {
+        println!(
+            "  {:<18} {:>8.4} ms/year  {:>5.1}%",
+            name,
+            ms / years_f,
+            ms / elapsed * 100.0
+        );
+    }
+    println!(
+        "  {:<18} {:>8.4} ms/year  {:>5.1}%",
+        "(unaccounted)",
+        (elapsed - accounted) / years_f,
+        (elapsed - accounted) / elapsed * 100.0
+    );
+    println!(
+        "events {} (dropped {}) | polities {} | persons {} | cities {} | rss {}",
+        world.chronicle.len(),
+        world.chronicle.dropped,
+        world.polities.len(),
+        world.persons.len(),
+        world.cities.len(),
+        rss()
+    );
+}
+
+/// Peak resident set size as the kernel reports it, or "?" elsewhere.
+fn rss() -> String {
+    match std::fs::read_to_string("/proc/self/status") {
+        Ok(s) => s
+            .lines()
+            .find(|l| l.starts_with("VmHWM:"))
+            .map(|l| l["VmHWM:".len()..].trim().to_string())
+            .unwrap_or_else(|| "?".to_string()),
+        Err(_) => "?".to_string(),
+    }
 }

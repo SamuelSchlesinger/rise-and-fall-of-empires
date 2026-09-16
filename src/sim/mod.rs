@@ -17,7 +17,7 @@ use crate::lang::Language;
 use crate::rng::Rng;
 use crate::term::Rgb;
 use chronicle::{Chronicle, Event, EventKind, Ref};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use tuning::Tuning;
 
 /// A file error with the path it happened to folded into its message.
@@ -589,6 +589,45 @@ pub struct Stats {
     pub pop_history: Vec<f64>,
 }
 
+/// The phases of a tick, in the order `World::tick` runs them.
+pub const PHASES: [&str; 19] = [
+    "grow_and_migrate",
+    "form_polities",
+    "expand",
+    "found_cities",
+    "economy",
+    "diplomacy",
+    "resolve_wars",
+    "rulers",
+    "unrest",
+    "magic",
+    "culture_drift",
+    "disasters",
+    "notables",
+    "wonders",
+    "artifacts",
+    "prophecies",
+    "legends",
+    "recompute",
+    "eras",
+];
+
+/// Per-phase timings, accumulated only while `on` is set. The flag is
+/// checked once per phase, so leaving it off costs nothing measurable.
+pub struct Prof {
+    pub on: bool,
+    pub ms: [f64; PHASES.len()],
+}
+
+impl Default for Prof {
+    fn default() -> Prof {
+        Prof {
+            on: false,
+            ms: [0.0; PHASES.len()],
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The world
 // ---------------------------------------------------------------------------
@@ -620,6 +659,11 @@ pub struct World {
     pub century_pop_start: f64,
     pub battlefield_names: BTreeMap<usize, String>,
     pub ticks_ms: f64,
+    /// Cells owned by each polity, ascending. Rebuilt by `recompute` and kept
+    /// exact in between by `claim` and `fall`, so that no subsystem has to
+    /// scan the whole map to find one realm's land.
+    pub owner_cells: Vec<Vec<usize>>,
+    pub prof: Prof,
 }
 
 impl World {
@@ -652,6 +696,8 @@ impl World {
             century_pop_start: 0.0,
             battlefield_names: BTreeMap::new(),
             ticks_ms: 0.0,
+            owner_cells: Vec::new(),
+            prof: Prof::default(),
         }
     }
 
@@ -708,6 +754,8 @@ impl World {
             century_pop_start: 0.0,
             battlefield_names: BTreeMap::new(),
             ticks_ms: 0.0,
+            owner_cells: Vec::new(),
+            prof: Prof::default(),
         };
         genesis::populate(&mut world);
         world.recompute();
@@ -995,12 +1043,17 @@ impl World {
         }
         let mut foreign: Vec<u32> = vec![0; self.polities.len()];
         let mut fert: Vec<f32> = vec![0.0; self.polities.len()];
-        let mut culture_sets: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); self.polities.len()];
-        let mut adjacency: BTreeMap<(usize, usize), u32> = BTreeMap::new();
+        // Every border crossing, collected flat and counted afterwards: a
+        // sort beats a map lookup per cell.
+        let mut borders: Vec<(usize, usize)> = Vec::new();
         let n = self.cells.len();
         let w = self.terrain.w;
         let mut total_pop = 0.0;
         let mut owned = 0usize;
+        self.owner_cells.resize_with(self.polities.len(), Vec::new);
+        for v in self.owner_cells.iter_mut() {
+            v.clear();
+        }
         for i in 0..n {
             let cs = self.cells[i];
             total_pop += cs.pop as f64;
@@ -1010,12 +1063,12 @@ impl World {
             }
             if let Some(p) = cs.owner {
                 owned += 1;
+                self.owner_cells[p].push(i);
                 let pol = &mut self.polities[p];
                 pol.cells += 1;
                 pol.pop += cs.pop as f64;
                 fert[p] += self.terrain.fertility[i];
                 if let Some(c) = cs.culture {
-                    culture_sets[p].insert(c);
                     *pol.culture_counts.entry(c).or_insert(0) += 1;
                     if c != pol.culture {
                         foreign[p] += 1;
@@ -1027,20 +1080,28 @@ impl World {
                 if x + 1 < w {
                     if let Some(q) = self.cells[i + 1].owner {
                         if q != p {
-                            *adjacency.entry((p.min(q), p.max(q))).or_insert(0) += 1;
+                            borders.push((p.min(q), p.max(q)));
                         }
                     }
                 }
                 if y + 1 < self.terrain.h {
                     if let Some(q) = self.cells[i + w].owner {
                         if q != p {
-                            *adjacency.entry((p.min(q), p.max(q))).or_insert(0) += 1;
+                            borders.push((p.min(q), p.max(q)));
                         }
                     }
                 }
             }
         }
-        for ((p, q), len) in adjacency {
+        borders.sort_unstable();
+        let mut at = 0;
+        while at < borders.len() {
+            let (p, q) = borders[at];
+            let mut len = 0u32;
+            while at < borders.len() && borders[at] == (p, q) {
+                len += 1;
+                at += 1;
+            }
             self.polities[p].neighbors.push((q, len));
             self.polities[q].neighbors.push((p, len));
         }
@@ -1060,7 +1121,7 @@ impl World {
                 p.foreign_share = foreign[p.id] as f32 / p.cells as f32;
                 p.avg_fertility = fert[p.id] / p.cells as f32;
             }
-            p.cultures_within = culture_sets[p.id].len();
+            p.cultures_within = p.culture_counts.len();
             if p.cells > p.peak_cells {
                 p.peak_cells = p.cells;
                 p.peak_year = self.year;
@@ -1091,36 +1152,115 @@ impl World {
         if self.year == 1 {
             self.century_pop_start = self.stats.pop;
         }
-        people::grow_and_migrate(self);
-        politics::form_polities(self);
-        politics::expand(self);
-        politics::found_cities(self);
-        politics::economy(self);
-        war::diplomacy(self);
-        war::resolve_wars(self);
-        politics::rulers(self);
-        politics::unrest(self);
-        magic::tick(self);
-        people::culture_drift(self);
-        events::disasters(self);
-        events::notables(self);
-        events::wonders(self);
-        stories::tick_artifacts(self);
-        stories::tick_prophecies(self);
-        stories::tick_legends(self);
-        self.recompute();
-        events::eras(self);
+        // Run one phase of the tick, charging its time to the profile when
+        // profiling is on.
+        macro_rules! phase {
+            ($i:expr, $call:expr) => {{
+                if self.prof.on {
+                    let t = std::time::Instant::now();
+                    $call;
+                    self.prof.ms[$i] += t.elapsed().as_secs_f64() * 1000.0;
+                } else {
+                    $call;
+                }
+            }};
+        }
+        phase!(0, people::grow_and_migrate(self));
+        phase!(1, politics::form_polities(self));
+        phase!(2, politics::expand(self));
+        phase!(3, politics::found_cities(self));
+        phase!(4, politics::economy(self));
+        phase!(5, war::diplomacy(self));
+        phase!(6, war::resolve_wars(self));
+        phase!(7, politics::rulers(self));
+        phase!(8, politics::unrest(self));
+        phase!(9, magic::tick(self));
+        phase!(10, people::culture_drift(self));
+        phase!(11, events::disasters(self));
+        phase!(12, events::notables(self));
+        phase!(13, events::wonders(self));
+        phase!(14, stories::tick_artifacts(self));
+        phase!(15, stories::tick_prophecies(self));
+        phase!(16, stories::tick_legends(self));
+        phase!(17, self.recompute());
+        phase!(18, events::eras(self));
+        self.chronicle.compact(self.tuning.chronicle_cap);
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);
         }
         self.ticks_ms = self.ticks_ms * 0.9 + t0.elapsed().as_secs_f64() * 1000.0 * 0.1;
     }
 
-    /// Cells owned by polity `p`.
+    // -- the owner index --------------------------------------------------
+
+    /// Cells owned by polity `p`, ascending.
+    pub fn cells_of_ref(&self, p: usize) -> &[usize] {
+        self.owner_cells.get(p).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Cells owned by polity `p`, ascending, as an owned list. Callers that
+    /// go on to mutate the world need this; the rest want `cells_of_ref`.
     pub fn cells_of(&self, p: usize) -> Vec<usize> {
-        (0..self.cells.len())
-            .filter(|&i| self.cells[i].owner == Some(p))
-            .collect()
+        self.cells_of_ref(p).to_vec()
+    }
+
+    /// Give `cell` to `p`, keeping the owner index sorted.
+    pub fn own_cell(&mut self, cell: usize, p: usize) {
+        if let Some(old) = self.cells[cell].owner {
+            if old == p {
+                return;
+            }
+            self.unown_cell(cell, old);
+        }
+        self.cells[cell].owner = Some(p);
+        if self.owner_cells.len() <= p {
+            self.owner_cells.resize_with(p + 1, Vec::new);
+        }
+        let v = &mut self.owner_cells[p];
+        if let Err(at) = v.binary_search(&cell) {
+            v.insert(at, cell);
+        }
+    }
+
+    fn unown_cell(&mut self, cell: usize, from: usize) {
+        if let Some(v) = self.owner_cells.get_mut(from) {
+            if let Ok(at) = v.binary_search(&cell) {
+                v.remove(at);
+            }
+        }
+    }
+
+    /// Hand every cell of `p` to `to` (or to nobody) and return the list, in
+    /// ascending order. Both index entries stay sorted.
+    pub fn transfer_cells(&mut self, p: usize, to: Option<usize>) -> Vec<usize> {
+        if self.owner_cells.len() <= p {
+            return Vec::new();
+        }
+        let moved = std::mem::take(&mut self.owner_cells[p]);
+        for &i in &moved {
+            self.cells[i].owner = to;
+        }
+        if let Some(q) = to {
+            if self.owner_cells.len() <= q {
+                self.owner_cells.resize_with(q + 1, Vec::new);
+            }
+            let old = std::mem::take(&mut self.owner_cells[q]);
+            let mut merged = Vec::with_capacity(old.len() + moved.len());
+            let (mut a, mut b) = (0, 0);
+            while a < old.len() && b < moved.len() {
+                if old[a] <= moved[b] {
+                    merged.push(old[a]);
+                    a += 1;
+                } else {
+                    merged.push(moved[b]);
+                    b += 1;
+                }
+            }
+            merged.extend_from_slice(&old[a..]);
+            merged.extend_from_slice(&moved[b..]);
+            self.owner_cells[q] = merged;
+        }
+        moved
     }
 
     pub fn living_polities(&self) -> Vec<usize> {

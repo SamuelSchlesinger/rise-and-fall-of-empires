@@ -350,6 +350,12 @@ pub struct Tuning {
     pub artifact_fall_pass_chance: f64,
     /// Yearly chance a long-reigning cruel ruler is named a tyrant.
     pub tyrant_chance: f64,
+
+    // -- housekeeping ------------------------------------------------------
+    /// How many events the chronicle keeps before the oldest small ones are
+    /// dropped. Great events (importance 2 and 3) are always kept, so the
+    /// real length can sit above this. 0 keeps everything for ever.
+    pub chronicle_cap: usize,
 }
 
 impl Default for Tuning {
@@ -524,6 +530,7 @@ impl Default for Tuning {
             artifact_capture_lost_chance: 0.25,
             artifact_fall_pass_chance: 0.7,
             tyrant_chance: 0.06,
+            chronicle_cap: 60_000,
         }
     }
 }
@@ -706,6 +713,7 @@ impl Tuning {
             "artifact_capture_lost_chance" => self.artifact_capture_lost_chance = v,
             "artifact_fall_pass_chance" => self.artifact_fall_pass_chance = v,
             "tyrant_chance" => self.tyrant_chance = v,
+            "chronicle_cap" => self.chronicle_cap = v.max(0.0) as usize,
             _ => return Err(format!("unknown tuning field '{}'", name)),
         }
         Ok(())

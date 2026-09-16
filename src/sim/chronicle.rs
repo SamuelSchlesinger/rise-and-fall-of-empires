@@ -94,6 +94,12 @@ pub struct Event {
 pub struct Chronicle {
     pub events: Vec<Event>,
     by_ref: BTreeMap<Ref, Vec<usize>>,
+    /// How many events compaction has thrown away over the world's life.
+    pub dropped: usize,
+    /// Length at which compaction is worth trying again. It rises when a
+    /// compaction finds nothing left to drop, so a chronicle made entirely of
+    /// great events does not get re-scanned every year.
+    next_compact: usize,
 }
 
 impl Chronicle {
@@ -121,5 +127,55 @@ impl Chronicle {
 
     pub fn len(&self) -> usize {
         self.events.len()
+    }
+
+    fn reindex(&mut self) {
+        self.by_ref.clear();
+        for (id, ev) in self.events.iter().enumerate() {
+            for r in &ev.refs {
+                self.by_ref.entry(*r).or_default().push(id);
+            }
+        }
+    }
+
+    /// Keep the chronicle from growing without bound. Over `cap` events, the
+    /// oldest trivia goes first: importance 0, then importance 1. Events of
+    /// importance 2 and 3 — the ones the world remembers — are never dropped,
+    /// so a long enough run can sit above the cap for good.
+    ///
+    /// Event positions shift, so the by-ref index is rebuilt; `for_ref` and
+    /// the entity pages keep working. It trims well below the cap so that it
+    /// runs rarely rather than every year.
+    pub fn compact(&mut self, cap: usize) {
+        if cap == 0 || self.events.len() <= cap || self.events.len() < self.next_compact {
+            return;
+        }
+        let target = cap - cap / 8;
+        let mut excess = self.events.len() - target;
+        let mut doomed = vec![false; self.events.len()];
+        for level in 0..=1u8 {
+            if excess == 0 {
+                break;
+            }
+            for (i, ev) in self.events.iter().enumerate() {
+                if excess == 0 {
+                    break;
+                }
+                if !doomed[i] && ev.importance == level {
+                    doomed[i] = true;
+                    excess -= 1;
+                }
+            }
+        }
+        let before = self.events.len();
+        let mut i = 0;
+        self.events.retain(|_| {
+            let keep = !doomed[i];
+            i += 1;
+            keep
+        });
+        self.dropped += before - self.events.len();
+        self.next_compact = self.events.len() + cap / 16 + 1;
+        self.reindex();
     }
 }

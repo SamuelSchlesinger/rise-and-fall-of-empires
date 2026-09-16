@@ -13,15 +13,18 @@ pub fn disasters(w: &mut World) {
     while i < w.plagues.len() {
         let polities = w.plagues[i].polities.clone();
         let mut deaths = 0.0f64;
-        for c in 0..w.cells.len() {
-            if let Some(p) = w.cells[c].owner {
-                if polities.contains(&p) {
-                    let d = w.cells[c].pop * tn.plague_cell_deaths;
-                    w.cells[c].pop -= d;
-                    deaths += d as f64;
-                    w.cells[c].plague = 2;
-                }
-            }
+        // The sick realms' land, in map order, so the death toll adds up the
+        // same way a walk of the whole map would.
+        let mut sick: Vec<usize> = Vec::new();
+        for &p in &polities {
+            sick.extend_from_slice(w.cells_of_ref(p));
+        }
+        sick.sort_unstable();
+        for &c in &sick {
+            let d = w.cells[c].pop * tn.plague_cell_deaths;
+            w.cells[c].pop -= d;
+            deaths += d as f64;
+            w.cells[c].plague = 2;
         }
         for c in 0..w.cities.len() {
             if w.cities[c].destroyed.is_none()
@@ -112,8 +115,8 @@ pub fn disasters(w: &mut World) {
             continue;
         }
         if rng.chance(tn.famine_chance * (1.2 - pol.avg_fertility as f64).max(0.1)) {
-            let cells = w.cells_of(p);
-            for &c in &cells {
+            for k in 0..w.cells_of_ref(p).len() {
+                let c = w.cells_of_ref(p)[k];
                 w.cells[c].pop *= tn.famine_cell_survival;
             }
             for c in pol.cities.clone() {

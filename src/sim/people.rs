@@ -77,8 +77,13 @@ pub fn grow_and_migrate(w: &mut World) {
         // Migration pressure.
         let pressure = if cap > 0.01 { cs.pop / cap } else { 2.0 };
         if pressure > tn.migration_pressure && cs.pop > tn.migration_min_pop {
-            let nbs: Vec<usize> = w.terrain.neighbors8(i).collect();
-            let nb = nbs[rng.below(nbs.len())];
+            let mut nbs = [0usize; 8];
+            let mut nnb = 0;
+            for x in w.terrain.neighbors8(i) {
+                nbs[nnb] = x;
+                nnb += 1;
+            }
+            let nb = nbs[rng.below(nnb)];
             let b = w.terrain.biome[nb];
             if b.is_water() {
                 continue;
@@ -220,11 +225,9 @@ pub fn culture_drift(w: &mut World) {
             // Find the dominant culture in the territory.
             let mut counts: std::collections::BTreeMap<usize, u32> =
                 std::collections::BTreeMap::new();
-            for i in 0..n {
-                if w.cells[i].owner == Some(p) {
-                    if let Some(c) = w.cells[i].culture {
-                        *counts.entry(c).or_insert(0) += 1;
-                    }
+            for &i in w.cells_of_ref(p) {
+                if let Some(c) = w.cells[i].culture {
+                    *counts.entry(c).or_insert(0) += 1;
                 }
             }
             if let Some((&c, _)) = counts.iter().max_by_key(|(_, &v)| v) {
@@ -274,26 +277,30 @@ fn divergence(w: &mut World) {
     let tn = w.tuning;
     let n = w.cells.len();
     let ncult = w.cultures.len();
+    // One visited map for the whole pass: a cell counts as seen when its
+    // stamp matches the culture being walked, so nothing has to be cleared.
+    let mut stamp = vec![0u32; n];
+    let mut mark = 0u32;
     for c in 0..ncult {
         if w.cultures[c].extinct.is_some() || w.cultures[c].cells < 50 {
             continue;
         }
         // Connected components of this culture's cells.
-        let mut seen = vec![false; n];
+        mark += 1;
         let home = w.cultures[c].home;
         let mut comps: Vec<Vec<usize>> = Vec::new();
         for s in 0..n {
-            if seen[s] || w.cells[s].culture != Some(c) {
+            if stamp[s] == mark || w.cells[s].culture != Some(c) {
                 continue;
             }
             let mut comp = Vec::new();
             let mut stack = vec![s];
-            seen[s] = true;
+            stamp[s] = mark;
             while let Some(i) = stack.pop() {
                 comp.push(i);
                 for nb in w.terrain.neighbors8(i) {
-                    if !seen[nb] && w.cells[nb].culture == Some(c) {
-                        seen[nb] = true;
+                    if stamp[nb] != mark && w.cells[nb].culture == Some(c) {
+                        stamp[nb] = mark;
                         stack.push(nb);
                     }
                 }

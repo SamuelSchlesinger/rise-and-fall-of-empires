@@ -20,7 +20,8 @@ cargo build --release
 
 Options: `--seed N`, `--width W --height H` (default 160×64), `--detail
 low|medium|high`, `--headless N`, `--min-importance 0-3` (headless filter),
-`--stats` (balance metrics per century, with `--headless N`), `--save FILE`,
+`--stats` (balance metrics per century, with `--headless N`), `--bench`
+(ms/year and per-phase timings, with `--headless N`), `--save FILE`,
 `--load FILE`, `--ascii`, `--no-mouse`, `--mkconfig`, `--snapshot PATH`
 (render one frame to PATH.txt and PATH.html; combine with `--layer` and
 `--cols/--rows`).
@@ -161,7 +162,9 @@ little strength or standing.
 
 **Chronicle.** Everything notable is written as prose and indexed by the
 realms, cities, people and schools involved, so every detail page carries
-its own history.
+its own history. It does not grow for ever: past `chronicle_cap` events
+(60,000 by default) the oldest small entries are dropped, trivia first, and
+events of importance 2 and 3 are kept whatever happens.
 
 ## Development
 
@@ -170,13 +173,24 @@ its own history.
 ```sh
 ./target/release/empires --seed 3 --headless 2000 --detail high | tail -20
 ./target/release/empires --seed 3 --headless 1500 --stats             # balance metrics
+./target/release/empires --seed 3 --headless 1500 --bench             # where a year goes
 ./target/release/empires --seed 3 --headless 300 --snapshot /tmp/frame --layer political
 python3 tools/ptytest.py ./target/release/empires    # drives the UI in a pty
 ```
 
 The simulation is deterministic: the same seed always produces the same
 history, and a saved world continues identically. Keep it that way (use
-ordered maps, never iterate a HashMap in the simulation).
+ordered maps, never iterate a HashMap in the simulation, and keep the order
+in which cells and realms are visited stable wherever it feeds a random draw
+or a tie-break).
+
+Cost scales with the map. No phase may walk the whole map once per realm:
+`World::owner_cells` keeps each realm's own land in map order, maintained by
+`claim` and `fall` and rebuilt by `recompute`, and `cells_of_ref` reads it.
+`--bench` says where a year actually goes. Over 1500 years at high detail a
+year costs about 0.44 ms at 160x64 and about 2.1 ms at 400x160, which has
+6.25 times the cells; the cost should stay roughly proportional to the map
+rather than climbing with the number of realms that have ever lived.
 
 Source layout: `src/geo.rs` terrain, `src/lang.rs` languages and names,
 `src/sim/` the simulation (`politics`, `war`, `magic`, `people`, `events`,

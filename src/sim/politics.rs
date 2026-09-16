@@ -124,7 +124,7 @@ pub fn found_city(w: &mut World, p: Option<usize>, cell: usize, culture: usize) 
 
 pub fn claim(w: &mut World, p: usize, cell: usize) {
     let culture = w.polities[p].culture;
-    w.cells[cell].owner = Some(p);
+    w.own_cell(cell, p);
     w.cells[cell].since = w.year;
     if w.cells[cell].culture.is_none() {
         w.cells[cell].culture = Some(culture);
@@ -533,22 +533,24 @@ fn score_cell(
 pub fn found_cities(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
-    let n = w.cells.len();
     let np = w.polities.len();
-    let mut by_owner: Vec<Vec<usize>> = vec![Vec::new(); np];
-    for i in 0..n {
-        if let Some(p) = w.cells[i].owner {
-            by_owner[p].push(i);
+    // Ground already too near a standing town, painted once instead of being
+    // re-tested against every city for every candidate site.
+    let mut crowded = vec![false; w.cells.len()];
+    for c in w.cities.iter().filter(|c| c.destroyed.is_none()) {
+        let (cx, cy) = w.terrain.xy(c.cell);
+        let y0 = (cy as i32 - tn.city_spacing_y).max(0) as usize;
+        let y1 = ((cy as i32 + tn.city_spacing_y) as usize).min(w.terrain.h - 1);
+        let x0 = (cx as i32 - tn.city_spacing_x).max(0) as usize;
+        let x1 = ((cx as i32 + tn.city_spacing_x) as usize).min(w.terrain.w - 1);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                crowded[y * w.terrain.w + x] = true;
+            }
         }
     }
-    let city_cells: Vec<usize> = w
-        .cities
-        .iter()
-        .filter(|c| c.destroyed.is_none())
-        .map(|c| c.cell)
-        .collect();
     for p in 0..np {
-        if !w.polities[p].alive() || by_owner[p].is_empty() {
+        if !w.polities[p].alive() || w.cells_of_ref(p).is_empty() {
             continue;
         }
         let pol = &w.polities[p];
@@ -562,23 +564,14 @@ pub fn found_cities(w: &mut World) {
         }
         let mut best = None;
         let mut best_s = tn.city_site_min_score;
-        let cells = &by_owner[p];
+        let cells = w.cells_of_ref(p);
         let samples = cells.len().min(80);
         for _ in 0..samples {
             let i = cells[rng.below(cells.len())];
             if w.cells[i].city.is_some() || !w.terrain.is_land(i) {
                 continue;
             }
-            let (x, y) = w.terrain.xy(i);
-            let too_close = city_cells
-                .iter()
-                .chain(w.polities[p].cities.iter().map(|&c| &w.cities[c].cell))
-                .any(|&cc| {
-                    let (cx, cy) = w.terrain.xy(cc);
-                    (cx as i32 - x as i32).abs() <= tn.city_spacing_x
-                        && (cy as i32 - y as i32).abs() <= tn.city_spacing_y
-                });
-            if too_close {
+            if crowded[i] {
                 continue;
             }
             let t = &w.terrain;
@@ -638,13 +631,7 @@ pub fn economy(w: &mut World) {
         let peace_neighbors = w.polities[p]
             .neighbors
             .iter()
-            .filter(|&&(q, _)| {
-                !w.wars.iter().any(|wr| {
-                    wr.alive()
-                        && ((wr.attacker == p && wr.defender == q)
-                            || (wr.attacker == q && wr.defender == p))
-                })
-            })
+            .filter(|&&(q, _)| w.war_between(p, q).is_none())
             .count() as f32;
         // Cities.
         let cities = w.polities[p].cities.clone();
@@ -1099,7 +1086,7 @@ pub fn split_off(
     prefer_culture: Option<usize>,
 ) -> Option<usize> {
     let rng = w.rng.clone();
-    let cells = w.cells_of(p);
+    let cells = w.cells_of_ref(p);
     if cells.len() < 8 {
         return None;
     }
@@ -1195,9 +1182,8 @@ pub fn fall(
         return;
     }
     super::stories::artifacts_on_fall(w, p, absorbed_by);
-    let cells = w.cells_of(p);
+    let cells = w.transfer_cells(p, absorbed_by);
     for &i in &cells {
-        w.cells[i].owner = absorbed_by;
         w.cells[i].since = w.year;
     }
     let cities = w.polities[p].cities.clone();
@@ -1441,9 +1427,9 @@ fn fragment(w: &mut World, p: usize) {
     }
     let seeds: Vec<usize> = cities[..k].iter().map(|&c| w.cities[c].cell).collect();
     let capital_cell = w.cities[capital].cell;
-    let cells = w.cells_of(p);
+    let cells = w.cells_of_ref(p);
     let mut regions: Vec<Vec<usize>> = vec![Vec::new(); k];
-    for &i in &cells {
+    for &i in cells {
         let dc = w.terrain.dist(i, capital_cell);
         let mut best = None;
         let mut best_d = dc;
