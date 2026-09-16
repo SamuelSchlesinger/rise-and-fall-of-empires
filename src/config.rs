@@ -224,6 +224,7 @@ pub fn key_name(k: Key) -> String {
         Key::Delete => "<Del>".into(),
         Key::F(n) => format!("<F{}>", n),
         Key::Mouse(_) => "<Mouse>".into(),
+        Key::Paste(_) => "<Paste>".into(),
     }
 }
 

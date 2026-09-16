@@ -399,7 +399,7 @@ impl Ui {
         }
         for (a, b) in &cfg.maps {
             self.keymap.retain(|(x, _)| x != a);
-            self.keymap.push((*a, *b));
+            self.keymap.push((a.clone(), b.clone()));
         }
     }
 
@@ -407,7 +407,7 @@ impl Ui {
         self.keymap
             .iter()
             .find(|(a, _)| *a == k)
-            .map(|(_, b)| *b)
+            .map(|(_, b)| b.clone())
             .unwrap_or(k)
     }
 
@@ -1274,6 +1274,12 @@ impl Ui {
                 self.prompt_text.push(c);
                 self.live_filter();
             }
+            Key::Paste(text) => {
+                for c in text.chars().filter(|c| !c.is_control()) {
+                    self.prompt_text.push(c);
+                }
+                self.live_filter();
+            }
             _ => {}
         }
         true
@@ -1779,7 +1785,7 @@ impl Ui {
                 ) {
                     (Some(a), Some(b)) => {
                         self.keymap.retain(|(x, _)| *x != a);
-                        self.keymap.push((a, b));
+                        self.keymap.push((a.clone(), b.clone()));
                         self.say(&format!(
                             "mapped {} to {}",
                             crate::config::key_name(a),
@@ -1806,8 +1812,8 @@ impl Ui {
                         .map(|(a, b)| {
                             format!(
                                 "{}→{}",
-                                crate::config::key_name(*a),
-                                crate::config::key_name(*b)
+                                crate::config::key_name(a.clone()),
+                                crate::config::key_name(b.clone())
                             )
                         })
                         .collect();

@@ -1,8 +1,29 @@
 //! Minimal raw-mode terminal layer for Linux using libc FFI (no crates):
-//! termios raw mode, window size, polled key input, and a diff-rendered
-//! cell buffer emitting 24-bit ANSI colour.
+//! termios raw mode, window size, polled key input, bracketed paste and a
+//! diff-rendered cell buffer emitting 24-bit ANSI colour.
+//!
+//! # Platform assumptions
+//!
+//! The FFI structs below are hand-written copies of the Linux definitions for
+//! the architectures this game is built for, x86_64 and aarch64, where glibc
+//! and musl agree: `struct termios` is four `u32` flag words, `c_line`, 32
+//! control characters and two `u32` speeds, `ioctl` takes its request as an
+//! `unsigned long`, and `TIOCGWINSZ` is `0x5413`. Other architectures (mips,
+//! sparc, alpha, powerpc ...) reorder those fields or number the ioctls
+//! differently, so the build is refused there rather than quietly writing
+//! nonsense into the caller's terminal settings.
 
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+compile_error!(
+    "src/term.rs hard-codes the Linux x86_64/aarch64 termios layout and TIOCGWINSZ; \
+     port the FFI structs and constants in this file before building for this architecture"
+);
+
+use std::cell::UnsafeCell;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -32,13 +53,29 @@ struct PollFd {
     revents: i16,
 }
 
+/// A `sigset_t`: an opaque bag of bits that only libc ever fills in. 128
+/// bytes is the size glibc and musl use on every architecture we build for,
+/// and an over-long buffer would be harmless anyway.
+#[repr(C)]
+struct SigSet([u64; 16]);
+
 extern "C" {
     fn tcgetattr(fd: i32, t: *mut Termios) -> i32;
     fn tcsetattr(fd: i32, opt: i32, t: *const Termios) -> i32;
     fn ioctl(fd: i32, req: u64, ...) -> i32;
     fn poll(fds: *mut PollFd, nfds: u64, timeout: i32) -> i32;
     fn read(fd: i32, buf: *mut u8, count: usize) -> isize;
+    fn write(fd: i32, buf: *const u8, count: usize) -> isize;
     fn isatty(fd: i32) -> i32;
+    /// `signal(2)`; the handler is passed as a plain address so that no
+    /// function-pointer type has to be spelled out at the call sites.
+    fn signal(sig: i32, handler: usize) -> usize;
+    fn raise(sig: i32) -> i32;
+    fn sigemptyset(set: *mut SigSet) -> i32;
+    fn sigaddset(set: *mut SigSet, sig: i32) -> i32;
+    fn sigprocmask(how: i32, set: *const SigSet, old: *mut SigSet) -> i32;
+    fn _exit(code: i32) -> !;
+    fn __errno_location() -> *mut i32;
 }
 
 const ISIG: u32 = 0o000001;
@@ -56,8 +93,114 @@ const VMIN: usize = 6;
 const TCSAFLUSH: i32 = 2;
 const TIOCGWINSZ: u64 = 0x5413;
 const POLLIN: i16 = 0x001;
+const POLLERR: i16 = 0x008;
+const POLLHUP: i16 = 0x010;
+const POLLNVAL: i16 = 0x020;
+const EINTR: i32 = 4;
+const SIG_DFL: usize = 0;
+const SIG_UNBLOCK: i32 = 1;
+const SIG_IGN: usize = 1;
+const SIGHUP: i32 = 1;
+const SIGINT: i32 = 2;
+const SIGTERM: i32 = 15;
 
-static mut ORIG: Option<Termios> = None;
+/// Everything `enter` switched on, switched off again: bracketed paste, mouse
+/// reporting, attributes, the cursor and the alternate screen.
+const RESET: &[u8] = b"\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[2J\x1b[H\x1b[?1049l";
+
+impl Termios {
+    const ZERO: Termios = Termios {
+        c_iflag: 0,
+        c_oflag: 0,
+        c_cflag: 0,
+        c_lflag: 0,
+        c_line: 0,
+        c_cc: [0; 32],
+        c_ispeed: 0,
+        c_ospeed: 0,
+    };
+}
+
+/// The terminal settings as we found them, for the ordinary `leave()` path.
+/// Reading a `OnceLock` neither allocates nor blocks, so the panic hook may
+/// use it and `leave()` stays correct however often it is called.
+static ORIG: OnceLock<Termios> = OnceLock::new();
+
+/// A second, plain copy of the same settings for the signal handler, which
+/// may not lock, allocate or run Rust's I/O machinery.
+struct SigCell(UnsafeCell<Termios>);
+
+// SAFETY: the cell is written exactly once, in `enter`, before the signal
+// handlers that read it are installed, and never written again; readers
+// therefore only ever see fully initialised bytes.
+unsafe impl Sync for SigCell {}
+
+static ORIG_RAW: SigCell = SigCell(UnsafeCell::new(Termios::ZERO));
+/// Set once `ORIG_RAW` holds real settings; the handler checks it first.
+static ORIG_RAW_SET: AtomicBool = AtomicBool::new(false);
+/// Set once the termination handlers have been installed.
+static HANDLERS: AtomicBool = AtomicBool::new(false);
+
+fn errno() -> i32 {
+    unsafe { *__errno_location() }
+}
+
+/// Put the terminal back using nothing but raw syscalls: no allocation, no
+/// locks, no Rust I/O. Async-signal-safe, idempotent, and harmless before
+/// `enter` has ever run.
+///
+/// # Safety
+///
+/// Writes to fd 1 and calls `tcsetattr` on fd 0, so the caller must be happy
+/// for the terminal to be reset.
+unsafe fn restore_raw() {
+    let mut off = 0usize;
+    while off < RESET.len() {
+        let n = write(1, RESET.as_ptr().add(off), RESET.len() - off);
+        if n > 0 {
+            off += n as usize;
+        } else if n < 0 && errno() == EINTR {
+            continue;
+        } else {
+            break;
+        }
+    }
+    if ORIG_RAW_SET.load(Ordering::Acquire) {
+        tcsetattr(0, TCSAFLUSH, ORIG_RAW.0.get());
+    }
+}
+
+/// SIGHUP/SIGINT/SIGTERM: hand the terminal back, then die of the signal so
+/// that the exit status is the usual one.
+extern "C" fn on_signal(sig: i32) {
+    unsafe {
+        restore_raw();
+        // Back to the default disposition, unblock the signal (it is blocked
+        // while its own handler runs) and take it properly, so that the shell
+        // sees an ordinary death by signal. `_exit` covers the case where
+        // something still swallows it.
+        signal(sig, SIG_DFL);
+        let mut set = SigSet([0; 16]);
+        if sigemptyset(&mut set) == 0 && sigaddset(&mut set, sig) == 0 {
+            sigprocmask(SIG_UNBLOCK, &set, std::ptr::null_mut());
+        }
+        raise(sig);
+        _exit(128 + sig);
+    }
+}
+
+/// Install `on_signal` for `sig`, unless the signal was inherited as ignored
+/// (a daemonising parent's doing), in which case it stays ignored.
+///
+/// # Safety
+///
+/// Changes process-wide signal dispositions.
+unsafe fn install(sig: i32) {
+    let prev = signal(sig, on_signal as *const () as usize);
+    if prev == SIG_IGN {
+        signal(sig, SIG_IGN);
+    }
+}
 
 pub fn is_tty() -> bool {
     unsafe { isatty(0) == 1 && isatty(1) == 1 }
@@ -94,21 +237,23 @@ pub fn enter(mouse: bool) -> bool {
     if !is_tty() {
         return false;
     }
-    let mut t = Termios {
-        c_iflag: 0,
-        c_oflag: 0,
-        c_cflag: 0,
-        c_lflag: 0,
-        c_line: 0,
-        c_cc: [0; 32],
-        c_ispeed: 0,
-        c_ospeed: 0,
-    };
+    let mut t = Termios::ZERO;
     unsafe {
         if tcgetattr(0, &mut t) != 0 {
             return false;
         }
-        ORIG = Some(t);
+        // Save the settings in both places *before* installing the handlers
+        // that read the raw copy, and write that copy only once.
+        if !ORIG_RAW_SET.load(Ordering::Acquire) {
+            ORIG_RAW.0.get().write(t);
+            ORIG_RAW_SET.store(true, Ordering::Release);
+        }
+        let _ = ORIG.set(t);
+        if !HANDLERS.swap(true, Ordering::SeqCst) {
+            install(SIGHUP);
+            install(SIGINT);
+            install(SIGTERM);
+        }
         let mut raw = t;
         raw.c_iflag &= !(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
         raw.c_oflag &= !OPOST;
@@ -118,8 +263,8 @@ pub fn enter(mouse: bool) -> bool {
         tcsetattr(0, TCSAFLUSH, &raw);
     }
     let mut out = io::stdout();
-    // Alternate screen, hide cursor, clear.
-    let _ = out.write_all(b"\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H");
+    // Alternate screen, hide cursor, clear, bracketed paste on.
+    let _ = out.write_all(b"\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?2004h");
     let _ = out.flush();
     if mouse {
         set_mouse(true);
@@ -127,21 +272,25 @@ pub fn enter(mouse: bool) -> bool {
     true
 }
 
+/// Leave raw mode and the alternate screen. Safe to call more than once, and
+/// safe from the panic hook: it neither allocates nor waits on a lock of ours.
 pub fn leave() {
     let mut out = io::stdout();
-    let _ = out.write_all(b"\x1b[?1006l\x1b[?1000l\x1b[0m\x1b[?25h\x1b[2J\x1b[H\x1b[?1049l");
+    let _ = out.write_all(RESET);
     let _ = out.flush();
-    unsafe {
-        let orig = std::ptr::addr_of!(ORIG).read();
-        if let Some(t) = orig {
-            tcsetattr(0, TCSAFLUSH, &t);
+    if let Some(t) = ORIG.get() {
+        unsafe {
+            tcsetattr(0, TCSAFLUSH, t);
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Key {
     Char(char),
+    /// A bracketed paste, delivered whole so that its contents never look
+    /// like commands.
+    Paste(String),
     Ctrl(char),
     Up,
     Down,
@@ -185,40 +334,101 @@ pub struct Mouse {
     pub y: usize,
 }
 
-fn read_bytes(buf: &mut Vec<u8>) {
-    let mut tmp = [0u8; 64];
-    let n = unsafe { read(0, tmp.as_mut_ptr(), tmp.len()) };
-    if n > 0 {
-        buf.extend_from_slice(&tmp[..n as usize]);
+/// Read whatever is waiting on stdin. Returns false once stdin is at end of
+/// file; a read cut short by a signal is simply retried.
+fn read_bytes(buf: &mut Vec<u8>) -> bool {
+    let mut tmp = [0u8; 1024];
+    loop {
+        let n = unsafe { read(0, tmp.as_mut_ptr(), tmp.len()) };
+        if n > 0 {
+            buf.extend_from_slice(&tmp[..n as usize]);
+            return true;
+        }
+        if n == 0 {
+            return false;
+        }
+        if errno() == EINTR {
+            continue;
+        }
+        // EAGAIN and friends: nothing to add, but stdin is still there.
+        return true;
     }
 }
 
-fn wait_input(timeout_ms: i32) -> bool {
+/// What a `poll` of stdin came back with.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ready {
+    Input,
+    Timeout,
+    Closed,
+}
+
+fn wait_input(timeout_ms: i32) -> Ready {
     let mut pfd = PollFd {
         fd: 0,
         events: POLLIN,
         revents: 0,
     };
     let r = unsafe { poll(&mut pfd, 1, timeout_ms) };
-    r > 0 && (pfd.revents & POLLIN) != 0
+    if r <= 0 {
+        // Nothing yet, or interrupted by a signal (a window resize, say): the
+        // caller redraws and comes back, so this counts as a timeout.
+        return Ready::Timeout;
+    }
+    if pfd.revents & POLLIN != 0 {
+        Ready::Input
+    } else if pfd.revents & (POLLHUP | POLLERR | POLLNVAL) != 0 {
+        Ready::Closed
+    } else {
+        Ready::Timeout
+    }
+}
+
+fn has_input(timeout_ms: i32) -> bool {
+    wait_input(timeout_ms) == Ready::Input
+}
+
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
 }
 
 pub struct Input {
     buf: Vec<u8>,
+    /// Stdin has closed: there will never be another key.
+    eof: bool,
 }
 
 impl Input {
     pub fn new() -> Input {
-        Input { buf: Vec::new() }
+        Input {
+            buf: Vec::new(),
+            eof: false,
+        }
     }
 
     /// Wait up to `timeout_ms` for a key. Returns None on timeout.
     pub fn poll_key(&mut self, timeout_ms: i32) -> Option<Key> {
         if self.buf.is_empty() {
-            if !wait_input(timeout_ms) {
+            if self.eof {
+                // Stdin is gone. `poll` would return at once, for ever, so
+                // wait out the caller's timeout by hand instead of spinning.
+                if timeout_ms > 0 {
+                    std::thread::sleep(Duration::from_millis(timeout_ms.min(1000) as u64));
+                }
                 return None;
             }
-            read_bytes(&mut self.buf);
+            match wait_input(timeout_ms) {
+                Ready::Timeout => return None,
+                Ready::Closed => {
+                    self.eof = true;
+                    return None;
+                }
+                Ready::Input => {
+                    if !read_bytes(&mut self.buf) {
+                        self.eof = true;
+                    }
+                }
+            }
             if self.buf.is_empty() {
                 return None;
             }
@@ -226,12 +436,48 @@ impl Input {
         self.parse()
     }
 
+    /// Everything between `ESC [ 200 ~` and `ESC [ 201 ~`, gathered as one
+    /// string. The opening marker has already been consumed.
+    fn read_paste(&mut self) -> String {
+        const END: &[u8] = b"\x1b[201~";
+        const MAX: usize = 256 * 1024;
+        let deadline = Instant::now() + Duration::from_millis(2000);
+        let mut text: Vec<u8> = Vec::new();
+        loop {
+            if let Some(at) = find(&self.buf, END) {
+                text.extend_from_slice(&self.buf[..at]);
+                self.buf.drain(..at + END.len());
+                break;
+            }
+            // Keep the last few bytes back: the marker may be split across reads.
+            let keep = END.len() - 1;
+            if self.buf.len() > keep {
+                let take = self.buf.len() - keep;
+                text.extend_from_slice(&self.buf[..take]);
+                self.buf.drain(..take);
+            }
+            // A big paste arrives in pieces, which over a slow link can be a
+            // fair way apart; but a terminal that never closes the paste must
+            // not hang the game either.
+            if text.len() > MAX || Instant::now() >= deadline || !has_input(250) {
+                text.append(&mut self.buf);
+                break;
+            }
+            if !read_bytes(&mut self.buf) {
+                self.eof = true;
+                text.append(&mut self.buf);
+                break;
+            }
+        }
+        String::from_utf8_lossy(&text).into_owned()
+    }
+
     fn parse(&mut self) -> Option<Key> {
         let b0 = self.buf[0];
         if b0 == 0x1b {
             if self.buf.len() == 1 {
                 // Lone escape or the start of a sequence still in flight.
-                if wait_input(15) {
+                if has_input(15) {
                     read_bytes(&mut self.buf);
                 }
                 if self.buf.len() == 1 {
@@ -247,7 +493,7 @@ impl Input {
                     end += 1;
                 }
                 if end >= self.buf.len() {
-                    if wait_input(15) {
+                    if has_input(15) {
                         read_bytes(&mut self.buf);
                     }
                     while end < self.buf.len() && !(0x40..=0x7e).contains(&self.buf[end]) {
@@ -289,6 +535,10 @@ impl Input {
                 }
                 let mut fields = params.split(|&b| b == b';');
                 let first = fields.next().unwrap_or(&[]);
+                // Bracketed paste: ESC [ 200 ~ text ESC [ 201 ~
+                if b1 == b'[' && fin == b'~' && first == b"200" {
+                    return Some(Key::Paste(self.read_paste()));
+                }
                 let modifier = fields
                     .next()
                     .and_then(|m| std::str::from_utf8(m).ok())
