@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::geo::Biome;
 use crate::sim::chronicle::{EventKind, Ref};
 use crate::sim::World;
-use crate::term::{self, Input, Key, Rgb, Screen, BOLD, DIM, REVERSE};
+use crate::term::{self, Input, Key, Rect, Rgb, Screen, Style, BOLD, DIM, REVERSE};
 use crate::theme::Theme;
 use std::time::{Duration, Instant};
 
@@ -204,7 +204,7 @@ pub fn run(
     ascii: bool,
     mouse: bool,
     save_path: Option<String>,
-    cfg: Config,
+    cfg: &Config,
     tour: bool,
 ) {
     if !term::enter(mouse) {
@@ -219,7 +219,7 @@ pub fn run(
     let (w, h) = term::size();
     let mut ui = Ui::new(world, ascii, mouse, w, h);
     ui.save_path = save_path.map(std::path::PathBuf::from);
-    ui.apply_config(&cfg);
+    ui.apply_config(cfg);
     ui.tour = tour || first_run();
     if cfg.errors.is_empty() {
         ui.say("? for keys   : for commands   / to search   :w to save");
@@ -266,12 +266,7 @@ pub fn snapshot(
             let mut cs: Vec<usize> = (0..ui.world.cities.len())
                 .filter(|&c| ui.world.cities[c].destroyed.is_none())
                 .collect();
-            cs.sort_by(|&a, &b| {
-                ui.world.cities[b]
-                    .pop
-                    .partial_cmp(&ui.world.cities[a].pop)
-                    .unwrap()
-            });
+            cs.sort_by(|&a, &b| ui.world.cities[b].pop.total_cmp(&ui.world.cities[a].pop));
             if let Some(&c) = cs.first() {
                 ui.selected = Some(Ref::City(c));
                 ui.mode = Mode::Detail;
@@ -283,11 +278,7 @@ pub fn snapshot(
                 .schools
                 .iter()
                 .filter(|s| s.alive())
-                .max_by(|a, b| {
-                    a.total_influence()
-                        .partial_cmp(&b.total_influence())
-                        .unwrap()
-                })
+                .max_by(|a, b| a.total_influence().total_cmp(&b.total_influence()))
             {
                 ui.selected = Some(Ref::School(s.id));
                 ui.mode = Mode::Detail;
@@ -311,8 +302,7 @@ pub fn snapshot(
             ps.sort_by(|&a, &b| {
                 ui.world.persons[b]
                     .renown
-                    .partial_cmp(&ui.world.persons[a].renown)
-                    .unwrap()
+                    .total_cmp(&ui.world.persons[a].renown)
             });
             if let Some(&i) = ps.first() {
                 ui.selected = Some(Ref::Person(i));
@@ -479,7 +469,7 @@ impl Ui {
             let (i, _) = SPEEDS
                 .iter()
                 .enumerate()
-                .min_by(|a, b| (a.1 - v).abs().partial_cmp(&(b.1 - v).abs()).unwrap())
+                .min_by(|a, b| (a.1 - v).abs().total_cmp(&(b.1 - v).abs()))
                 .unwrap();
             self.speed_idx = i;
         }
@@ -832,8 +822,7 @@ impl Ui {
         cs.sort_by(|&a, &b| {
             self.world.cities[b]
                 .pop
-                .partial_cmp(&self.world.cities[a].pop)
-                .unwrap()
+                .total_cmp(&self.world.cities[a].pop)
         });
         let cur = match self.selected {
             Some(Ref::City(c)) => cs.iter().position(|&x| x == c).map(|i| i as i32),
@@ -934,7 +923,7 @@ impl Ui {
                 Ref::Artifact(a.id),
             );
         }
-        hits.sort_by(|a, b| b.0.cmp(&a.0));
+        hits.sort_by_key(|h| std::cmp::Reverse(h.0));
         hits.truncate(60);
         hits.into_iter().map(|(_, r)| r).collect()
     }
@@ -1030,7 +1019,7 @@ impl Ui {
                 ));
             }
         }
-        out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        out.sort_by(|a, b| b.0.total_cmp(&a.0));
         out.truncate(3);
         out.into_iter().map(|(_, t, r)| (t, r)).collect()
     }

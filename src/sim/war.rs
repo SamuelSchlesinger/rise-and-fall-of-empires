@@ -93,12 +93,12 @@ impl World {
         }
     }
 
-    pub fn end_war(&mut self, wid: usize, result: String, log: bool) {
+    pub fn end_war(&mut self, wid: usize, result: &str, log: bool) {
         if !self.wars[wid].alive() {
             return;
         }
         self.wars[wid].ended = Some(self.year);
-        self.wars[wid].result = result.clone();
+        self.wars[wid].result = result.to_string();
         let (a, d) = (self.wars[wid].attacker, self.wars[wid].defender);
         self.polities[a].wars.retain(|&x| x != wid);
         self.polities[d].wars.retain(|&x| x != wid);
@@ -110,7 +110,7 @@ impl World {
         self.polities[a].tension.insert(d, 0.0);
         self.polities[d].tension.insert(a, 0.0);
         if log {
-            let text = prose::war_ended(&self.wars[wid].name, &result);
+            let text = prose::war_ended(&self.wars[wid].name, result);
             self.log(
                 2,
                 EventKind::Peace,
@@ -294,7 +294,7 @@ pub fn resolve_wars(w: &mut World) {
         }
         let (a, d) = (w.wars[wid].attacker, w.wars[wid].defender);
         if !w.polities[a].alive() || !w.polities[d].alive() {
-            w.end_war(wid, "ended.".to_string(), false);
+            w.end_war(wid, "ended.", false);
             continue;
         }
         let years = w.year - w.wars[wid].started;
@@ -501,7 +501,7 @@ fn battle(
             };
             if leads && rng.chance(p_die) {
                 let name = w.persons[r].name.clone();
-                politics::ruler_dies(w, side, prose::fell_at(&place), 2);
+                politics::ruler_dies(w, side, &prose::fell_at(&place), 2);
                 text.push_str(&prose::ruler_fell_in_battle(&name));
                 importance = 2;
             }
@@ -579,7 +579,7 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
             .collect();
         if let Some(&nc) = remaining
             .iter()
-            .max_by(|&&x, &&y| w.cities[x].pop.partial_cmp(&w.cities[y].pop).unwrap())
+            .max_by(|&&x, &&y| w.cities[x].pop.total_cmp(&w.cities[y].pop))
         {
             w.polities[loser].capital = Some(nc);
             let to = w.cities[nc].name.clone();
@@ -587,7 +587,7 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
         } else {
             let cause = prose::conquered_by(w, loser, winner, &name);
             s.push_str(&prose::capital_lost(w, loser));
-            politics::fall(w, loser, cause, Some(winner), 2);
+            politics::fall(w, loser, &cause, Some(winner), 2);
         }
     }
     s
@@ -604,7 +604,7 @@ fn make_peace(w: &mut World, wid: usize) {
                 // Rebels crushed.
                 let cause = prose::rebellion_crushed(w, a, d, years);
                 let leader = w.polities[a].ruler;
-                politics::fall(w, a, cause, Some(d), 2);
+                politics::fall(w, a, &cause, Some(d), 2);
                 if let Some(l) = leader {
                     if w.persons[l].alive() {
                         w.persons[l].died = Some(w.year);
@@ -619,7 +619,7 @@ fn make_peace(w: &mut World, wid: usize) {
             {
                 // Rebels take over the old realm.
                 let cause = prose::rebellion_triumphant(w, d, a);
-                politics::fall(w, d, cause, Some(a), 2);
+                politics::fall(w, d, &cause, Some(a), 2);
                 return;
             } else {
                 prose::independence_recognised(w, a, d)
@@ -650,7 +650,7 @@ fn make_peace(w: &mut World, wid: usize) {
             }
         }
     };
-    w.end_war(wid, result, true);
+    w.end_war(wid, &result, true);
 }
 
 pub fn role_general(w: &mut World, p: usize, g: usize) {

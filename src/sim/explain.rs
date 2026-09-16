@@ -181,7 +181,7 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
     };
     push(&mut out, kind_stab, kind_text.to_string());
 
-    out.sort_by(|a, b| b.weight.abs().partial_cmp(&a.weight.abs()).unwrap());
+    out.sort_by(|a, b| b.weight.abs().total_cmp(&a.weight.abs()));
     out
 }
 

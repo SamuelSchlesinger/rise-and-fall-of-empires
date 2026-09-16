@@ -1,4 +1,21 @@
 //! Rise and Fall of Empires: a lo-fi passive world simulator.
+//!
+//! This binary is the whole game. [`geo`] raises a world out of [`noise`],
+//! [`sim`] runs the centuries on it and writes them down, [`ui`] draws the
+//! result over a hand-rolled terminal layer in [`term`], and [`ser`] puts a
+//! world on disk and takes it off again. Everything is seeded from [`rng`],
+//! so a seed names one world and one history for good.
+//!
+//! This module is only the front door: command-line arguments, the headless
+//! and snapshot modes, and the hand-off to [`ui::run`].
+
+#![deny(unsafe_op_in_unsafe_fn)]
+#![warn(
+    clippy::doc_markdown,
+    clippy::needless_pass_by_value,
+    clippy::redundant_closure_for_method_calls,
+    clippy::semicolon_if_nothing_returned
+)]
 
 mod config;
 mod geo;
@@ -71,12 +88,12 @@ fn parse_args(cfg: &config::Config) -> Args {
         match args[i].as_str() {
             "--seed" | "-s" => a.seed = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.seed),
             "--width" | "-w" => {
-                a.width = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.width)
+                a.width = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(a.width);
             }
             "--height" | "-h" => {
                 a.height = next(&mut i)
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(a.height)
+                    .unwrap_or(a.height);
             }
             "--detail" | "-d" => {
                 a.detail = match next(&mut i).as_deref() {
@@ -86,10 +103,10 @@ fn parse_args(cfg: &config::Config) -> Args {
                 }
             }
             "--headless" | "--years" => {
-                a.headless = Some(next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(500))
+                a.headless = Some(next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(500));
             }
             "--min-importance" | "-i" => {
-                a.min_importance = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(1)
+                a.min_importance = next(&mut i).and_then(|v| v.parse().ok()).unwrap_or(1);
             }
             "--ascii" => a.ascii = true,
             "--tour" => a.tour = true,
@@ -184,8 +201,8 @@ fn main() {
             let stdout = std::io::stdout();
             let mut out = stdout.lock();
             for e in &world.chronicle.events {
-                if e.importance >= args.min_importance {
-                    if writeln!(
+                if e.importance >= args.min_importance
+                    && writeln!(
                         out,
                         "[{:>5}] {}{}",
                         e.year,
@@ -193,9 +210,8 @@ fn main() {
                         e.text
                     )
                     .is_err()
-                    {
-                        return; // downstream closed the pipe (e.g. `| head`)
-                    }
+                {
+                    return; // downstream closed the pipe (e.g. `| head`)
                 }
             }
         }
@@ -226,7 +242,7 @@ fn main() {
         args.ascii,
         args.mouse,
         args.save.or(args.load),
-        cfg,
+        &cfg,
         args.tour,
     );
 }

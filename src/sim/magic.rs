@@ -677,7 +677,7 @@ fn catastrophe(w: &mut World, s: usize, p: usize, cap: usize) {
     w.polities[p].capital = remaining
         .iter()
         .copied()
-        .max_by(|&a, &b| w.cities[a].pop.partial_cmp(&w.cities[b].pop).unwrap());
+        .max_by(|&a, &b| w.cities[a].pop.total_cmp(&w.cities[b].pop));
     // The school is discredited everywhere.
     for v in w.schools[s].influence.values_mut() {
         *v *= 0.3;
@@ -688,12 +688,12 @@ fn catastrophe(w: &mut World, s: usize, p: usize, cap: usize) {
         if let Some(r) = w.polities[p].ruler {
             let rn = w.persons[r].name.clone();
             text.push_str(&prose::catastrophe_ruler(&rn));
-            super::politics::ruler_dies(w, p, prose::perished_in_unmaking(&name), 2);
+            super::politics::ruler_dies(w, p, &prose::perished_in_unmaking(&name), 2);
         }
     }
     if w.polities[p].capital.is_none() {
         text.push_str(&prose::catastrophe_realm_ends(w, p));
-        super::politics::fall(w, p, prose::perished_with(&name), None, 3);
+        super::politics::fall(w, p, &prose::perished_with(&name), None, 3);
     }
     w.log(
         3,

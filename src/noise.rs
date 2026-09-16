@@ -3,10 +3,19 @@
 
 use crate::rng::Rng;
 
+/// A permutation table: one gradient field, sampled by [`Noise::at`],
+/// [`Noise::fbm`] and [`Noise::ridged`].
 pub struct Noise {
     perm: [u8; 512],
 }
 
+/// The eight unit gradients a lattice corner may take.
+///
+/// The diagonals are the truncated `0.7071`, not `std::f32::consts::FRAC_1_SQRT_2`:
+/// their exact bits decide every elevation, coastline and mana field, so a
+/// seed would no longer name the same world if they changed.
+// The truncation is deliberate and load-bearing, so the near-constant check is off here.
+#[allow(clippy::approx_constant)]
 const GRAD: [(f32, f32); 8] = [
     (1.0, 0.0),
     (-1.0, 0.0),
@@ -27,6 +36,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 impl Noise {
+    /// A fresh field, its permutation table shuffled by `rng`.
     pub fn new(rng: &Rng) -> Noise {
         let mut p: Vec<u8> = (0..=255).collect();
         rng.shuffle(&mut p);

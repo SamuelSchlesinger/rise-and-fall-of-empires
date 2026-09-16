@@ -15,7 +15,11 @@ impl Ui {
             return;
         }
         let bg = Rgb(10, 10, 14);
-        self.screen.fill(0, y0, sw, h, ' ', Rgb(200, 200, 200), bg);
+        self.screen.fill(
+            Rect::new(0, y0, sw, h),
+            ' ',
+            Style::new(Rgb(200, 200, 200), bg),
+        );
         self.screen.hline(0, y0, sw, Rgb(60, 60, 70), bg);
         let title = format!(" Chronicle (importance ≥{}) ", self.log_min);
         let title = if self.ascii {
@@ -47,7 +51,8 @@ impl Ui {
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
         let accent = Rgb(230, 200, 120);
-        self.screen.fill(0, 0, sw, sh, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         // Tabs.
         let mut x = 1;
         for (i, t) in detail::LIST_TABS.iter().enumerate() {
@@ -93,11 +98,13 @@ impl Ui {
                 (fg, bg, 0)
             };
             if sel {
-                self.screen.fill(0, y, sw, 1, ' ', f, b);
+                self.screen
+                    .fill(Rect::new(0, y, sw, 1), ' ', Style::new(f, b));
             }
             self.screen
                 .put(1, y, if self.ascii { '#' } else { '■' }, color, b);
-            self.screen.text_clip(3, y, row, sw - 4, f, b, a);
+            self.screen
+                .text_clip(3, y, row, sw - 4, Style::attr(f, b, a));
         }
         if rows.is_empty() {
             self.screen.text(
@@ -123,7 +130,8 @@ impl Ui {
         let sh = self.screen.h.saturating_sub(1);
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
-        self.screen.fill(0, 0, sw, sh, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         let width = sw.saturating_sub(4).max(20);
         let lines = detail::detail_lines(&self.world, r, width, self.ascii);
         let max_scroll = lines.len().saturating_sub(sh.saturating_sub(1));
@@ -132,7 +140,7 @@ impl Ui {
         }
         for (k, line) in lines.iter().skip(self.detail_scroll).take(sh).enumerate() {
             self.screen
-                .text_clip(2, k, &line.text, width, line.fg, bg, line.attr);
+                .text_clip(2, k, &line.text, width, Style::attr(line.fg, bg, line.attr));
         }
         if lines.len() > sh {
             let s = format!(
@@ -155,7 +163,8 @@ impl Ui {
         let sh = self.screen.h.saturating_sub(1);
         let bg = Rgb(12, 12, 16);
         let fg = Rgb(200, 200, 205);
-        self.screen.fill(0, 0, sw, sh, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         self.chron_rows.clear();
         let filter = self.chron_filter.to_lowercase();
         let title = if filter.is_empty() {
@@ -206,14 +215,16 @@ impl Ui {
         let sh = self.screen.h.saturating_sub(1);
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
-        self.screen.fill(0, 0, sw, sh, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         for (k, l) in detail::HELP.iter().enumerate().take(sh) {
             let (c, a) = if l.starts_with("  ") || l.is_empty() {
                 (fg, 0)
             } else {
                 (Rgb(230, 200, 120), BOLD)
             };
-            self.screen.text_clip(2, k, l, sw - 3, c, bg, a);
+            self.screen
+                .text_clip(2, k, l, sw - 3, Style::attr(c, bg, a));
         }
     }
 
@@ -264,7 +275,8 @@ impl Ui {
         let sh = self.screen.h.saturating_sub(1);
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
-        self.screen.fill(0, 0, sw, sh, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         let width = sw.saturating_sub(6).max(30);
         let lines = recap::lines(&self.world, self.recap_years, self.recap_scope, width);
         let max_scroll = lines.len().saturating_sub(sh.saturating_sub(1));
@@ -273,7 +285,7 @@ impl Ui {
         }
         for (k, line) in lines.iter().skip(self.recap_scroll).take(sh).enumerate() {
             self.screen
-                .text_clip(3, k, &line.text, width, line.fg, bg, line.attr);
+                .text_clip(3, k, &line.text, width, Style::attr(line.fg, bg, line.attr));
         }
         if lines.len() > sh {
             let s = format!(
@@ -307,15 +319,12 @@ impl Ui {
         let y = (sh.saturating_sub(h)) / 2;
         let bg = Rgb(26, 26, 38);
         let fg = Rgb(225, 225, 235);
-        self.screen.fill(x, y, w, h, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(x, y, w, h), ' ', Style::new(fg, bg));
         self.screen.frame(
-            x,
-            y,
-            w,
-            h,
+            Rect::new(x, y, w, h),
             "Rise and Fall of Empires",
-            Rgb(240, 210, 130),
-            bg,
+            Style::new(Rgb(240, 210, 130), bg),
         );
         for (k, l) in TOUR.iter().enumerate() {
             if y + 2 + k >= y + h - 1 {
@@ -328,8 +337,13 @@ impl Ui {
             } else {
                 (fg, 0)
             };
-            self.screen
-                .text_clip(x + 3, y + 2 + k, l, w.saturating_sub(5), c, bg, a);
+            self.screen.text_clip(
+                x + 3,
+                y + 2 + k,
+                l,
+                w.saturating_sub(5),
+                Style::attr(c, bg, a),
+            );
         }
     }
 
@@ -347,9 +361,13 @@ impl Ui {
         self.fate_rect = (x, y, w, h);
         let bg = Rgb(30, 24, 40);
         let fg = Rgb(230, 225, 235);
-        self.screen.fill(x, y, w, h, ' ', fg, bg);
         self.screen
-            .frame(x, y, w, h, "The Hand of Fate", Rgb(230, 200, 120), bg);
+            .fill(Rect::new(x, y, w, h), ' ', Style::new(fg, bg));
+        self.screen.frame(
+            Rect::new(x, y, w, h),
+            "The Hand of Fate",
+            Style::new(Rgb(230, 200, 120), bg),
+        );
         for (k, l) in lines.iter().enumerate() {
             let attr = if k == 0 { BOLD } else { 0 };
             self.screen.text_attr(x + 2, y + 1 + k, l, fg, bg, attr);

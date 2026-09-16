@@ -148,7 +148,7 @@ impl Ui {
                 let dir = Self::default_save_dir();
                 let mut names: Vec<String> = std::fs::read_dir(&dir)
                     .map(|rd| {
-                        rd.filter_map(|e| e.ok())
+                        rd.filter_map(std::result::Result::ok)
                             .map(|e| e.file_name().to_string_lossy().into_owned())
                             .filter(|n| n.ends_with(".rfe"))
                             .collect()
@@ -179,7 +179,7 @@ impl Ui {
                     let (i, _) = SPEEDS
                         .iter()
                         .enumerate()
-                        .min_by(|a, b| (a.1 - v).abs().partial_cmp(&(b.1 - v).abs()).unwrap())
+                        .min_by(|a, b| (a.1 - v).abs().total_cmp(&(b.1 - v).abs()))
                         .unwrap();
                     self.speed_idx = i;
                     self.paused = false;
@@ -382,8 +382,8 @@ impl Ui {
                         self.keymap.push((a.clone(), b.clone()));
                         self.say(&format!(
                             "mapped {} to {}",
-                            crate::config::key_name(a),
-                            crate::config::key_name(b)
+                            crate::config::key_name(&a),
+                            crate::config::key_name(&b)
                         ));
                     }
                     _ => self.say("usage: :map <from> <to>   e.g. :map w k   :map <S-Up> K"),
@@ -392,7 +392,7 @@ impl Ui {
             "unmap" => match crate::config::parse_key(arg) {
                 Some(a) => {
                     self.keymap.retain(|(x, _)| *x != a);
-                    self.say(&format!("unmapped {}", crate::config::key_name(a)));
+                    self.say(&format!("unmapped {}", crate::config::key_name(&a)));
                 }
                 None => self.say("usage: :unmap <key>"),
             },
@@ -406,8 +406,8 @@ impl Ui {
                         .map(|(a, b)| {
                             format!(
                                 "{}→{}",
-                                crate::config::key_name(a.clone()),
-                                crate::config::key_name(b.clone())
+                                crate::config::key_name(a),
+                                crate::config::key_name(b)
                             )
                         })
                         .collect();
@@ -415,7 +415,7 @@ impl Ui {
                 }
             }
             "set" => {
-                let mut it = arg.splitn(2, |c: char| c == '=' || c == ' ');
+                let mut it = arg.splitn(2, ['=', ' ']);
                 let k = it.next().unwrap_or("").trim().to_lowercase();
                 let v = it.next().unwrap_or("").trim().to_string();
                 if k.is_empty() {
@@ -427,13 +427,13 @@ impl Ui {
                             self.apply_config(&c);
                             self.say(&format!("{} = {}", k, v));
                         }
-                        Err(e) => self.say(&e),
+                        Err(e) => self.say(&e.to_string()),
                     }
                 }
             }
             "mkconfig" => match crate::config::write_template() {
                 Ok(p) => self.say(&format!("wrote {}", p.display())),
-                Err(e) => self.say(&e),
+                Err(e) => self.say(&e.to_string()),
             },
             "config" => self.say(&format!("{}", crate::config::config_path().display())),
             _ => return Cmd::Unknown,

@@ -178,14 +178,11 @@ pub fn here_sentence(w: &World, cell: usize) -> String {
     }
     if let Some(c) = cs.city {
         let city = &w.cities[c];
-        if city.destroyed.is_none() {
-            s.push_str(&format!(", where {} stands", city.name));
-        } else {
-            s.push_str(&format!(
-                ", where {} stood until {}",
-                city.name,
-                city.destroyed.unwrap()
-            ));
+        match city.destroyed {
+            None => s.push_str(&format!(", where {} stands", city.name)),
+            Some(year) => {
+                s.push_str(&format!(", where {} stood until {}", city.name, year));
+            }
         }
     }
     match cs.owner {

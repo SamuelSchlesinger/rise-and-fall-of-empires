@@ -146,7 +146,7 @@ pub fn populate(w: &mut World) {
                         continue;
                     }
                     let d = w.terrain.dist(home, i);
-                    if d < 6 || d > 18 {
+                    if !(6..=18).contains(&d) {
                         continue;
                     }
                     let race = &w.races[ri];

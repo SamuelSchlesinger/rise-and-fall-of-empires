@@ -218,7 +218,7 @@ pub fn years(n: i64) -> String {
 
 /// `"a"`, `"a and b"`, `"a, b, and c"`.
 pub fn list_with_and<S: AsRef<str>>(items: &[S]) -> String {
-    let items: Vec<&str> = items.iter().map(|s| s.as_ref()).collect();
+    let items: Vec<&str> = items.iter().map(std::convert::AsRef::as_ref).collect();
     match items.len() {
         0 => String::new(),
         1 => items[0].to_string(),

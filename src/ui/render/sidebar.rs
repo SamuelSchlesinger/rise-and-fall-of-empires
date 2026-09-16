@@ -16,7 +16,8 @@ impl Ui {
         let fg = Rgb(200, 200, 205);
         let dim = Rgb(120, 120, 130);
         let accent = Rgb(230, 200, 120);
-        self.screen.fill(x0, 0, width, mh, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(x0, 0, width, mh), ' ', Style::new(fg, bg));
         self.screen.vline(x0, 0, mh, Rgb(60, 60, 70), bg);
         let x = x0 + 2;
         let tx = width - 3;
@@ -30,10 +31,11 @@ impl Ui {
         self.screen
             .text_attr(x, y, &format!("Year {}", w.year), accent, bg, BOLD);
         y += 1;
-        self.screen.text_clip(x, y, &era, tx, dim, bg, 0);
+        self.screen.text_clip(x, y, &era, tx, Style::new(dim, bg));
         y += 1;
         for l in term::wrap(&era_desc, tx).into_iter().take(1) {
-            self.screen.text_clip(x, y, &l, tx, Rgb(95, 95, 105), bg, 0);
+            self.screen
+                .text_clip(x, y, &l, tx, Style::new(Rgb(95, 95, 105), bg));
             y += 1;
         }
         y += 1;
@@ -48,7 +50,7 @@ impl Ui {
             ),
         ];
         for l in lines.iter() {
-            self.screen.text_clip(x, y, l, tx, fg, bg, 0);
+            self.screen.text_clip(x, y, l, tx, Style::new(fg, bg));
             y += 1;
         }
         // What happened while the viewer was on another screen.
@@ -58,7 +60,7 @@ impl Ui {
             y += 1;
             for l in term::wrap(&note, tx).into_iter().take(3) {
                 self.screen
-                    .text_clip(x, y, &l, tx, Rgb(235, 215, 165), bg, 0);
+                    .text_clip(x, y, &l, tx, Style::new(Rgb(235, 215, 165), bg));
                 y += 1;
             }
             y += 1;
@@ -101,7 +103,8 @@ impl Ui {
                         self.screen
                             .put(x, y, if self.ascii { '*' } else { '•' }, color, bg);
                     }
-                    self.screen.text_clip(x + 2, y, &l, tx - 2, fg, bg, 0);
+                    self.screen
+                        .text_clip(x + 2, y, &l, tx - 2, Style::new(fg, bg));
                     self.story_rows.push((y, r));
                     y += 1;
                 }
@@ -141,7 +144,7 @@ impl Ui {
                 if y >= here_stop {
                     break;
                 }
-                self.screen.text_clip(x, y, &l, tx, c, bg, 0);
+                self.screen.text_clip(x, y, &l, tx, Style::new(c, bg));
                 y += 1;
             }
         }
@@ -158,7 +161,7 @@ impl Ui {
                     if y >= sel_stop {
                         break;
                     }
-                    self.screen.text_clip(x, y, &l, tx, c, bg, 0);
+                    self.screen.text_clip(x, y, &l, tx, Style::new(c, bg));
                     y += 1;
                 }
             }
@@ -208,7 +211,8 @@ impl Ui {
                     pol.name.clone()
                 };
                 let s = format!("{} {:<w$} {:>4} {}", war, name, pol.cells, arrow, w = namew);
-                self.screen.text_clip(x + 2, y, &s, tx - 2, fg, bg, 0);
+                self.screen
+                    .text_clip(x + 2, y, &s, tx - 2, Style::new(fg, bg));
                 y += 1;
             }
         }

@@ -22,10 +22,12 @@ use std::collections::BTreeMap;
 use tuning::Tuning;
 
 /// A file error with the path it happened to folded into its message.
-fn io_err(what: &str, e: std::io::Error) -> crate::ser::SaveError {
+fn io_err(what: &str, e: &std::io::Error) -> crate::ser::SaveError {
     crate::ser::SaveError::Io(std::io::Error::new(e.kind(), format!("{}: {}", what, e)))
 }
 
+/// How much the simulation bothers to remember. Lower detail drops the
+/// small events and the optional narrative flourishes, and runs faster.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Detail {
     Low,
@@ -34,6 +36,7 @@ pub enum Detail {
 }
 
 impl Detail {
+    /// The name the config file and `:detail` use.
     pub fn name(self) -> &'static str {
         match self {
             Detail::Low => "low",
@@ -41,6 +44,7 @@ impl Detail {
             Detail::High => "high",
         }
     }
+    /// 0, 1 or 2: how much optional work a subsystem should do.
     pub fn level(self) -> u8 {
         match self {
             Detail::Low => 0,
@@ -48,6 +52,7 @@ impl Detail {
             Detail::High => 2,
         }
     }
+    /// The next level round the cycle, for the `D` key.
     pub fn next(self) -> Detail {
         match self {
             Detail::Low => Detail::Medium,
@@ -69,6 +74,8 @@ impl Detail {
 // Entities
 // ---------------------------------------------------------------------------
 
+/// A people: a lifespan, a language and a set of leanings that every
+/// culture descended from it starts out with.
 pub struct Race {
     #[allow(dead_code)]
     pub id: usize,
@@ -88,6 +95,7 @@ pub struct Race {
     pub home: usize,
 }
 
+/// What a culture cares about. Every value is in `[0, 1]`.
 #[derive(Clone, Copy, Debug)]
 pub struct Values {
     pub militarism: f32,
@@ -97,6 +105,8 @@ pub struct Values {
     pub openness: f32,
 }
 
+/// A people as they are now: a language, a set of values and the land they
+/// live on. Cultures split, drift and die out.
 pub struct Culture {
     pub id: usize,
     pub name: String,
@@ -115,6 +125,8 @@ pub struct Culture {
     pub last_seen: i32,
 }
 
+/// A city: a cell, a population and a prosperity, with walls if anyone has
+/// built them and a year it was destroyed if it has been.
 pub struct City {
     pub id: usize,
     pub name: String,
@@ -132,6 +144,8 @@ pub struct City {
     pub peak_pop: f32,
 }
 
+/// What kind of thing a realm is, which decides how far it can reach and
+/// how well it holds together.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PolityKind {
     Tribe,
@@ -145,6 +159,7 @@ pub enum PolityKind {
 }
 
 impl PolityKind {
+    /// The common noun for this kind of realm.
     pub fn name(self) -> &'static str {
         match self {
             PolityKind::Tribe => "tribe",
@@ -157,6 +172,7 @@ impl PolityKind {
             PolityKind::Horde => "horde",
         }
     }
+    /// 0 to 3: how grand the kind is, for promotions and demotions.
     pub fn rank(self) -> u8 {
         match self {
             PolityKind::Tribe => 0,
@@ -169,6 +185,7 @@ impl PolityKind {
             PolityKind::Empire => 3,
         }
     }
+    /// How many more cells this kind of realm can administer.
     pub fn admin_bonus(self) -> f32 {
         match self {
             PolityKind::Tribe => 0.0,
@@ -181,6 +198,7 @@ impl PolityKind {
             PolityKind::Horde => 30.0,
         }
     }
+    /// How hard this kind of realm pushes at its borders.
     pub fn expansion_mult(self) -> f32 {
         match self {
             PolityKind::Tribe => 0.6,
@@ -193,6 +211,7 @@ impl PolityKind {
             PolityKind::Horde => 1.8,
         }
     }
+    /// Whether rule passes down a family rather than being chosen.
     pub fn has_dynasty(self) -> bool {
         matches!(
             self,
@@ -201,6 +220,8 @@ impl PolityKind {
     }
 }
 
+/// A realm: land, cities, a ruler, an army and a treasury, and the running
+/// tallies that decide whether it grows, holds or comes apart.
 pub struct Polity {
     pub id: usize,
     pub name: String,
@@ -250,23 +271,28 @@ pub struct Polity {
 }
 
 impl Polity {
+    /// Whether the realm still stands.
     pub fn alive(&self) -> bool {
         self.fell.is_none()
     }
+    /// Whether it is fighting anyone.
     pub fn at_war(&self) -> bool {
         !self.wars.is_empty()
     }
+    /// How many cells it can govern before it starts to fray.
     pub fn admin_capacity(&self, t: &Tuning) -> f32 {
         t.admin_capacity_base
             + self.kind.admin_bonus()
             + self.dev * t.admin_capacity_dev_weight
             + self.cities.len() as f32 * t.admin_capacity_city_weight
     }
+    /// Land held over [`Polity::admin_capacity`]: 1.0 is exactly at the limit.
     pub fn overextension(&self, t: &Tuning) -> f32 {
         (self.cells as f32 / self.admin_capacity(t)).max(0.0)
     }
 }
 
+/// What a person is remembered as.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Role {
     Ruler,
@@ -281,6 +307,7 @@ pub enum Role {
 }
 
 impl Role {
+    /// The common noun for this role.
     pub fn name(self) -> &'static str {
         match self {
             Role::Ruler => "ruler",
@@ -296,6 +323,7 @@ impl Role {
     }
 }
 
+/// A person's gender, which chooses their honorific.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Gender {
     F,
@@ -303,6 +331,7 @@ pub enum Gender {
     N,
 }
 
+/// What a person is like. Every trait is in `[0, 1]`.
 #[derive(Clone, Copy, Debug)]
 pub struct Traits {
     pub ambition: f32,
@@ -314,6 +343,7 @@ pub struct Traits {
 }
 
 impl Traits {
+    /// A fresh set of traits, each near the middle of its range.
     pub fn random(rng: &Rng) -> Traits {
         Traits {
             ambition: rng.trait_value(0.5, 0.22),
@@ -324,6 +354,7 @@ impl Traits {
             charisma: rng.trait_value(0.5, 0.22),
         }
     }
+    /// A child's traits: the parent's, pulled back towards the middle.
     pub fn inherit(&self, rng: &Rng) -> Traits {
         let mix = |v: f32| rng.trait_value(v as f64 * 0.6 + 0.2, 0.2);
         Traits {
@@ -335,6 +366,7 @@ impl Traits {
             charisma: mix(self.charisma),
         }
     }
+    /// The two or three traits that stand out, in words.
     pub fn describe(&self) -> String {
         let mut parts: Vec<&str> = Vec::new();
         if self.ambition > 0.72 {
@@ -375,6 +407,7 @@ impl Traits {
     }
 }
 
+/// Somebody worth remembering: a ruler, a general, a mage, a prophet.
 pub struct Person {
     #[allow(dead_code)]
     pub id: usize,
@@ -397,17 +430,20 @@ pub struct Person {
 }
 
 impl Person {
+    /// Name and epithet together: "Aurel the Patient".
     pub fn full_name(&self) -> String {
         match &self.epithet {
             Some(e) => format!("{} {}", self.name, e),
             None => self.name.clone(),
         }
     }
+    /// Whether they are still living.
     pub fn alive(&self) -> bool {
         self.died.is_none()
     }
 }
 
+/// What a school teaches: magic, a faith, or a way of thinking.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SchoolKind {
     Arcane,
@@ -416,6 +452,7 @@ pub enum SchoolKind {
 }
 
 impl SchoolKind {
+    /// The common noun for this kind of school.
     pub fn name(self) -> &'static str {
         match self {
             SchoolKind::Arcane => "arcane school",
@@ -423,6 +460,7 @@ impl SchoolKind {
             SchoolKind::Philosophical => "philosophy",
         }
     }
+    /// What its followers are called.
     pub fn follower(self) -> &'static str {
         match self {
             SchoolKind::Arcane => "adepts",
@@ -432,6 +470,8 @@ impl SchoolKind {
     }
 }
 
+/// An order, faith or academy: a doctrine, a home city and a hold over
+/// however many realms will listen to it.
 pub struct School {
     pub id: usize,
     pub name: String,
@@ -455,14 +495,17 @@ pub struct School {
 }
 
 impl School {
+    /// Whether anyone still teaches it.
     pub fn alive(&self) -> bool {
         self.extinct.is_none()
     }
+    /// Its hold over every realm added together.
     pub fn total_influence(&self) -> f32 {
         self.influence.values().sum()
     }
 }
 
+/// What a war is being fought over.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum WarKind {
     Conquest,
@@ -473,6 +516,7 @@ pub enum WarKind {
     Succession,
 }
 
+/// A war: two realms, a running score, and how it ended.
 pub struct War {
     #[allow(dead_code)]
     pub id: usize,
@@ -490,11 +534,13 @@ pub struct War {
 }
 
 impl War {
+    /// Whether the fighting is still going on.
     pub fn alive(&self) -> bool {
         self.ended.is_none()
     }
 }
 
+/// What the simulation keeps for each map cell, on top of its terrain.
 #[derive(Clone, Copy, Default)]
 pub struct CellState {
     pub owner: Option<usize>,
@@ -505,6 +551,7 @@ pub struct CellState {
     pub plague: u8,
 }
 
+/// What sort of thing a relic is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ArtifactKind {
     Crown,
@@ -519,6 +566,7 @@ pub enum ArtifactKind {
     Shard,
 }
 
+/// Who has a relic now, if anyone.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Holder {
     Polity(usize),
@@ -527,6 +575,8 @@ pub enum Holder {
     Lost,
 }
 
+/// A relic: made once, passed from hand to hand, and lost often enough to
+/// be worth going looking for.
 pub struct Artifact {
     pub id: usize,
     pub name: String,
@@ -541,6 +591,7 @@ pub struct Artifact {
     pub hands: u32,
 }
 
+/// What a seer foretold, in a form the simulation can check.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProphecyKind {
     RealmFalls(usize),
@@ -551,6 +602,7 @@ pub enum ProphecyKind {
     RelicReturns(usize, usize),
 }
 
+/// A prophecy, its deadline, and whether it came true.
 pub struct Prophecy {
     #[allow(dead_code)]
     pub id: usize,
@@ -563,6 +615,7 @@ pub struct Prophecy {
     pub resolved: Option<i32>,
 }
 
+/// A named age of the world, given to it in hindsight.
 pub struct Era {
     #[allow(dead_code)]
     pub start: i32,
@@ -570,6 +623,7 @@ pub struct Era {
     pub description: String,
 }
 
+/// A pestilence running its course through some realms.
 pub struct Plague {
     pub name: String,
     pub years_left: i32,
@@ -577,6 +631,7 @@ pub struct Plague {
     pub deaths: f64,
 }
 
+/// World totals, recomputed each year for the sidebar and the balance harness.
 #[derive(Default, Clone)]
 pub struct Stats {
     pub pop: f64,
@@ -633,6 +688,11 @@ impl Default for Prof {
 // The world
 // ---------------------------------------------------------------------------
 
+/// Everything there is: the map, everyone on it, and all that has happened.
+///
+/// Entities live in flat `Vec`s and refer to one another by index, so that
+/// any part of the world can be reached from any other without a borrow
+/// fight. An index is never reused: a realm that falls keeps its slot.
 pub struct World {
     pub seed: u64,
     pub rng: Rng,
@@ -702,28 +762,42 @@ impl World {
         }
     }
 
+    /// Write the world to `path` through a temporary file, so an interrupted
+    /// save cannot leave a half-written one behind. Returns the byte count.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ser::SaveError::Io`] if the directory or the file cannot be
+    /// written or the rename into place fails.
     pub fn save_to(&mut self, path: &std::path::Path) -> Result<usize, crate::ser::SaveError> {
         let bytes = crate::ser::save(self);
         if let Some(dir) = path.parent() {
             if !dir.as_os_str().is_empty() {
                 std::fs::create_dir_all(dir)
-                    .map_err(|e| io_err(&format!("cannot create {}", dir.display()), e))?;
+                    .map_err(|e| io_err(&format!("cannot create {}", dir.display()), &e))?;
             }
         }
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, &bytes)
-            .map_err(|e| io_err(&format!("cannot write {}", tmp.display()), e))?;
+            .map_err(|e| io_err(&format!("cannot write {}", tmp.display()), &e))?;
         std::fs::rename(&tmp, path)
-            .map_err(|e| io_err(&format!("cannot rename to {}", path.display()), e))?;
+            .map_err(|e| io_err(&format!("cannot rename to {}", path.display()), &e))?;
         Ok(bytes.len())
     }
 
+    /// Read a world back from `path`.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ser::SaveError`] if the file cannot be read, is not a save, or
+    /// does not survive its own checksum.
     pub fn load_from(path: &std::path::Path) -> Result<World, crate::ser::SaveError> {
         let bytes = std::fs::read(path)
-            .map_err(|e| io_err(&format!("cannot read {}", path.display()), e))?;
+            .map_err(|e| io_err(&format!("cannot read {}", path.display()), &e))?;
         crate::ser::load(&bytes)
     }
 
+    /// Raise a world `w` by `h` from `seed` and populate its first age.
     pub fn new(seed: u64, w: usize, h: usize, detail: Detail) -> World {
         let rng = Rng::new(seed);
         let terrain = geo::generate(&rng, w, h);
@@ -765,6 +839,8 @@ impl World {
 
     // -- logging ----------------------------------------------------------
 
+    /// Record an event, unless the current [`Detail`] does not care for it.
+    /// Returns the event's id when one was kept.
     pub fn log(
         &mut self,
         importance: u8,
@@ -787,6 +863,7 @@ impl World {
         Some(self.chronicle.push(ev))
     }
 
+    /// Whether the world is running at the highest detail.
     pub fn high_detail(&self) -> bool {
         self.detail == Detail::High
     }
@@ -802,6 +879,7 @@ impl World {
 
     // -- naming helpers -----------------------------------------------------
 
+    /// The language of the realm's culture, for naming what it finds.
     pub fn polity_lang(&self, p: usize) -> &Language {
         &self.cultures[self.polities[p].culture].lang
     }
@@ -818,6 +896,7 @@ impl World {
         }
     }
 
+    /// The ruler's name and title, short enough for a sidebar line.
     pub fn ruler_short(&self, p: usize) -> String {
         match self.polities[p].ruler {
             Some(r) => {
@@ -828,6 +907,7 @@ impl World {
         }
     }
 
+    /// What this realm calls a ruler of that gender: King, Khan, Hierarch.
     pub fn honorific(&self, p: usize, g: Gender) -> String {
         let pol = &self.polities[p];
         let lang = self.polity_lang(p);
@@ -854,6 +934,7 @@ impl World {
         }
     }
 
+    /// Bring somebody into the world and return their index.
     pub fn new_person(
         &mut self,
         culture: usize,
@@ -1018,15 +1099,19 @@ impl World {
         format!("in the open {}", b.name())
     }
 
+    /// A realm's colour on the map, spread around the hue circle by index so
+    /// that neighbours rarely clash.
     pub fn polity_color(&self, id: usize) -> Rgb {
         let hue = (id as f32 * 137.508) % 360.0;
-        let sat = if id % 3 == 0 { 0.75 } else { 0.55 };
-        let val = if id % 2 == 0 { 0.85 } else { 0.65 };
+        let sat = if id.is_multiple_of(3) { 0.75 } else { 0.55 };
+        let val = if id.is_multiple_of(2) { 0.85 } else { 0.65 };
         Rgb::from_hsv(hue, sat, val)
     }
 
     // -- aggregates -------------------------------------------------------
 
+    /// Rebuild every aggregate: cell counts, populations, neighbours and the
+    /// owner index. Run once a year and after loading.
     pub fn recompute(&mut self) {
         for p in self.polities.iter_mut() {
             p.cells = 0;
@@ -1147,6 +1232,7 @@ impl World {
 
     // -- tick -------------------------------------------------------------
 
+    /// Advance the world one year, running the phases in [`PHASES`] order.
     pub fn tick(&mut self) {
         let t0 = std::time::Instant::now();
         self.year += 1;
@@ -1196,7 +1282,10 @@ impl World {
 
     /// Cells owned by polity `p`, ascending.
     pub fn cells_of_ref(&self, p: usize) -> &[usize] {
-        self.owner_cells.get(p).map(|v| v.as_slice()).unwrap_or(&[])
+        self.owner_cells
+            .get(p)
+            .map(std::vec::Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     /// Cells owned by polity `p`, ascending, as an owned list. Callers that
@@ -1264,6 +1353,7 @@ impl World {
         moved
     }
 
+    /// The indices of every realm that still stands.
     pub fn living_polities(&self) -> Vec<usize> {
         self.polities
             .iter()
@@ -1272,6 +1362,7 @@ impl World {
             .collect()
     }
 
+    /// The cell the realm's capital sits on, if it has one standing.
     pub fn capital_cell(&self, p: usize) -> Option<usize> {
         self.polities[p].capital.map(|c| self.cities[c].cell)
     }

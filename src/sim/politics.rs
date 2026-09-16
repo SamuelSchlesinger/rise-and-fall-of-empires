@@ -353,7 +353,7 @@ pub fn expand(w: &mut World) {
     let np = w.polities.len();
     let mut cand: Vec<Vec<(f32, usize, f32)>> = vec![Vec::new(); np];
     let capitals: Vec<Option<usize>> = (0..np).map(|p| w.capital_cell(p)).collect();
-    let alive: Vec<bool> = w.polities.iter().map(|p| p.alive()).collect();
+    let alive: Vec<bool> = w.polities.iter().map(super::Polity::alive).collect();
     let mut seen: Vec<usize> = Vec::with_capacity(8);
     for i in 0..n {
         if w.cells[i].owner.is_some() || !w.terrain.is_land(i) {
@@ -409,8 +409,8 @@ pub fn expand(w: &mut World) {
             }
         }
     }
-    for p in 0..np {
-        if cand[p].is_empty() {
+    for (p, list) in cand.iter_mut().enumerate() {
+        if list.is_empty() {
             continue;
         }
         let pol = &w.polities[p];
@@ -432,8 +432,7 @@ pub fn expand(w: &mut World) {
             * (tn.expand_stability_base + pol.stability)
             * over_pen
             * war_pen;
-        let list = &mut cand[p];
-        list.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        list.sort_by(|a, b| b.0.total_cmp(&a.0));
         let mut taken = 0;
         let claims: Vec<usize> = {
             let mut out = Vec::new();
@@ -619,7 +618,7 @@ pub fn economy(w: &mut World) {
                 .fold(0.0, f32::max)
         })
         .collect();
-    for p in 0..np {
+    for (p, &nb_dev) in neighbor_dev.iter().enumerate() {
         if !w.polities[p].alive() {
             continue;
         }
@@ -711,8 +710,8 @@ pub fn economy(w: &mut World) {
         if stab < 0.3 {
             ddev -= 0.0015;
         }
-        if neighbor_dev[p] > pol.dev {
-            ddev += (neighbor_dev[p] - pol.dev) * 0.004 * (0.5 + vals.openness);
+        if nb_dev > pol.dev {
+            ddev += (nb_dev - pol.dev) * 0.004 * (0.5 + vals.openness);
         }
         pol.dev = (pol.dev + ddev).clamp(0.0, 3.0);
         // Seafaring.
@@ -847,7 +846,7 @@ fn epithet_for(w: &World, p: usize, r: usize) -> Option<String> {
     Some(rng.pick(&opts).to_string())
 }
 
-pub fn ruler_dies(w: &mut World, p: usize, cause: String, importance: u8) {
+pub fn ruler_dies(w: &mut World, p: usize, cause: &str, importance: u8) {
     let r = match w.polities[p].ruler {
         Some(r) => r,
         None => return,
@@ -855,9 +854,9 @@ pub fn ruler_dies(w: &mut World, p: usize, cause: String, importance: u8) {
     let epithet = epithet_for(w, p, r);
     w.persons[r].epithet = epithet;
     w.persons[r].died = Some(w.year);
-    w.persons[r].death = cause.clone();
+    w.persons[r].death = cause.to_string();
     let length = w.year - w.polities[p].reign_start;
-    let mut text = prose::ruler_died(w, p, r, &cause, length);
+    let mut text = prose::ruler_died(w, p, r, cause, length);
     if w.high_detail() {
         let flourish = prose::ruler_death_flourish(w, p, r, length, &Pick::rolled(&w.rng.clone()));
         text.push_str(&flourish);
@@ -971,7 +970,11 @@ fn succession(w: &mut World, p: usize, old: usize) {
         if let Some(rebel) = split_off(w, p, Some(claimant_b), None) {
             let claim = prose::succession_claim(w, p, &name_b);
             w.wars_start(rebel, p, super::WarKind::Succession, claim);
-            let seat_a = w.cities[w.polities[p].capital.unwrap()].name.clone();
+            // A realm whose every city has been destroyed has no capital left
+            // to name, so the claimant holds out for the realm itself.
+            let seat_a = w.polities[p]
+                .capital
+                .map_or_else(|| w.polities[p].short.clone(), |c| w.cities[c].name.clone());
             let text = prose::succession_war(w, p, rebel, &name_a, &name_b, &seat_a);
             w.log(
                 2,
@@ -1065,11 +1068,11 @@ pub fn rulers(w: &mut World) {
         let roll = rng.f64();
         if roll < p_nat as f64 {
             let cause = prose::natural_death(age as i32, &Pick::rolled(&rng));
-            ruler_dies(w, p, cause, 1);
+            ruler_dies(w, p, &cause, 1);
         } else if roll < (p_nat + p_assassin) as f64 {
             let by = prose::assassin(w, p, &Pick::rolled(&rng));
             w.polities[p].stability = (w.polities[p].stability - 0.15).max(0.0);
-            ruler_dies(w, p, prose::murdered_by(&by), 2);
+            ruler_dies(w, p, &prose::murdered_by(&by), 2);
         }
     }
 }
@@ -1162,9 +1165,8 @@ pub fn split_off(
         .copied()
         .find(|&i| w.cells[i].city.is_some())
         .unwrap_or(seed);
-    let leader = leader.map(|l| {
+    let leader = leader.inspect(|&l| {
         w.persons[l].culture = seed_culture;
-        l
     });
     let np = found_polity(w, seed_culture, seat, kind, Some(p), &region, leader);
     w.polities[p].last_revolt = w.year;
@@ -1174,7 +1176,7 @@ pub fn split_off(
 pub fn fall(
     w: &mut World,
     p: usize,
-    cause: String,
+    cause: &str,
     absorbed_by: Option<usize>,
     importance_floor: u8,
 ) {
@@ -1193,7 +1195,7 @@ pub fn fall(
     let wars = w.polities[p].wars.clone();
     for wid in wars {
         let result = prose::war_lapsed(w, p);
-        w.end_war(wid, result, false);
+        w.end_war(wid, &result, false);
     }
     if let Some(r) = w.polities[p].ruler {
         if w.persons[r].alive() {
@@ -1202,7 +1204,7 @@ pub fn fall(
     }
     let pol = &mut w.polities[p];
     pol.fell = Some(w.year);
-    pol.fall_cause = cause.clone();
+    pol.fall_cause = cause.to_string();
     let peak = pol.peak_cells;
     let imp = if peak > 150 {
         3
@@ -1218,7 +1220,7 @@ pub fn fall(
         .filter(|c| c.founder == Some(p))
         .count()
         .max(w.polities[p].cities.len());
-    let text = prose::realm_fell(w, p, &cause, cities_built);
+    let text = prose::realm_fell(w, p, cause, cities_built);
     let mut refs = vec![Ref::Polity(p)];
     if let Some(a) = absorbed_by {
         refs.push(Ref::Polity(a));
@@ -1234,7 +1236,7 @@ pub fn unrest(w: &mut World) {
         let pol = &w.polities[p];
         if pol.cells == 0 && pol.founded < w.year {
             let cause = prose::faded_away(w, p, !pol.wars.is_empty());
-            fall(w, p, cause, None, 1);
+            fall(w, p, &cause, None, 1);
             continue;
         }
         // Kind progression.
@@ -1396,7 +1398,18 @@ fn kind_changes(w: &mut World, p: usize) {
         }
     }
     let capital = cap_name.unwrap_or_else(|| short.clone());
-    let (imp, text) = prose::rank_changed(w, p, old, new, &oldname, &name, &ruler, &capital);
+    let (imp, text) = prose::rank_changed(
+        w,
+        p,
+        &prose::RankChange {
+            old,
+            new,
+            old_name: &oldname,
+            new_name: &name,
+            ruler: &ruler,
+            capital: &capital,
+        },
+    );
     w.log(
         imp,
         EventKind::Politics,
@@ -1418,11 +1431,11 @@ fn fragment(w: &mut World, p: usize) {
         .copied()
         .filter(|&c| c != capital)
         .collect();
-    cities.sort_by(|&a, &b| w.cities[b].pop.partial_cmp(&w.cities[a].pop).unwrap());
+    cities.sort_by(|&a, &b| w.cities[b].pop.total_cmp(&w.cities[a].pop));
     let k = (2 + rng.below(3)).min(cities.len());
     if k < 1 {
         // No cities to seed successors: the state simply collapses.
-        fall(w, p, prose::collapsed_into_lawlessness(w, p), None, 2);
+        fall(w, p, &prose::collapsed_into_lawlessness(w, p), None, 2);
         return;
     }
     let seeds: Vec<usize> = cities[..k].iter().map(|&c| w.cities[c].cell).collect();

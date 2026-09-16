@@ -315,9 +315,7 @@ impl Ui {
             if (x0..x0 + n + 1).any(|x| taken[sy][x]) {
                 continue;
             }
-            for x in x0..x0 + n + 1 {
-                taken[sy][x] = true;
-            }
+            taken[sy][x0..x0 + n + 1].fill(true);
             let color = pol.color;
             let fg = color.mix(Rgb(255, 255, 255), 0.55);
             for (k, ch) in label.chars().enumerate() {
@@ -335,7 +333,11 @@ impl Ui {
         let y = my + mh - 1;
         let bg = Rgb(24, 24, 30);
         let text = words::legend(self.layer, self.ascii);
-        self.screen.fill(mx, y, mw, 1, ' ', Rgb(170, 170, 180), bg);
+        self.screen.fill(
+            Rect::new(mx, y, mw, 1),
+            ' ',
+            Style::new(Rgb(170, 170, 180), bg),
+        );
         self.screen
             .text_attr(mx + 1, y, self.layer.name(), Rgb(235, 205, 130), bg, BOLD);
         let x = mx + 2 + self.layer.name().chars().count();
@@ -344,9 +346,7 @@ impl Ui {
             y,
             &text,
             mw.saturating_sub(x - mx + 1),
-            Rgb(165, 165, 178),
-            bg,
-            0,
+            Style::new(Rgb(165, 165, 178), bg),
         );
     }
 }

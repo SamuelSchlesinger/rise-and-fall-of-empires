@@ -51,7 +51,8 @@ impl Ui {
         let bg = Rgb(40, 40, 52);
         let fg = Rgb(220, 220, 225);
         let key = Rgb(255, 220, 120);
-        self.screen.fill(0, y, sw, 1, ' ', fg, bg);
+        self.screen
+            .fill(Rect::new(0, y, sw, 1), ' ', Style::new(fg, bg));
         // A prompt takes over the whole line, as in vim.
         if self.prompt != Prompt::None {
             let lead = if self.prompt == Prompt::Command {

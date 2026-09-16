@@ -122,9 +122,8 @@ pub fn grow_and_migrate(w: &mut World) {
             w.cells[i].culture = Some(c);
         }
     }
-    for i in 0..n {
-        let cs = &mut w.cells[i];
-        cs.pop = (cs.pop + delta[i]).max(0.0);
+    for (cs, &d) in w.cells.iter_mut().zip(delta.iter()).take(n) {
+        cs.pop = (cs.pop + d).max(0.0);
         if cs.pop < 0.01 && cs.owner.is_none() && cs.city.is_none() {
             cs.pop = 0.0;
         }

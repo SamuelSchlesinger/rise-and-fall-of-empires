@@ -11,6 +11,22 @@
 //! cells. Purely cosmetic or structural numbers (text choices, list sizes,
 //! clamps) are deliberately left where they are.
 
+/// A `tune.<field>` setting named a field that does not exist.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnknownField(
+    /// The name that was asked for.
+    pub String,
+);
+
+impl std::fmt::Display for UnknownField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown tuning field '{}'", self.0)
+    }
+}
+
+impl std::error::Error for UnknownField {}
+
+/// Every balance-relevant number the simulation uses. See the module header.
 #[derive(Clone, Copy, Debug)]
 pub struct Tuning {
     // -- population and migration -----------------------------------------
@@ -538,7 +554,12 @@ impl Default for Tuning {
 impl Tuning {
     /// Set one field by name, as the config file's `tune.<field> = <value>`
     /// lines do. Returns an error message for an unknown field.
-    pub fn set(&mut self, name: &str, v: f64) -> Result<(), String> {
+    /// Set one field by name, as `tune.<name> = <v>` in the config file does.
+    ///
+    /// # Errors
+    ///
+    /// [`UnknownField`] if no field goes by that name.
+    pub fn set(&mut self, name: &str, v: f64) -> Result<(), UnknownField> {
         match name {
             // population and migration
             "pop_growth_rate" => self.pop_growth_rate = v as f32,
@@ -617,10 +638,10 @@ impl Tuning {
             "ruler_death_age_weight" => self.ruler_death_age_weight = v as f32,
             "ruler_assassination_base" => self.ruler_assassination_base = v as f32,
             "ruler_assassination_cruelty_weight" => {
-                self.ruler_assassination_cruelty_weight = v as f32
+                self.ruler_assassination_cruelty_weight = v as f32;
             }
             "ruler_assassination_unrest_weight" => {
-                self.ruler_assassination_unrest_weight = v as f32
+                self.ruler_assassination_unrest_weight = v as f32;
             }
             "succession_smooth_base" => self.succession_smooth_base = v,
             "succession_smooth_stability_weight" => self.succession_smooth_stability_weight = v,
@@ -714,7 +735,7 @@ impl Tuning {
             "artifact_fall_pass_chance" => self.artifact_fall_pass_chance = v,
             "tyrant_chance" => self.tyrant_chance = v,
             "chronicle_cap" => self.chronicle_cap = v.max(0.0) as usize,
-            _ => return Err(format!("unknown tuning field '{}'", name)),
+            _ => return Err(UnknownField(name.to_string())),
         }
         Ok(())
     }

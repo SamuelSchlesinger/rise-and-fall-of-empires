@@ -298,18 +298,33 @@ pub fn succession_claim(w: &World, p: usize, claimant: &str) -> String {
 // Rank
 // ---------------------------------------------------------------------------
 
+/// What a realm was and what it has become, for [`rank_changed`].
+pub struct RankChange<'a> {
+    /// The kind of thing it was.
+    pub old: PolityKind,
+    /// The kind of thing it now is.
+    pub new: PolityKind,
+    /// What it was called before.
+    pub old_name: &'a str,
+    /// What it is called now.
+    pub new_name: &'a str,
+    /// The ruler presiding over the change.
+    pub ruler: &'a str,
+    /// The capital it happened in.
+    pub capital: &'a str,
+}
+
 /// A realm changes what kind of thing it is. Returns importance and text.
 /// No draws.
-pub fn rank_changed(
-    w: &World,
-    p: usize,
-    old: PolityKind,
-    new: PolityKind,
-    old_name: &str,
-    new_name: &str,
-    ruler: &str,
-    capital: &str,
-) -> (u8, String) {
+pub fn rank_changed(w: &World, p: usize, c: &RankChange) -> (u8, String) {
+    let RankChange {
+        old,
+        new,
+        old_name,
+        new_name,
+        ruler,
+        capital,
+    } = *c;
     let short = realm(w, p);
     // The old name may be plural ("the Velenic Clans are now ...").
     let was_named = if super::name_is_plural(old_name, old) {
