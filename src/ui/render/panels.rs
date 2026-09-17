@@ -439,11 +439,11 @@ impl Ui {
     }
 
     pub(super) fn render_fate(&mut self) {
-        let p = match self.selected {
-            Some(Ref::Polity(p)) => p,
-            _ => return,
-        };
-        let lines = detail::fate_menu(&self.world, p);
+        let Some(r) = self.selected else { return };
+        let lines = detail::fate_menu_for(&self.world, r);
+        if lines.is_empty() {
+            return;
+        }
         let w = lines.iter().map(|l| l.chars().count()).max().unwrap_or(20) + 4;
         let h = lines.len() + 2;
         let (_, _, mw, mh) = self.map_rect();

@@ -5,6 +5,7 @@
 
 mod commands;
 pub(crate) mod detail;
+mod export;
 mod input;
 mod learn;
 pub mod query;
@@ -530,6 +531,15 @@ pub fn run(
 /// Only for measurement: the interactive loop renders every frame, so what
 /// a frame costs at year five thousand is the number that decides whether
 /// the game still feels responsive in a long world.
+/// A paused interface over a given world, for the tests that exercise what
+/// the interface can produce rather than how it is driven.
+#[cfg(test)]
+pub(crate) fn for_test(world: World, cols: usize, rows: usize) -> Ui {
+    let mut ui = Ui::new(world, false, false, cols, rows);
+    ui.paused = true;
+    ui
+}
+
 #[cfg(test)]
 pub(crate) fn time_frames(world: World, cols: usize, rows: usize, frames: u32) -> f64 {
     let mut ui = Ui::new(world, false, false, cols, rows);
@@ -1357,18 +1367,39 @@ impl Ui {
         if self.selected.is_none() {
             self.selected = self.entity_at_cursor();
         }
-        if let Some(Ref::Polity(_)) = self.selected {
-            self.prev_mode = self.mode;
-            self.mode = Mode::Fate;
-        } else {
-            self.say("select a realm first (Enter or s over its lands)");
+        // A realm, a town, a person or a stretch of country. It used to
+        // reach realms alone, so the only way to touch a city was to find
+        // whichever realm happened to hold it and act on all of that
+        // instead — and a city is the unit most of this world's history
+        // actually happens to.
+        //
+        // Failing all of those, the region under the cursor, so that there
+        // is always something to act on even where nobody lives.
+        let target = self
+            .selected
+            .filter(|&r| detail::fate_reaches(&self.world, r))
+            .or_else(|| {
+                let i = self.world.terrain.idx(self.cursor.0, self.cursor.1);
+                self.world.terrain.feature_at(i).map(Ref::Feature)
+            });
+        match target {
+            Some(r) => {
+                self.selected = Some(r);
+                self.prev_mode = self.mode;
+                self.mode = Mode::Fate;
+            }
+            None => self.say("nothing here the hand of fate can reach"),
         }
     }
 
-    fn choose_fate(&mut self, p: usize, choice: usize) {
-        let msg = detail::hand_of_fate(&mut self.world, p, choice as u8);
+    fn choose_fate(&mut self, r: Ref, choice: usize) {
+        let msg = detail::hand_of_fate_on(&mut self.world, r, choice as u8);
         self.say(&msg);
         self.mode = self.prev_mode;
+        // What was done may have changed what the derived indexes say — a
+        // blighted region, an emptied one, a town that has doubled — and the
+        // next frame reads them.
+        self.world.recompute();
     }
 }
 

@@ -585,17 +585,17 @@ impl Ui {
     }
 
     fn key_fate(&mut self, k: &Key) {
-        let p = match self.selected {
-            Some(Ref::Polity(p)) => p,
-            _ => {
-                self.mode = self.prev_mode;
-                return;
-            }
+        let Some(r) = self
+            .selected
+            .filter(|&r| crate::ui::detail::fate_reaches(&self.world, r))
+        else {
+            self.mode = self.prev_mode;
+            return;
         };
         match k {
             Key::Esc | Key::Char('x') | Key::Char('q') => self.mode = self.prev_mode,
             Key::Char(c) if ('1'..='6').contains(c) => {
-                self.choose_fate(p, *c as usize - '1' as usize);
+                self.choose_fate(r, *c as usize - '1' as usize);
             }
             _ => {}
         }
@@ -755,8 +755,8 @@ impl Ui {
                     if m.x >= fx && m.x < fx + fw && m.y >= fy && m.y < fy + fh {
                         let row = m.y.saturating_sub(fy + 1);
                         if (2..8).contains(&row) {
-                            if let Some(Ref::Polity(p)) = self.selected {
-                                self.choose_fate(p, row - 2);
+                            if let Some(r) = self.selected {
+                                self.choose_fate(r, row - 2);
                             }
                         }
                     } else {

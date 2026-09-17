@@ -2048,3 +2048,163 @@ fn probe_trade_share() {
         }
     }
 }
+
+/// Every intervention, on every kind of thing, must do something and must
+/// leave the world standing.
+///
+/// The Hand of Fate reached realms and nothing else, so the only way to
+/// touch a city was to find whichever realm happened to hold it and act on
+/// the whole of that instead — and a city is the unit most of this world's
+/// history actually happens to. It reaches towns, people and regions now,
+/// which is four times as many ways to be wrong.
+///
+/// Each one is worked on a world forked through a save file, so that
+/// twenty-four interventions are twenty-four independent experiments rather
+/// than one long compounding one, and each is asked for three things: that
+/// it says what it did, that the world survives a further century, and that
+/// something actually changed.
+#[test]
+fn every_intervention_does_something_and_breaks_nothing() {
+    use crate::sim::chronicle::Ref;
+    use crate::ui::detail::{fate_menu_for, fate_reaches, hand_of_fate_on};
+    let mut seed_world = world(67);
+    run(&mut seed_world, 500);
+    let bytes = ser::save(&mut seed_world);
+
+    // One target of each kind, chosen from the world rather than assumed.
+    let realm = *seed_world
+        .alive_polities
+        .first()
+        .expect("a 500 year world has realms");
+    let city = seed_world.polities[realm]
+        .cities
+        .first()
+        .copied()
+        .or_else(|| {
+            (0..seed_world.cities.len()).find(|&c| seed_world.cities[c].destroyed.is_none())
+        })
+        .expect("a 500 year world has cities");
+    let person = *seed_world
+        .alive_persons
+        .last()
+        .expect("a 500 year world has people");
+    let region = (0..seed_world.terrain.features.len())
+        .find(|&f| {
+            seed_world.terrain.features[f].name.is_some()
+                && seed_world.terrain.features[f]
+                    .cells
+                    .iter()
+                    .any(|&i| seed_world.terrain.is_land(i))
+        })
+        .expect("a world has a named region with land in it");
+
+    for target in [
+        Ref::Polity(realm),
+        Ref::City(city),
+        Ref::Person(person),
+        Ref::Feature(region),
+    ] {
+        // Every reachable kind must offer a menu, and the menu must have a
+        // line for each of the six keys that select from it.
+        let menu = fate_menu_for(&seed_world, target);
+        assert!(
+            menu.len() >= 8,
+            "{:?} offers {} lines, which is not a title, a blank and six \
+             choices",
+            target,
+            menu.len()
+        );
+        for choice in 0..6u8 {
+            let mut w = ser::load(&bytes).expect("a fresh save must load");
+            assert!(fate_reaches(&w, target), "{:?} is out of reach", target);
+            let before = summary(&w);
+            let said = hand_of_fate_on(&mut w, target, choice);
+            assert!(
+                !said.is_empty() && said != "that is beyond reach now",
+                "{:?} choice {} said {:?}",
+                target,
+                choice,
+                said
+            );
+            // The world has to survive being interfered with, including the
+            // derived indexes an intervention may have invalidated.
+            w.recompute();
+            run(&mut w, 100);
+            let after = summary(&w);
+            assert_ne!(
+                before, after,
+                "{:?} choice {} ({}) left the world exactly as it was",
+                target, choice, said
+            );
+            // And a save written after an intervention must still load.
+            let bytes_after = ser::save(&mut w);
+            assert!(
+                ser::load(&bytes_after).is_ok(),
+                "{:?} choice {} produced a world that cannot be saved",
+                target,
+                choice
+            );
+        }
+    }
+}
+
+/// A world can be written out for somebody who does not have the game.
+///
+/// Everything the interface knows is on a screen that scrolls away, and the
+/// only way out was a save file, which needs this binary to read. A world
+/// run for five thousand years is a thing people want to keep and show to
+/// other people.
+#[test]
+fn a_world_can_be_written_out() {
+    let dir = std::env::temp_dir().join(format!("empires-export-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a temp directory");
+    let mut ui = crate::ui::for_test(world(71), 100, 40);
+    run(&mut ui.world, 400);
+
+    // Every shape, and each one has to produce something a reader could use.
+    for (kind, must_contain) in [
+        ("chronicle", "## Years"),
+        ("map", "<!doctype html>"),
+        ("realms", "name,lands,people"),
+        ("wealth", "treasury"),
+        ("cities", "prosperity"),
+        ("roads", "name,"),
+    ] {
+        let path = dir.join(format!("{}.out", kind));
+        let said = ui.export(kind, path.to_str().expect("a utf-8 path"));
+        assert!(said.starts_with("wrote "), "{}: {}", kind, said);
+        let body = std::fs::read_to_string(&path).expect("the file it said it wrote");
+        assert!(
+            body.contains(must_contain),
+            "{} export has no {:?} in it:\n{}",
+            kind,
+            must_contain,
+            &body[..body.len().min(300)]
+        );
+        // Big enough to be a real answer rather than a header and nothing.
+        assert!(body.len() > 200, "{} export is {} bytes", kind, body.len());
+    }
+
+    // A shape nobody knows about says so rather than writing an empty file.
+    let said = ui.export("moon-phases", dir.join("x").to_str().unwrap());
+    assert!(said.starts_with("usage:"), "{}", said);
+
+    // The chronicle honours what the reader has chosen to see: raising the
+    // bar must not make the file longer.
+    let path = dir.join("chron.md");
+    let p = path.to_str().unwrap();
+    ui.chron_min = 1;
+    ui.export("chronicle", p);
+    let all = std::fs::read_to_string(&path).unwrap().len();
+    ui.chron_min = 3;
+    ui.export("chronicle", p);
+    let great = std::fs::read_to_string(&path).unwrap().len();
+    assert!(
+        great < all,
+        "asking for only the great events gave {} bytes against {}",
+        great,
+        all
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

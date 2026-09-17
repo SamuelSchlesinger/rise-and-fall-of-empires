@@ -1622,6 +1622,10 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
         FG,
         0,
     ));
+    // The hand of fate reaches towns now, so the page that describes one
+    // should say so: a reader who has never pressed `x` will not guess that
+    // it does anything here.
+    out.push(line("[x] Intervene with the Hand of Fate", DIMC, DIM));
     for wn in &city.wonders {
         out.push(line(format!("    Wonder    {}", wn), ACCENT, 0));
     }
@@ -1891,6 +1895,9 @@ fn person_page(
     }
     for l in term::wrap(&desc, w2) {
         out.push(line(l, FG, 0));
+    }
+    if per.alive() {
+        out.push(line("[x] Intervene with the Hand of Fate", DIMC, DIM));
     }
     for l in term::wrap(&explain::standing(w, pi), w2) {
         out.push(line(l, ACCENT, 0));
@@ -2377,7 +2384,7 @@ pub const HELP: &[&str] = &[
     "             ] [ next / previous realm   } { next / previous city   t go to the top story",
     "             r a recap of the last fifty years (of the selected realm or city, if selected)",
     "             v the event log's level: 1 everything, 2 the notable (the default), 3 the great",
-    "             x the Hand of Fate for that realm",
+    "             x the Hand of Fate: a realm, a town, a person or a region",
     "",
     "Search       /name finds realms, cities, people, peoples, schools, wars, places and relics;",
     "             Enter jumps, n N cycle.  In lists and the chronicle, / filters the rows instead.",
@@ -2389,9 +2396,13 @@ pub const HELP: &[&str] = &[
     "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
     "             :fate 3  :q  :wq  :q!",
+    "             :export chronicle|map|realms|wealth|cities|roads|persons|wars|houses [path]",
+    "             (Markdown for the history, HTML for the map, CSV for a table)",
     "",
     "Browsing     e lists (realms, cities, peoples, schools, persons, wars, places, relics,",
-    "             prophecies, figures, houses)   c the chronicle (f or v cycles importance 0-3,",
+    "             prophecies, figures, houses, wealth, roads)   In a list, / filters by name or",
+    "             by number: lands>200, income<0, prosperity>=150. The footer says what a page",
+    "             will answer to.   c the chronicle (f or v cycles importance 0-3,",
     "             / filters by text)   Figures are those the world called great; Houses are the",
     "             ruling families, each with its whole line of succession.",
     "             Everywhere: j k scroll, Ctrl-d Ctrl-u half a page, Ctrl-f Ctrl-b a page,",
@@ -2422,6 +2433,411 @@ pub const HELP: &[&str] = &[
     "             has a Why block: what pulls its stability up or down, ranked, in words.",
 ];
 
+/// Whether the Hand of Fate has anything to say about a thing.
+///
+/// It used to reach realms and nothing else, which meant the only way to
+/// touch a city, a person or a stretch of country was to find the realm that
+/// happened to hold it and act on the whole of that instead. A city is the
+/// unit most of this world's history actually happens to.
+pub fn fate_reaches(w: &World, r: Ref) -> bool {
+    match r {
+        Ref::Polity(p) => p < w.polities.len() && w.polities[p].alive(),
+        Ref::City(c) => c < w.cities.len() && w.cities[c].destroyed.is_none(),
+        Ref::Person(i) => i < w.persons.len() && w.persons[i].alive(),
+        Ref::Feature(f) => f < w.terrain.features.len(),
+        _ => false,
+    }
+}
+
+/// The menu for whatever is selected, or an empty list if nothing fitting is.
+pub fn fate_menu_for(w: &World, r: Ref) -> Vec<String> {
+    match r {
+        Ref::Polity(p) if fate_reaches(w, r) => fate_menu(w, p),
+        Ref::City(c) if fate_reaches(w, r) => vec![
+            format!("What befalls {}?", w.cities[c].name),
+            String::new(),
+            "1  A boom: the town fills, and the money with it".into(),
+            "2  A fire: half of it burns, and the people scatter".into(),
+            "3  Walls: masons raise them higher than the crown could afford".into(),
+            "4  A wonder: something is built here that outlasts the realm".into(),
+            "5  A sickness: it comes with the ships and empties the streets".into(),
+            "6  A great road: the carrying trade finds this town".into(),
+        ],
+        Ref::Person(i) if fate_reaches(w, r) => vec![
+            format!("What befalls {}?", w.persons[i].full_name()),
+            String::new(),
+            "1  Renown: their name is suddenly on every tongue".into(),
+            "2  Ruin: they are disgraced, and everybody remembers why".into(),
+            "3  Brilliance: wisdom and presence beyond their years".into(),
+            "4  Ambition: they begin to want what is not theirs".into(),
+            "5  A knife: they do not see the year out".into(),
+            "6  An heir: a child is born to them who will be remarkable".into(),
+        ],
+        Ref::Feature(f) if fate_reaches(w, r) => vec![
+            format!("What befalls {}?", w.terrain.features[f].display()),
+            String::new(),
+            "1  Good earth: the land grows kinder for a long age".into(),
+            "2  Exhaustion: the soil gives out and the people drift away".into(),
+            "3  A blight: the country is poisoned and left to the waste".into(),
+            "4  A lode: ore is struck, and everything follows from that".into(),
+            "5  A quickening: the ley runs strong here now".into(),
+            "6  Emptying: whoever lived here leaves, and the ground forgets".into(),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// Work the chosen intervention on whatever is selected.
+pub fn hand_of_fate_on(w: &mut World, r: Ref, choice: u8) -> String {
+    if !fate_reaches(w, r) {
+        return "that is beyond reach now".into();
+    }
+    match r {
+        Ref::Polity(p) => hand_of_fate(w, p, choice),
+        Ref::City(c) => city_fate(w, c, choice),
+        Ref::Person(i) => person_fate(w, i, choice),
+        Ref::Feature(f) => land_fate(w, f, choice),
+        _ => "nothing answers".into(),
+    }
+}
+
+/// What can be done to a single town.
+fn city_fate(w: &mut World, c: usize, choice: u8) -> String {
+    let name = w.cities[c].name.clone();
+    let cell = w.cities[c].cell;
+    let at = Some(cell);
+    let refs = |w: &World| -> Vec<Ref> {
+        let mut v = vec![Ref::City(c)];
+        if let Some(p) = w.cities[c].polity {
+            v.push(Ref::Polity(p));
+        }
+        v
+    };
+    match choice {
+        0 => {
+            w.cities[c].pop *= 1.6;
+            w.cities[c].prosperity = (w.cities[c].prosperity + 0.5).min(2.5);
+            let r = refs(w);
+            let text = format!(
+                "For a generation everybody who could get to {} went there, and \
+                 the town could not build houses fast enough.",
+                name
+            );
+            w.log(2, EventKind::Founding, &r, at, text);
+            format!("{} is booming", name)
+        }
+        1 => {
+            w.cities[c].pop *= 0.5;
+            w.cities[c].prosperity *= 0.6;
+            w.cities[c].walls *= 0.5;
+            let r = refs(w);
+            let text = format!(
+                "The fire began in the warehouses of {} and did not stop until \
+                 there was nothing left in that quarter to burn.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &r, at, text);
+            format!("{} has burned", name)
+        }
+        2 => {
+            w.cities[c].walls = (w.cities[c].walls + 1.2).min(3.0);
+            let r = refs(w);
+            let text = format!(
+                "The new walls of {} were the talk of the age, and its \
+                 neighbours drew their own conclusions.",
+                name
+            );
+            w.log(1, EventKind::Wonder, &r, at, text);
+            format!("{} is walled", name)
+        }
+        3 => {
+            let pick = crate::sim::prose::Pick::rolled(&w.rng);
+            let wonder = crate::sim::prose::wonder_name(&name, &pick);
+            w.cities[c].wonders.push(wonder.clone());
+            w.cities[c].prosperity = (w.cities[c].prosperity + 0.2).min(2.5);
+            if let Some(p) = w.cities[c].polity {
+                w.polities[p].prestige += 25.0;
+            }
+            let r = refs(w);
+            let text = format!(
+                "{} was finished in a single reign, which nobody had thought \
+                 possible, and stood long after the realm that raised it.",
+                wonder
+            );
+            w.log(2, EventKind::Wonder, &r, at, text);
+            format!("{} now stands", wonder)
+        }
+        4 => {
+            w.cells[cell].plague = 6;
+            w.cities[c].pop *= 0.75;
+            let polities = w.cities[c].polity.map(|p| vec![p]).unwrap_or_default();
+            w.plagues.push(crate::sim::Plague {
+                name: "the Harbour Fever".into(),
+                years_left: 4,
+                polities,
+                deaths: 0.0,
+            });
+            let r = refs(w);
+            let text = format!(
+                "It came into {} on a ship nobody thought to turn away.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &r, at, text);
+            format!("sickness is loose in {}", name)
+        }
+        _ => {
+            // Every road this town works, made worth far more. The network
+            // is rebuilt every twentieth year, so this lasts until then and
+            // then settles wherever the town's size now justifies.
+            let mut touched = 0;
+            for route in w.routes.iter_mut() {
+                if route.a == c || route.b == c {
+                    route.value *= 2.5;
+                    route.open = true;
+                    touched += 1;
+                }
+            }
+            crate::sim::trade::reckon(w);
+            w.cities[c].prosperity = (w.cities[c].prosperity + 0.3).min(2.5);
+            let r = refs(w);
+            let text = format!(
+                "The caravans changed their route that year and came through \
+                 {} instead, and went on coming.",
+                name
+            );
+            w.log(2, EventKind::Founding, &r, at, text);
+            format!(
+                "{} carries {}",
+                name,
+                crate::sim::prose::count(touched as i64, "road")
+            )
+        }
+    }
+}
+/// What can be done to one person.
+fn person_fate(w: &mut World, i: usize, choice: u8) -> String {
+    let who = w.persons[i].full_name();
+    let at = w.persons[i].polity.and_then(|p| w.capital_cell(p));
+    let refs = |w: &World| -> Vec<Ref> {
+        let mut v = vec![Ref::Person(i)];
+        if let Some(p) = w.persons[i].polity {
+            v.push(Ref::Polity(p));
+        }
+        v
+    };
+    match choice {
+        0 => {
+            w.persons[i].renown += 6.0;
+            w.persons[i].greatness += 40.0;
+            let r = refs(w);
+            let text = format!(
+                "Whatever {} had done, the story of it reached places {} had \
+                 never been, and grew in the telling.",
+                who, who
+            );
+            w.log(2, EventKind::Person, &r, at, text);
+            format!("{} is renowned", who)
+        }
+        1 => {
+            w.persons[i].renown = (w.persons[i].renown - 6.0).max(0.0);
+            w.persons[i].greatness = (w.persons[i].greatness - 40.0).max(0.0);
+            if let Some(p) = w.persons[i].polity {
+                w.polities[p].stability = (w.polities[p].stability - 0.05).max(0.0);
+            }
+            let r = refs(w);
+            let text = format!(
+                "What {} had done in private was suddenly known, and nobody \
+                 who had praised them would admit to it afterwards.",
+                who
+            );
+            w.log(2, EventKind::Person, &r, at, text);
+            format!("{} is disgraced", who)
+        }
+        2 => {
+            let t = &mut w.persons[i].traits;
+            t.wisdom = (t.wisdom + 0.4).min(1.0);
+            t.charisma = (t.charisma + 0.4).min(1.0);
+            let r = refs(w);
+            let text = format!(
+                "{} spoke, and people who had come to argue found they agreed.",
+                who
+            );
+            w.log(1, EventKind::Person, &r, at, text);
+            format!("{} is brilliant", who)
+        }
+        3 => {
+            let t = &mut w.persons[i].traits;
+            t.ambition = 1.0;
+            t.cruelty = (t.cruelty + 0.2).min(1.0);
+            let r = refs(w);
+            let text = format!(
+                "{} began to speak of what was owed to them, and to count who \
+                 had not paid it.",
+                who
+            );
+            w.log(1, EventKind::Person, &r, at, text);
+            format!("{} is ambitious", who)
+        }
+        4 => {
+            w.persons[i].died = Some(w.year);
+            w.persons[i].death = "was found dead, and no one was ever charged.".into();
+            if let Some(h) = w.persons[i].house {
+                w.close_house_if_spent(h);
+            }
+            let r = refs(w);
+            let text = format!("{} was found dead, and no one was ever charged.", who);
+            w.log(2, EventKind::Death, &r, at, text);
+            format!("{} is dead", who)
+        }
+        _ => {
+            let Some(p) = w.persons[i].polity.filter(|&p| w.polities[p].alive()) else {
+                return format!("{} belongs to no realm that could raise a child", who);
+            };
+            let culture = w.polities[p].culture;
+            let child = w.new_person(culture, crate::sim::Role::Noble, Some(p), w.year, None);
+            // Given the blood of somebody remarkable rather than a roll of
+            // the dice: this is an intervention, and the point of it is that
+            // the child will be worth watching.
+            w.persons[child].parent = Some(i);
+            let t = &mut w.persons[child].traits;
+            t.ambition = (t.ambition + 0.35).min(1.0);
+            t.wisdom = (t.wisdom + 0.3).min(1.0);
+            t.charisma = (t.charisma + 0.3).min(1.0);
+            w.persons[child].vigour = 1.15;
+            if let Some(h) = w.persons[i].house {
+                w.join_house(child, h);
+            }
+            w.persons[i].children.push(child);
+            let born = w.persons[child].full_name();
+            let text = format!(
+                "A child was born to {} that the midwives talked about for \
+                 years afterwards, though none of them could say why.",
+                who
+            );
+            w.log(
+                2,
+                EventKind::Person,
+                &[Ref::Person(child), Ref::Person(i), Ref::Polity(p)],
+                at,
+                text,
+            );
+            format!("{} is born", born)
+        }
+    }
+}
+
+/// What can be done to a stretch of country.
+///
+/// The one kind of intervention that outlives everybody it touches: the
+/// ground keeps what is done to it, and knowledge belongs to the ground, so
+/// emptying a region is how a dark age is started on purpose.
+fn land_fate(w: &mut World, f: usize, choice: u8) -> String {
+    let name = w.terrain.features[f].display();
+    let cells: Vec<usize> = w.terrain.features[f].cells.clone();
+    let at = {
+        let c = w.terrain.features[f].center;
+        Some(w.terrain.idx(c.0, c.1))
+    };
+    let land: Vec<usize> = cells
+        .iter()
+        .copied()
+        .filter(|&i| w.terrain.is_land(i))
+        .collect();
+    if land.is_empty() {
+        return format!("{} is all water", name);
+    }
+    let refs = vec![Ref::Feature(f)];
+    match choice {
+        0 => {
+            for &i in &land {
+                w.terrain.fertility[i] = (w.terrain.fertility[i] + 0.25).min(1.0);
+            }
+            let text = format!(
+                "The rains came right for a lifetime over {}, and then kept \
+                 coming right.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &refs, at, text);
+            format!("{} is fertile", name)
+        }
+        1 => {
+            for &i in &land {
+                w.terrain.fertility[i] *= 0.45;
+            }
+            let text = format!(
+                "The fields of {} gave less every year until the people \
+                 stopped pretending it was the weather.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &refs, at, text);
+            format!("{} is exhausted", name)
+        }
+        2 => {
+            w.terrain.blight(&land);
+            for &i in &land {
+                w.cells[i].pop *= 0.3;
+            }
+            let text = format!(
+                "Whatever was done in {}, nothing has grown there since, and \
+                 the few who go in do not stay.",
+                name
+            );
+            w.log(3, EventKind::Magic, &refs, at, text);
+            format!("{} is blighted", name)
+        }
+        3 => {
+            for &i in &land {
+                w.terrain.minerals[i] = (w.terrain.minerals[i] + 0.4).min(1.0);
+            }
+            // The goods of a cell are a pure reading of its terrain, so
+            // changing the terrain means reading them again.
+            w.goods = crate::sim::trade::goods_of(&w.terrain);
+            let text = format!(
+                "Somebody sank a shaft in {} on a hunch, and a hundred years \
+                 of everybody's iron came out of it.",
+                name
+            );
+            w.log(2, EventKind::Discovery, &refs, at, text);
+            format!("{} has ore", name)
+        }
+        4 => {
+            for &i in &land {
+                w.terrain.mana[i] = (w.terrain.mana[i] + 0.35).min(1.0);
+            }
+            // The goods of a cell are a pure reading of its terrain, so
+            // changing the terrain means reading them again.
+            w.goods = crate::sim::trade::goods_of(&w.terrain);
+            let text = format!(
+                "The old stones of {} began to be warm to the touch, and the \
+                 dogs would not go near them.",
+                name
+            );
+            w.log(2, EventKind::Magic, &refs, at, text);
+            format!("the ley runs strong in {}", name)
+        }
+        _ => {
+            // Knowledge belongs to the ground and ground that empties of
+            // people forgets, so this is the one way to start a dark age on
+            // purpose.
+            for &i in &land {
+                w.cells[i].pop = 0.0;
+                w.known[i] = 0;
+            }
+            for &i in &land {
+                w.refresh_yield(i);
+            }
+            let text = format!(
+                "Within a generation there was nobody left in {} who \
+                 remembered why anyone had ever lived there.",
+                name
+            );
+            w.log(3, EventKind::Disaster, &refs, at, text);
+            format!("{} is empty", name)
+        }
+    }
+}
+
+/// The six things that can be done to a whole realm.
 pub fn fate_menu(w: &World, p: usize) -> Vec<String> {
     let pol = &w.polities[p];
     vec![
@@ -2436,6 +2852,7 @@ pub fn fate_menu(w: &World, p: usize) -> Vec<String> {
     ]
 }
 
+/// Work one of them.
 pub fn hand_of_fate(w: &mut World, p: usize, choice: u8) -> String {
     if !w.polities[p].alive() {
         return "that realm is gone".into();
