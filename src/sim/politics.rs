@@ -454,6 +454,14 @@ pub fn form_polities(w: &mut World) {
 // Expansion
 // ---------------------------------------------------------------------------
 
+/// What putting to sea at all adds to the price of a cell.
+const SEA_CROSSING_COST: f32 = 3.0;
+/// What each cell of open water adds on top of that.
+const SEA_WIDTH_COST: f32 = 0.12;
+/// How much less attractive a cell across water is than the same cell
+/// reachable on foot, all else equal. Realms fill their own shore first.
+const SEA_SCORE_PENALTY: f32 = 0.35;
+
 pub fn expand(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
@@ -485,35 +493,36 @@ pub fn expand(w: &mut World) {
                 }
             }
         }
-        // Overseas colonisation for seafaring states.
-        if w.terrain.coast[i] {
-            let (x, y) = w.terrain.xy(i);
-            for dy in -2i32..=2 {
-                for dx in -4i32..=4 {
-                    if dx.abs() <= 1 && dy.abs() <= 1 {
-                        continue;
-                    }
-                    let cx = x as i32 + dx;
-                    let cy = y as i32 + dy;
-                    if cx < 0 || cy < 0 || cx >= w.terrain.w as i32 || cy >= w.terrain.h as i32 {
-                        continue;
-                    }
-                    let j = w.terrain.idx(cx as usize, cy as usize);
-                    if !w.terrain.coast[j] {
-                        continue;
-                    }
-                    if let Some(p) = w.cells[j].owner {
-                        if !alive[p] || !w.polities[p].seafaring || seen.contains(&p) {
-                            continue;
-                        }
-                        seen.push(p);
-                        if let Some((s, c)) =
-                            score_cell(w, p, i, capitals[p], base_cost + 4.0, &rng)
-                        {
-                            cand[p].push((s - 0.5, i, c));
-                        }
-                    }
-                }
+    }
+    // Overseas colonisation, along the map's own sea routes.
+    //
+    // This used to scan a fixed box of nine by five cells around every
+    // coastal cell, which meant a realm could cross about four cells of
+    // water and no more, whatever it knew about ships — and over fifteen
+    // centuries nought to two realms in an entire world ever held land on
+    // two landmasses. Now the crossing has to be one the map actually
+    // affords and one the realm's reach can manage, and a mature naval
+    // power can cross an ocean.
+    for p in w.living_polities() {
+        let reach = w.sea_reach(p);
+        if reach == 0 {
+            continue;
+        }
+        for c in w.sea_sorties(p) {
+            let far = c.to as usize;
+            if w.cells[far].owner.is_some() || !w.terrain.is_land(far) {
+                continue;
+            }
+            let base_cost = match w.terrain.biome[far].move_cost() {
+                Some(x) => x,
+                None => continue,
+            };
+            // Open water is dear, and dearer the wider it is. A strait is
+            // barely more than a land border; an ocean is a generation's
+            // undertaking.
+            let sea_cost = base_cost + SEA_CROSSING_COST + c.width as f32 * SEA_WIDTH_COST;
+            if let Some((score, cost)) = score_cell(w, p, far, capitals[p], sea_cost, &rng) {
+                cand[p].push((score - SEA_SCORE_PENALTY, far, cost));
             }
         }
     }

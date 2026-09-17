@@ -1268,6 +1268,12 @@ fn head<S: Io>(s: &mut S, w: &mut World) {
 
 fn terrain_sec<S: Io>(s: &mut S, w: &mut World) {
     terrain(s, &mut w.terrain);
+    if s.reading() {
+        // Sea routes are a pure function of the terrain, which never
+        // changes, so they are rebuilt rather than stored — a section could
+        // only disagree with the map it describes.
+        w.terrain.crossings = crate::geo::sea_routes(&w.terrain);
+    }
 }
 fn cells<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.cells, CellState::default, cell);

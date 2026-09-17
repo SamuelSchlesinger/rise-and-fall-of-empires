@@ -22,6 +22,10 @@ const TRUCE_SWEEP: usize = 16;
 /// coldest are forgotten, which is both what a chancery would do and what
 /// keeps the phase's cost flat as the world ages.
 const TENSION_CAP: usize = 24;
+/// What an assault across open water is worth against one over a border.
+/// A landing is the hardest thing an army does, and the reason an island is
+/// worth holding.
+const LANDING_PENALTY: f32 = 0.6;
 /// A world with less settled land than this has no hegemon, whatever share
 /// of it one realm holds: being the largest of three chiefdoms on an empty
 /// map is not the same fact as ruling a quarter of the world.
@@ -975,6 +979,32 @@ pub fn resolve_wars(w: &mut World) {
             }
         }
     }
+    // Amphibious contact. A crossing whose two shores are held by opposite
+    // sides of a war puts each side's coast on the other's front, so the
+    // war can actually be fought — before this, a war across water had no
+    // front at all, its score decayed, and peace came within two years
+    // whatever either side wanted.
+    let reaches: Vec<u16> = (0..w.polities.len()).map(|p| w.sea_reach(p)).collect();
+    for c in &w.terrain.crossings {
+        let (a, b) = (c.from as usize, c.to as usize);
+        let (Some(p), Some(q)) = (w.cells[a].owner, w.cells[b].owner) else {
+            continue;
+        };
+        if p == q {
+            continue;
+        }
+        if !pairs.contains(&(p, q)) && !pairs.contains(&(q, p)) {
+            continue;
+        }
+        // Somebody has to be able to make the crossing. If only one side
+        // can, only that side can attack over it — but both shores are a
+        // front, because the one that cannot cross still has to defend.
+        if c.width > reaches[p].max(reaches[q]) {
+            continue;
+        }
+        front.entry((p, q)).or_default().push(a);
+        front.entry((q, p)).or_default().push(b);
+    }
     for v in front.values_mut() {
         v.sort_unstable();
         v.dedup();
@@ -1149,12 +1179,21 @@ fn battle(
         (side_d, side_a, a_front)
     };
     let (off, def) = (off_side[0], def_side[0]);
-    let s_off = side_strength(w, off_side, &[]);
+    // The ground is chosen before the fighting is weighed, because where it
+    // is decides how hard it is to get to.
+    let site = def_front[rng.below(def_front.len())];
+    // An assault nobody could have walked to is a landing, and a landing is
+    // a far harder thing than a march: the defenders meet it at the water's
+    // edge and the attackers arrive in the order their ships allow.
+    let amphibious = !w
+        .terrain
+        .neighbors8(site)
+        .any(|nb| matches!(w.cells[nb].owner, Some(o) if off_side.contains(&o)));
+    let s_off = side_strength(w, off_side, &[]) * if amphibious { LANDING_PENALTY } else { 1.0 };
     let s_def = side_strength(w, def_side, def_front);
     let p_win = s_off / (s_off + s_def);
     let win = rng.chance((p_win as f64 + rng.normal() * 0.08).clamp(0.05, 0.95));
     let margin = ((s_off - s_def) / (s_off + s_def)).abs();
-    let site = def_front[rng.below(def_front.len())];
     let def_culture = w.cells[site].culture.unwrap_or(w.polities[def].culture);
     let place = battlefield_name(w, site, def_culture);
     w.wars[wid].battles += 1;
@@ -1193,6 +1232,9 @@ fn battle(
         1
     };
     let mut text = prose::battle_opening(w, off, def, &place, win);
+    if amphibious {
+        text.push_str(&prose::came_by_sea(w, off, win));
+    }
     if winner_side.len() > 1 || loser_side.len() > 1 {
         text.push_str(&prose::battle_allies(w, winner_side, loser_side));
     }

@@ -52,6 +52,9 @@ pub struct Tuning {
     pub migration_share: f32,
     /// Migrants only move somewhere emptier than this share of their pressure.
     pub migration_fill_ratio: f32,
+    /// Yearly chance that a crowded coastal community takes to the water
+    /// instead of staying put, when a crossing is within its people's reach.
+    pub migration_sea_chance: f64,
     /// Base yearly growth rate of a city.
     pub city_growth_rate: f32,
     /// Local fertility multiplier for a city's carrying capacity.
@@ -459,6 +462,7 @@ impl Default for Tuning {
             migration_pressure: 0.55,
             migration_min_pop: 0.25,
             migration_share: 0.08,
+            migration_sea_chance: 0.35,
             migration_fill_ratio: 0.7,
             city_growth_rate: 0.03,
             city_capacity_factor: 1.6,
@@ -667,6 +671,7 @@ impl Tuning {
             "migration_min_pop" => self.migration_min_pop = v as f32,
             "migration_share" => self.migration_share = v as f32,
             "migration_fill_ratio" => self.migration_fill_ratio = v as f32,
+            "migration_sea_chance" => self.migration_sea_chance = v,
             "city_growth_rate" => self.city_growth_rate = v as f32,
             "city_capacity_factor" => self.city_capacity_factor = v as f32,
             "city_capacity_dev_weight" => self.city_capacity_dev_weight = v as f32,

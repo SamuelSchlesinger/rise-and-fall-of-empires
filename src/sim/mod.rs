@@ -933,6 +933,15 @@ pub struct Stats {
     pub pop_history: Vec<f64>,
 }
 
+/// How much of the distance to an overseas province a realm with total
+/// mastery of the sea is forgiven. At 0.5, land across water is half as far
+/// from the capital as the map says.
+const SEA_BINDS_FACTOR: f32 = 0.5;
+
+/// The water a realm can cross the moment it first builds sea-going hulls,
+/// before its people's seafaring and its own development are counted.
+const SEA_REACH_BASE: f32 = 3.0;
+
 /// The phases of a tick, in the order `World::tick` runs them.
 pub const PHASES: [&str; 22] = [
     "grow_and_migrate",
@@ -1256,6 +1265,59 @@ impl World {
     pub fn forget_the_dead(&mut self) {
         let persons = &self.persons;
         self.alive_persons.retain(|&i| persons[i].alive());
+    }
+
+    // -- the sea ----------------------------------------------------------
+
+    /// How wide a stretch of open water this realm can carry a colony or an
+    /// army across, in cells. Zero until it has taken to the sea at all.
+    ///
+    /// Reach is what turns the sea from a wall into a distance. A realm that
+    /// has only just learned to build sea-going hulls can cross a strait; an
+    /// old, developed, seafaring power can cross an ocean, and only such a
+    /// power can reach the far isles. It is capped at
+    /// [`crate::geo::MAX_CROSSING`] because that is the widest water the map
+    /// records a route over.
+    pub fn sea_reach(&self, p: usize) -> u16 {
+        let pol = &self.polities[p];
+        if !pol.seafaring || !pol.alive() {
+            return 0;
+        }
+        let race = &self.races[self.cultures[pol.culture].race];
+        let kind_bonus = match pol.kind {
+            // A republic on the water is a thalassocracy: its whole reason
+            // for existing is the carrying trade.
+            PolityKind::Republic => 3.0,
+            PolityKind::Empire => 2.0,
+            PolityKind::Horde => -2.0,
+            _ => 0.0,
+        };
+        let reach = SEA_REACH_BASE + race.seafaring * 8.0 + pol.dev * 2.5 + kind_bonus;
+        reach.clamp(1.0, crate::geo::MAX_CROSSING as f32) as u16
+    }
+
+    /// Every crossing that leaves land this realm holds, with the cell on
+    /// the far side. Only those within its reach.
+    ///
+    /// Cheap: the route graph is static and sorted, so this walks the
+    /// realm's own coast rather than searching the map.
+    pub fn sea_sorties(&self, p: usize) -> Vec<crate::geo::Crossing> {
+        let reach = self.sea_reach(p);
+        if reach == 0 {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for &i in self.cells_of_ref(p) {
+            if !self.terrain.coast[i] {
+                continue;
+            }
+            for c in self.terrain.crossings_from(i) {
+                if c.width <= reach {
+                    out.push(*c);
+                }
+            }
+        }
+        out
     }
 
     // -- houses -----------------------------------------------------------
@@ -1696,6 +1758,33 @@ impl World {
                 }
             }
         }
+        // Neighbours across water.
+        //
+        // Without this the sea is not a distance but a wall: two realms on
+        // opposite shores were not neighbours at all, so no tension ever
+        // built between them, so no war was ever declared, so an army could
+        // see a coast it could never be sent to. A crossing only counts when
+        // somebody's reach can actually make it, and it counts for little —
+        // a sea border is one cell of contact, so tension over water rises
+        // slowly, the way a quarrel with a realm you rarely meet should.
+        let reaches: Vec<u16> = (0..self.polities.len())
+            .map(|p| self.sea_reach(p))
+            .collect();
+        for c in &self.terrain.crossings {
+            let (a, b) = (c.from as usize, c.to as usize);
+            let (Some(p), Some(q)) = (self.cells[a].owner, self.cells[b].owner) else {
+                continue;
+            };
+            if p == q {
+                continue;
+            }
+            // One of them has to be able to cross it for the two to be in
+            // any kind of contact.
+            if c.width > reaches[p].max(reaches[q]) {
+                continue;
+            }
+            borders.push((p.min(q), p.max(q)));
+        }
         borders.sort_unstable();
         let mut at = 0;
         while at < borders.len() {
@@ -1725,10 +1814,34 @@ impl World {
         let mut sprawl_sum: Vec<f64> = Vec::with_capacity(self.polities.len());
         for p in 0..self.polities.len() {
             sprawl_sum.push(match self.capital_cell(p) {
-                Some(seat) => self.owner_cells[p]
-                    .iter()
-                    .map(|&i| self.terrain.dist(seat, i) as f64)
-                    .sum(),
+                Some(seat) => {
+                    // Land across water counts for less the better the realm
+                    // sails. For most of history the sea was the fast road:
+                    // a province a month's sail away was closer to the
+                    // capital than one a month's march inland, and an empire
+                    // that controlled the water was *bound* by it rather
+                    // than stretched across it.
+                    //
+                    // Without this the sea could be opened and would then be
+                    // punished — every overseas holding would drive up
+                    // `sprawl`, cost stability, and fray the realm that took
+                    // it, so nothing would ever be held for long.
+                    let home = self.terrain.landmass[seat];
+                    let reach = self.sea_reach(p) as f32;
+                    let over_sea =
+                        1.0 - SEA_BINDS_FACTOR * (reach / crate::geo::MAX_CROSSING as f32).min(1.0);
+                    self.owner_cells[p]
+                        .iter()
+                        .map(|&i| {
+                            let d = self.terrain.dist(seat, i) as f64;
+                            if self.terrain.landmass[i] == home {
+                                d
+                            } else {
+                                d * over_sea as f64
+                            }
+                        })
+                        .sum()
+                }
                 None => 0.0,
             });
         }

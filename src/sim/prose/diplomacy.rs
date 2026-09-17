@@ -365,3 +365,18 @@ pub fn battle_allies(w: &World, winner_side: &[usize], loser_side: &[usize]) -> 
         ),
     }
 }
+
+/// An assault that arrived by ship. Appended to a battle line.
+pub fn came_by_sea(w: &World, attacker: usize, won: bool) -> String {
+    if won {
+        format!(
+            " The {} host had come by sea, and held the beach long enough to land behind it.",
+            realm_adj(w, attacker)
+        )
+    } else {
+        format!(
+            " The {} host had come by sea, and was thrown back into it.",
+            realm_adj(w, attacker)
+        )
+    }
+}

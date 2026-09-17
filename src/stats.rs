@@ -170,11 +170,11 @@ pub fn run(world: &mut World, years: i32) {
             break;
         }
         println!(
-            "  {:>3} rulers over {:>4}y  {:<30} {} thrones at its height{}",
+            "  {:>3} rulers over {:>4}y  {:<30} {} at its height{}",
             ho.seniors.len(),
             ho.span(world.year).max(0),
             ho.name,
-            ho.peak_realms.max(1),
+            crate::sim::prose::count(ho.peak_realms.max(1) as i64, "throne"),
             match ho.ended {
                 Some(y) => format!(", died out in {}", y),
                 None => String::new(),

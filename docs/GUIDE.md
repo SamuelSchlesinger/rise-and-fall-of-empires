@@ -180,6 +180,7 @@ on adding a field.
 #   tune.birth_chance = 0.16              # how many heirs a house produces
 #   tune.diadochi_min_generals = 2        # generals a dead conqueror needs to be
 #                                         # carved up between them
+#   tune.migration_sea_chance = 0.35      # how readily a crowded coast takes to boats
 
 # map w k                # examples: map <S-Up> K, map <C-p> :, map ; :
 ```
@@ -282,6 +283,23 @@ are sacked or spared; peace comes with exhaustion.
 where mana is high or a people is mystical. They spread along trade and
 conquest, are adopted as state doctrine or persecuted, split in schisms, and
 an arcane order that reaches too far can unmake the city that raised it.
+
+**The sea.** Where the water can be crossed is a property of the map, fixed
+when the world is made. A crowded people on a coast will take a narrow strait
+on its own and settle the island beyond it. A realm has to learn to build
+sea-going hulls first, and then how wide a crossing it can manage depends on
+its people's seafaring, its own development, and what kind of realm it is — a
+republic on the water is a thalassocracy and reaches furthest. A strait is
+within reach of almost anyone; only an old and developed naval power reaches
+the far isles.
+
+Once two realms face each other across water they are neighbours: quarrels
+build between them, slowly, and armies can be sent. Landing on a hostile shore
+is the hardest thing an army does and about a third to a half of landings are
+thrown back into the sea. But a realm that controls the water is bound
+together by it rather than stretched across it, so an overseas province is
+counted as nearer to the capital than the map says — which is what makes an
+empire on both sides of an ocean possible at all.
 
 **Houses and figures.** Rulers marry — at home, or into a neighbouring house,
 which quiets that border for a generation — and their children are born, named

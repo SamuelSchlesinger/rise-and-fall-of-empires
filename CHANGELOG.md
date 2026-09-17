@@ -12,12 +12,43 @@ it invalidates saved worlds' futures and every seed anyone has written down.
 
 ## [0.2.0] - 2026-09-17
 
-The world now has people in it. Rulers marry, have children the chronicle
-watches grow up, and are called great while they are alive to hear it; realms
-take standing positions towards one another instead of only temperatures; and
-an empire that grows too large manufactures the coalition that pulls it down.
+The world now has people in it, and a sea. Rulers marry, have children the
+chronicle watches grow up, and are called great while they are alive to hear
+it; realms take standing positions towards one another instead of only
+temperatures; an empire that grows too large manufactures the coalition that
+pulls it down; and the water between two shores is a distance rather than a
+wall.
 
 ### Added
+
+- **The sea.** Where the water can be crossed is worked out once, when the
+  world is made: every pair of coastal cells on different landmasses within
+  reach of each other over open water. How wide a crossing a realm can manage
+  then depends on its people's seafaring, its own development and what kind of
+  realm it is — a republic on the water reaches furthest. A strait is within
+  reach of almost anyone; only an old, developed naval power reaches the far
+  isles.
+
+  Two realms facing each other across water are now **neighbours**: quarrels
+  build between them and armies can be sent. Before this the sea was a wall
+  rather than a distance — realms on opposite shores were not neighbours at
+  all, so no tension ever built, so no war was ever declared, and an army
+  could see a coast it could never be sent to. Over fifteen centuries nought
+  to two realms in an entire world ever held land on two landmasses.
+
+  Landing on a hostile shore is the hardest thing an army does and a third to
+  a half of landings are thrown back into the sea. A realm that controls the
+  water is bound together by it rather than stretched across it, so an
+  overseas province counts as nearer to its capital than the map says — which
+  is what makes an empire on both sides of an ocean possible at all rather
+  than merely reachable and then immediately punished for it.
+
+  Crowded coastal peoples also take narrow straits on their own, without any
+  state's shipwrights, so islands get peopled and there is something out there
+  to colonise or to conquer. A test asserts the property the whole system
+  exists for: every landmass worth settling can be reached from the largest
+  one by a chain of crossings, so a realm that masters the sea can in
+  principle reach the whole world.
 
 - **Houses.** A dynasty is an entity rather than a string on a realm, with its
   own page: the whole line of succession down the centuries, every throne it
@@ -111,12 +142,18 @@ an empire that grows too large manufactures the coalition that pulls it down.
   world that wrote the file.
 - A fifty-year recap can no longer overrun the page it was given.
 - The check for "1 lands" no longer fires on the tail of a decimal.
+- Sea routes are rebuilt defensively, so a corrupt save cannot index a
+  terrain past the area it claims to cover.
 
 ### Performance
 
 - Living realms and living people are maintained as indexes beside their
   append-only vectors, the way `owner_cells` already was. Phases that filtered
   the raw vectors cost the whole history of the world every year.
+- The sea costs about 3% of a year. Because the terrain never changes, the set
+  of possible crossings is static: it is built once at worldgen (6–30 ms) and
+  rebuilt on load rather than stored, and every question about the sea after
+  that is a lookup in a sorted list of a few dozen routes.
 - Greatness is scored without building the sentences that explain it; the prose
   is written only when somebody is going to read it.
 - A year costs about 0.40 ms at 160x64 over 1500 years, against 0.26 ms before

@@ -708,3 +708,126 @@ fn a_house_page_reads_down_the_centuries() {
         }
     }
 }
+
+/// Every landmass worth settling can be reached from the largest one by a
+/// chain of sea crossings, so a realm that masters the sea can in principle
+/// reach the whole world.
+///
+/// This is the property the sea exists for. Without it a fifth of some
+/// worlds sat two cells of water away and no army could ever go there.
+#[test]
+fn the_sea_joins_the_world() {
+    for seed in [7u64, 1, 42, 99, 3, 128] {
+        let w = World::new(seed, 160, 64, Detail::Medium);
+        let t = &w.terrain;
+        // Landmass sizes, and which are worth reaching at all.
+        let mut size: std::collections::BTreeMap<u16, usize> = Default::default();
+        for i in 0..t.w * t.h {
+            if t.landmass[i] != 0 {
+                *size.entry(t.landmass[i]).or_insert(0) += 1;
+            }
+        }
+        let biggest = *size.iter().max_by_key(|(_, &s)| s).expect("land").0;
+        // Flood the landmass graph through crossings.
+        let mut seen: std::collections::BTreeSet<u16> = Default::default();
+        seen.insert(biggest);
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for c in &t.crossings {
+                let (a, b) = (t.landmass[c.from as usize], t.landmass[c.to as usize]);
+                if seen.contains(&a) && !seen.contains(&b) {
+                    seen.insert(b);
+                    grew = true;
+                }
+            }
+        }
+        let stranded: Vec<(u16, usize)> = size
+            .iter()
+            .filter(|(lm, &s)| s >= 20 && !seen.contains(lm))
+            .map(|(&lm, &s)| (lm, s))
+            .collect();
+        let land: usize = size.values().sum();
+        let reachable: usize = size
+            .iter()
+            .filter(|(lm, _)| seen.contains(lm))
+            .map(|(_, &s)| s)
+            .sum();
+        assert!(
+            stranded.is_empty(),
+            "seed {}: landmasses of {:?} cells cannot be reached by sea at all \
+             ({:.0}% of land reachable)",
+            seed,
+            stranded.iter().map(|&(_, s)| s).collect::<Vec<_>>(),
+            reachable as f32 / land as f32 * 100.0
+        );
+        assert!(
+            !t.crossings.is_empty(),
+            "seed {} has no sea crossings at all",
+            seed
+        );
+    }
+}
+
+/// Realms actually cross the water: they settle across it and they fight
+/// across it. Both roads have to work, because a crossing whose far shore is
+/// empty is a colony and one whose far shore is somebody else's is a war,
+/// and a world only reaches its islands if it can do both.
+#[test]
+fn the_sea_is_crossed_both_ways() {
+    let mut colonies = 0;
+    let mut landings = 0;
+    let mut straddled = 0;
+    for seed in [7u64, 1, 42, 99] {
+        let mut w = World::new(seed, 160, 64, Detail::Medium);
+        run(&mut w, 900);
+        landings += w
+            .chronicle
+            .events
+            .iter()
+            .filter(|e| e.text.contains("come by sea"))
+            .count();
+        for p in 0..w.polities.len() {
+            let mut on: Vec<u16> = w
+                .cells_of_ref(p)
+                .iter()
+                .map(|&i| w.terrain.landmass[i])
+                .filter(|&l| l != 0)
+                .collect();
+            on.sort_unstable();
+            on.dedup();
+            if on.len() > 1 {
+                straddled += 1;
+            }
+        }
+        // Somebody peopled an island their ancestors could not have walked
+        // to: a landmass other than the biggest that carries population.
+        let mut lm: std::collections::BTreeMap<u16, (usize, f32)> = Default::default();
+        for i in 0..w.terrain.w * w.terrain.h {
+            let l = w.terrain.landmass[i];
+            if l == 0 {
+                continue;
+            }
+            let e = lm.entry(l).or_insert((0, 0.0));
+            e.0 += 1;
+            e.1 += w.cells[i].pop;
+        }
+        let biggest = *lm.iter().max_by_key(|(_, &(s, _))| s).expect("land").0;
+        colonies += lm
+            .iter()
+            .filter(|(&l, &(s, pop))| l != biggest && s >= 8 && pop > 0.0)
+            .count();
+    }
+    assert!(
+        landings > 0,
+        "no army in four worlds ever landed on a hostile shore"
+    );
+    assert!(
+        straddled > 0,
+        "no realm in four worlds ever held land on two landmasses"
+    );
+    assert!(
+        colonies > 0,
+        "no island in four worlds was ever peopled across water"
+    );
+}

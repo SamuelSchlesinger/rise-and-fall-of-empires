@@ -6,7 +6,7 @@ use crate::lang::Language;
 use crate::noise::Noise;
 use crate::rng::Rng;
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BTreeMap, BinaryHeap};
 
 /// What grows (or does not) on one cell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -277,7 +277,48 @@ pub struct Terrain {
     pub features: Vec<Feature>,
     /// How many cells are not water.
     pub land_count: usize,
+    /// Where the sea can be crossed, both directions, sorted by `from`.
+    ///
+    /// Derived from the terrain and therefore never stored: [`sea_routes`]
+    /// rebuilds it after a load. Because the terrain never changes, the set
+    /// of places a ship *could* cross is a fixed property of the map, which
+    /// is what makes every question about the sea a cheap lookup instead of
+    /// a search.
+    pub crossings: Vec<Crossing>,
 }
+
+/// A crossing still under consideration while the route graph is built.
+struct Candidate {
+    width: u16,
+    from: usize,
+    to: usize,
+}
+
+/// A stretch of open water a fleet can cross: two coastal cells on different
+/// landmasses, and how wide the water between them is.
+#[derive(Clone, Copy, Debug)]
+pub struct Crossing {
+    pub from: u32,
+    pub to: u32,
+    /// Cells of open water between them. What a realm's reach is measured
+    /// against.
+    pub width: u16,
+}
+
+/// The widest water the map records a crossing for at all.
+///
+/// A ceiling on the *graph*, not on any realm: a realm's own reach starts at
+/// a few cells and only an old, developed, seafaring power ever approaches
+/// this. It is set wide enough that every landmass worth settling can be
+/// reached from the largest one — `the_sea_joins_the_world` asserts exactly
+/// that — because an island a fifth of the world in size sitting permanently
+/// beyond reach is a hole in the map rather than a frontier.
+pub const MAX_CROSSING: usize = 26;
+/// Crossings to the same landmass must start this far apart, so that a
+/// single narrow strait does not produce a dozen near-identical routes.
+const CROSSING_SPACING: usize = 6;
+/// Most crossings recorded between any two landmasses.
+const CROSSINGS_PER_PAIR: usize = 6;
 
 const NB8: [(i32, i32); 8] = [
     (-1, -1),
@@ -313,6 +354,7 @@ impl Terrain {
             landmass: Vec::new(),
             features: Vec::new(),
             land_count: 0,
+            crossings: Vec::new(),
         }
     }
 
@@ -425,6 +467,139 @@ fn percentile(vals: &[f32], p: f32) -> f32 {
 
 /// Raise a whole world: elevation, climate, rivers, biomes, soil, mana and
 /// the names of the places they make. Deterministic in `rng`.
+/// Every place the sea can be crossed, both directions, sorted by `from`.
+///
+/// A crossing joins two coastal cells on **different landmasses** over water
+/// no wider than [`MAX_CROSSING`], by a line whose interior is all water. The
+/// different-landmass rule is what keeps this a list of sea routes rather
+/// than a list of ways to walk round a bay: anywhere on your own landmass,
+/// you can march.
+///
+/// Built once from the terrain, which never changes. The work is kept near
+/// linear by bucketing the shore into a coarse grid and comparing only
+/// neighbouring buckets, and bounded by keeping at most
+/// [`CROSSINGS_PER_PAIR`] routes between any two landmasses, spaced at least
+/// [`CROSSING_SPACING`] apart so a single strait does not swamp the list.
+pub fn sea_routes(t: &Terrain) -> Vec<Crossing> {
+    // Rebuilt on load, so it meets whatever a save file happens to contain.
+    // A terrain whose arrays do not cover the area it claims does not
+    // describe a world with a sea in it, and is left without routes rather
+    // than indexed past its end.
+    let n = t.w.saturating_mul(t.h);
+    if n == 0 || t.coast.len() < n || t.landmass.len() < n || t.biome.len() < n {
+        return Vec::new();
+    }
+    let shore: Vec<usize> = (0..n)
+        .filter(|&i| t.coast[i] && t.is_land(i) && t.landmass[i] != 0)
+        .collect();
+    if shore.is_empty() {
+        return Vec::new();
+    }
+    // Coarse buckets of MAX_CROSSING cells, so a candidate search only has
+    // to look at its own bucket and the eight around it.
+    // Rounded up by hand: `div_ceil` is newer than this crate's MSRV.
+    let bw = ((t.w + MAX_CROSSING - 1) / MAX_CROSSING).max(1);
+    let bh = ((t.h + MAX_CROSSING - 1) / MAX_CROSSING).max(1);
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); bw * bh];
+    for &i in &shore {
+        let (x, y) = t.xy(i);
+        buckets[(y / MAX_CROSSING) * bw + x / MAX_CROSSING].push(i);
+    }
+    // Candidates per landmass pair, narrowest water first.
+    let mut per_pair: BTreeMap<(u16, u16), Vec<Candidate>> = BTreeMap::new();
+    for &a in &shore {
+        let (ax, ay) = t.xy(a);
+        let (bx, by) = (ax / MAX_CROSSING, ay / MAX_CROSSING);
+        let la = t.landmass[a];
+        for gy in by.saturating_sub(1)..=(by + 1).min(bh - 1) {
+            for gx in bx.saturating_sub(1)..=(bx + 1).min(bw - 1) {
+                for &b in &buckets[gy * bw + gx] {
+                    let lb = t.landmass[b];
+                    // One direction only per pair of cells; the list is
+                    // mirrored at the end.
+                    if lb <= la || b <= a {
+                        continue;
+                    }
+                    let d = t.dist(a, b);
+                    if !(2..=MAX_CROSSING).contains(&d) {
+                        continue;
+                    }
+                    if !open_water_between(t, a, b) {
+                        continue;
+                    }
+                    per_pair.entry((la, lb)).or_default().push(Candidate {
+                        width: d as u16,
+                        from: a,
+                        to: b,
+                    });
+                }
+            }
+        }
+    }
+    let mut out: Vec<Crossing> = Vec::new();
+    for (_, mut cands) in per_pair {
+        // Narrowest first, with a total tie-break so the same map always
+        // yields the same routes.
+        cands.sort_by_key(|c| (c.width, c.from, c.to));
+        let mut kept: Vec<usize> = Vec::new();
+        for cand in cands {
+            let (width, a, b) = (cand.width, cand.from, cand.to);
+            if kept.len() >= CROSSINGS_PER_PAIR {
+                break;
+            }
+            if kept.iter().any(|&k| t.dist(k, a) < CROSSING_SPACING) {
+                continue;
+            }
+            kept.push(a);
+            out.push(Crossing {
+                from: a as u32,
+                to: b as u32,
+                width,
+            });
+            out.push(Crossing {
+                from: b as u32,
+                to: a as u32,
+                width,
+            });
+        }
+    }
+    out.sort_by_key(|c| (c.from, c.to));
+    out
+}
+
+/// Whether the straight line between two coastal cells runs over open water
+/// the whole way, so that it is a sea route and not a shortcut over a third
+/// landmass.
+fn open_water_between(t: &Terrain, a: usize, b: usize) -> bool {
+    let (ax, ay) = t.xy(a);
+    let (bx, by) = t.xy(b);
+    let steps = t.dist(a, b);
+    if steps < 2 {
+        return false;
+    }
+    for k in 1..steps {
+        // Sampled along the line; the endpoints are the shores themselves.
+        let x = ax as i32 + (bx as i32 - ax as i32) * k as i32 / steps as i32;
+        let y = ay as i32 + (by as i32 - ay as i32) * k as i32 / steps as i32;
+        let i = t.idx(x as usize, y as usize);
+        if t.is_land(i) {
+            return false;
+        }
+    }
+    true
+}
+
+impl Terrain {
+    /// The crossings that start at `cell`, or nothing if the sea cannot be
+    /// put to sea from there. A binary search over the sorted list.
+    pub fn crossings_from(&self, cell: usize) -> &[Crossing] {
+        let key = cell as u32;
+        let start = self.crossings.partition_point(|c| c.from < key);
+        let end = self.crossings.partition_point(|c| c.from <= key);
+        &self.crossings[start..end]
+    }
+}
+
 pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
     let n = w * h;
     let noise_e = Noise::new(rng);
@@ -488,6 +663,7 @@ pub fn generate(rng: &Rng, w: usize, h: usize) -> Terrain {
         landmass: vec![0; n],
         features: Vec::new(),
         land_count: 0,
+        crossings: Vec::new(),
     };
 
     // Preliminary water mask.
@@ -905,6 +1081,7 @@ fn label_features(t: &mut Terrain, nexi: &[(f32, f32, f32)], dir: &[Option<usize
         }
     }
     t.landmass = landmass;
+    t.crossings = sea_routes(t);
     // Ranges, forests, deserts, marshes, steppes.
     let specs: Vec<FeatureSpec> = vec![
         (

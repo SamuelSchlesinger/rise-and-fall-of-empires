@@ -19,8 +19,9 @@ noise.rs         2D gradient noise and fBm: terrain, climate, mana
 rng.rs           xoshiro256** with interior mutability; clones share a stream
 lang.rs          per-culture phonology; every name in the world is coined here,
                  daughter tongues by sound shift
-geo.rs           elevation -> climate -> rivers -> biomes -> mana -> features.
-                 Generated once, mostly read afterwards
+geo.rs           elevation -> climate -> rivers -> biomes -> mana -> features,
+                 and the sea routes between landmasses. Generated once,
+                 read afterwards
 
 sim/
   mod.rs         the World: entities, World::tick, recompute, the owner index,
@@ -99,6 +100,45 @@ living costs the whole history of the world every year.
 temperature, rainfall, river, biome, mana, minerals, features. `CellState` (in
 `sim`) is the mutable half: population, culture, owner, development. They are
 parallel arrays indexed by `y * w + x`.
+
+## The sea
+
+Because the terrain never changes, **where the sea can be crossed is a fixed
+property of the map**. `geo::sea_routes` works it out once — every pair of
+coastal cells on *different* landmasses within `MAX_CROSSING` of each other,
+joined by a line whose interior is all water — and stores it as
+`Terrain::crossings`, sorted so `crossings_from` is a binary search. It is
+derived, so `ser` rebuilds it on load rather than storing it.
+
+That one static graph is what makes every question about the sea a lookup:
+
+- `World::sea_reach` is how wide a crossing a realm can manage, from its
+  people's seafaring, its own development and what kind of thing it is. A
+  realm that has just learned to build sea-going hulls can cross a strait;
+  only an old, developed, seafaring power reaches the far isles.
+- `politics::expand` walks the realm's own sorties rather than scanning a box
+  around every coastal cell, so reach is a capability rather than a constant.
+- `recompute` adds a **sea neighbour** for any crossing whose two shores are
+  held by different realms and which somebody's reach can make. Without it
+  the sea was not a distance but a wall: realms on opposite shores were not
+  neighbours, so no tension built, so no war was ever declared.
+- `war::resolve_wars` puts both shores of such a crossing on the front, so
+  the war can be fought. `battle` notices when the ground could not have been
+  walked to and charges `LANDING_PENALTY` for the assault.
+- `people::grow_and_migrate` lets a crowded coastal community take a crossing
+  within its *people's* own reach — narrow water only, since a people has no
+  shipwrights of its own. Islands get peopled, which is what gives a state
+  something to colonise or conquer later.
+- `recompute` also discounts the distance to land across water by
+  `SEA_BINDS_FACTOR × reach`, because for most of history the sea was the
+  fast road. Without that the sea could be opened and would then be punished:
+  every overseas holding would drive up `sprawl` and fray the realm that took
+  it.
+
+`the_sea_joins_the_world` asserts the property all of this exists for — that
+every landmass worth settling can be reached from the largest one by a chain
+of crossings, so a realm that masters the sea can in principle reach the whole
+world.
 
 ## The tick pipeline
 
