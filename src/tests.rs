@@ -977,3 +977,47 @@ fn trade_makes_position_worth_something() {
         );
     }
 }
+
+/// The weather moves, and it moves the land's capacity with it.
+///
+/// Terrain is immutable, which is right for elevation and wrong for
+/// rainfall: without this the steppe is as dry in year nine thousand as in
+/// year one and no region ever has a bad century.
+#[test]
+fn the_weather_turns_over_centuries() {
+    let mut w = world(23);
+    run(&mut w, 40);
+    let early: Vec<f32> = w.climate.at.clone();
+    assert!(!early.is_empty(), "the world has no weather at all");
+    assert!(
+        early.iter().any(|&v| v.abs() > 0.15),
+        "the weather is flat everywhere"
+    );
+    run(&mut w, 900);
+    let late = &w.climate.at;
+    // Somewhere has genuinely changed.
+    let moved = early
+        .iter()
+        .zip(late.iter())
+        .filter(|(a, b)| (*a - *b).abs() > 0.3)
+        .count();
+    assert!(
+        moved > early.len() / 50,
+        "only {} cells of {} saw their weather change in nine centuries",
+        moved,
+        early.len()
+    );
+    // And it is the same weather a reloaded world gets back, including
+    // partway through an epoch.
+    for extra in [0usize, 3, 5] {
+        let mut a = world(23);
+        run(&mut a, 200 + extra as i32);
+        let bytes = crate::ser::save(&mut a);
+        let b = crate::ser::load(&bytes).expect("loads");
+        assert_eq!(
+            a.climate.at, b.climate.at,
+            "the weather did not survive a save taken {} years into an epoch",
+            extra
+        );
+    }
+}

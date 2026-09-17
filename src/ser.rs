@@ -1722,6 +1722,11 @@ pub fn load(bytes: &[u8]) -> Result<World, SaveError> {
         }
     }
     validate(&w)?;
+    // The weather is derived from the world's seed and its year, so it is
+    // rebuilt rather than stored — but it has to be rebuilt *here*, because
+    // the tick only works it out on an epoch boundary and a world loaded
+    // between two boundaries would otherwise run on no weather at all.
+    crate::sim::climate::rebuild(&mut w);
     w.recompute();
     Ok(w)
 }

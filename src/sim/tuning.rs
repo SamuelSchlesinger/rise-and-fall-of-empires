@@ -467,6 +467,14 @@ pub struct Tuning {
     /// How much a hegemon's share adds to everyone else's tension with it.
     pub containment_tension: f32,
 
+    // -- the weather of centuries ------------------------------------------
+    /// How far a good or a bad stretch of centuries moves the carrying
+    /// capacity of land, either way.
+    pub climate_amplitude: f32,
+    /// How far a region's weather must move in a lifetime before the
+    /// chroniclers remark on it.
+    pub climate_notice: f32,
+
     // -- the ties between people -------------------------------------------
     /// Yearly chance a rivalry sets in somewhere in the world.
     pub rivalry_chance: f64,
@@ -710,6 +718,8 @@ impl Default for Tuning {
             tributary_revolt_chance: 0.02,
             hegemon_share: 0.2,
             containment_tension: 0.05,
+            climate_amplitude: 0.28,
+            climate_notice: 0.3,
             rivalry_chance: 0.12,
             patronage_chance: 0.09,
             protege_surpasses_chance: 0.05,
@@ -939,6 +949,8 @@ impl Tuning {
             "tributary_revolt_chance" => self.tributary_revolt_chance = v,
             "hegemon_share" => self.hegemon_share = v as f32,
             "containment_tension" => self.containment_tension = v as f32,
+            "climate_amplitude" => self.climate_amplitude = v as f32,
+            "climate_notice" => self.climate_notice = v as f32,
             "rivalry_chance" => self.rivalry_chance = v,
             "patronage_chance" => self.patronage_chance = v,
             "protege_surpasses_chance" => self.protege_surpasses_chance = v,

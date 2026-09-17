@@ -717,3 +717,54 @@ pub fn era_of_tech(w: &World, t: usize, wars: u32, pick: &Pick) -> String {
         ),
     }
 }
+
+// ---------------------------------------------------------------------------
+// The weather of centuries
+// ---------------------------------------------------------------------------
+
+/// A region's weather has plainly turned. One draw.
+///
+/// Named by place rather than by number, because "the rains failed over the
+/// Ngerrilm Plain" is a sentence and "cell 4,182 lost 0.3 capacity" is not.
+pub fn climate_turned(place: &str, level: f32, improving: bool, pick: &Pick) -> String {
+    let dry = level < 0.0;
+    match (dry, improving, pick.index(2)) {
+        (true, false, 0) => format!(
+            "The rains had been failing over {} for a generation, and the old people said they \
+             had never known the wells so low.",
+            place
+        ),
+        (true, false, _) => format!(
+            "{} was drying. Each year the grass came up thinner than the last, and the herds \
+             went further to find it.",
+            cap(place)
+        ),
+        (true, true, 0) => format!(
+            "The drought over {} broke at last. It had lasted long enough that nobody under \
+             thirty remembered the land green.",
+            place
+        ),
+        (true, true, _) => format!(
+            "Rain returned to {}, late and grudging, but it returned.",
+            place
+        ),
+        (false, true, 0) => format!(
+            "The seasons turned kind over {}. Harvests came in heavy for a lifetime together, \
+             and the villages spread out into country nobody had troubled to farm.",
+            place
+        ),
+        (false, true, _) => format!(
+            "{} had a long run of good years. The granaries were full and the children lived.",
+            cap(place)
+        ),
+        (false, false, 0) => format!(
+            "The good years over {} were ending, though it would be a generation before anyone \
+             said so aloud.",
+            place
+        ),
+        (false, false, _) => format!(
+            "The weather over {} was turning against the people who had grown used to it.",
+            place
+        ),
+    }
+}

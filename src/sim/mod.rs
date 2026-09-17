@@ -4,6 +4,7 @@
 pub mod blood;
 pub mod chronicle;
 pub mod circles;
+pub mod climate;
 pub mod dynasty;
 pub mod events;
 pub mod explain;
@@ -989,7 +990,7 @@ const MEANINGFUL_WORLD: usize = 300;
 const SEA_REACH_BASE: f32 = 3.0;
 
 /// The phases of a tick, in the order `World::tick` runs them.
-pub const PHASES: [&str; 25] = [
+pub const PHASES: [&str; 26] = [
     "grow_and_migrate",
     "form_polities",
     "expand",
@@ -1004,6 +1005,7 @@ pub const PHASES: [&str; 25] = [
     "unrest",
     "magic",
     "culture_drift",
+    "climate",
     "trade",
     "tech",
     "disasters",
@@ -1092,6 +1094,9 @@ pub struct World {
     /// What each realm knows anywhere in its lands, gathered by `recompute`
     /// so that `knows` is a bit test rather than a walk over its territory.
     pub polity_known: Vec<u128>,
+    /// How kind the weather has been lately, cell by cell. Drifts over
+    /// centuries; see [`climate`].
+    pub climate: climate::Climate,
     /// What each cell of the world produces, if anything.
     ///
     /// A pure reading of the terrain, so it is rebuilt on load rather than
@@ -1156,6 +1161,7 @@ impl World {
             persons: Vec::new(),
             known: Vec::new(),
             polity_known: Vec::new(),
+            climate: climate::Climate::default(),
             goods: Vec::new(),
             routes: Vec::new(),
             cell_yield: Vec::new(),
@@ -1239,6 +1245,7 @@ impl World {
             persons: Vec::new(),
             known: vec![0; n],
             polity_known: Vec::new(),
+            climate: climate::Climate::default(),
             goods: Vec::new(),
             routes: Vec::new(),
             cell_yield: Vec::new(),
@@ -2070,17 +2077,18 @@ impl World {
         phase!(11, politics::unrest(self));
         phase!(12, magic::tick(self));
         phase!(13, people::culture_drift(self));
-        phase!(14, trade::tick(self));
-        phase!(15, tech::tick(self));
-        phase!(16, events::disasters(self));
-        phase!(17, events::notables(self));
-        phase!(18, circles::tick(self));
-        phase!(19, events::wonders(self));
-        phase!(20, stories::tick_artifacts(self));
-        phase!(21, stories::tick_prophecies(self));
-        phase!(22, stories::tick_legends(self));
-        phase!(23, self.recompute());
-        phase!(24, events::eras(self));
+        phase!(14, climate::tick(self));
+        phase!(15, trade::tick(self));
+        phase!(16, tech::tick(self));
+        phase!(17, events::disasters(self));
+        phase!(18, events::notables(self));
+        phase!(19, circles::tick(self));
+        phase!(20, events::wonders(self));
+        phase!(21, stories::tick_artifacts(self));
+        phase!(22, stories::tick_prophecies(self));
+        phase!(23, stories::tick_legends(self));
+        phase!(24, self.recompute());
+        phase!(25, events::eras(self));
         self.chronicle.compact(self.tuning.chronicle_cap);
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);
