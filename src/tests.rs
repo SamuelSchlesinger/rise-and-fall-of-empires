@@ -1100,6 +1100,160 @@ fn time_each_century() {
     println!("worst century: {:.3} ms/year", worst);
 }
 
+/// A realm's books at the start of a year, for [`the_income_breakdown_adds_up`].
+struct Books {
+    realm: usize,
+    treasury: f32,
+    /// Wonders standing in its cities: paying for one is not a cost of
+    /// government.
+    wonders: usize,
+    /// How many towns it holds, and how many wars it has ever declared.
+    /// Either changing means the tax base moved under it mid-tick.
+    cities: usize,
+    wars: usize,
+    /// What the breakdown says the year will bring, and what passes through
+    /// the treasury to bring it.
+    forecast: f32,
+    gross: f32,
+}
+
+/// The income breakdown must add up to what the treasury actually gains.
+///
+/// `explain` duplicates the arithmetic in `politics::economy` on purpose —
+/// an explanation has to name its parts, and the simulation only wants the
+/// sum — but a duplicate with nothing holding it to account drifts, and a
+/// breakdown that disagrees with the number beside it is worse than no
+/// breakdown at all.
+///
+/// So this reads the treasury before and after a tick and demands the
+/// difference. Only realms where nothing *else* touched the money are
+/// compared: tribute, sacking, peace terms and paying for a wonder are all
+/// treasury writers, and none of them are income.
+///
+/// Writing it cost three changes to the simulation, because three inputs to
+/// the income arithmetic were read at one moment and used at another, and an
+/// explanation can only read the world as it stands:
+///
+/// * A city was taxed on the prosperity the same loop was about to give it,
+///   so the crown's income depended on an adjustment made in the same
+///   breath. It is taxed on the year's opening prosperity now.
+/// * Towns grew in the first phase and were taxed in the fifth, so a
+///   booming city paid on people who had arrived that same year. Growth is
+///   its own phase now, and it runs after the assessment.
+/// * And trade stays *after* the economy rather than before it, which looks
+///   like the wrong way round and is not: a toll roll is assessed in
+///   arrears. Moving it earlier was tried and made this uncheckable, since
+///   a forecast cannot know a toll roll that has not been counted yet.
+///
+/// With those, every input is a year's opening value and the parts add up to
+/// the whole. What tolerance is left is float arithmetic and the order of a
+/// summation — which is the point: a term left out, a weight wrong or a cost
+/// counted as income is off by tens of percent and cannot hide in it.
+#[test]
+fn the_income_breakdown_adds_up() {
+    use crate::sim::explain;
+    let mut w = world(7);
+    run(&mut w, 150);
+    let mut checked = 0;
+    for _ in 0..200 {
+        let before: Vec<Books> = w
+            .alive_polities
+            .iter()
+            .copied()
+            // Not at war (sacking, peace terms and loot), paying no
+            // tribute and — the one that took a while to find — collecting
+            // none either. An overlord's treasury grows by its tributaries'
+            // taxes, which is somebody else's income.
+            .filter(|&p| {
+                !w.polities[p].at_war()
+                    && w.polities[p].overlord.is_none()
+                    && !w
+                        .alive_polities
+                        .iter()
+                        .any(|&q| w.polities[q].overlord == Some(p))
+            })
+            .map(|p| {
+                let wonders: usize = w.polities[p]
+                    .cities
+                    .iter()
+                    .map(|&c| w.cities[c].wonders.len())
+                    .sum();
+                // The tolerance scales with what passes through the
+                // treasury, not with what is left in it: a realm whose
+                // income nearly cancels its upkeep has a net near zero, and
+                // a percent of its gross is a large share of that.
+                let f = explain::income_factors(&w, p);
+                let net: f32 = f.iter().map(|x| x.weight).sum();
+                let gross: f32 = f.iter().map(|x| x.weight.abs()).sum();
+                Books {
+                    realm: p,
+                    treasury: w.polities[p].treasury,
+                    wonders,
+                    cities: w.polities[p].cities.len(),
+                    wars: w.polities[p].wars.len(),
+                    forecast: net,
+                    gross,
+                }
+            })
+            .collect();
+        w.tick();
+        for b in before {
+            let (p, was, predicted, gross) = (b.realm, b.treasury, b.forecast, b.gross);
+            let (wonders_before, cities_before, wars_before) = (b.wonders, b.cities, b.wars);
+            if !w.polities[p].alive() || w.polities[p].at_war() {
+                continue;
+            }
+            let wonders: usize = w.polities[p]
+                .cities
+                .iter()
+                .map(|&c| w.cities[c].wonders.len())
+                .sum();
+            if wonders != wonders_before {
+                continue;
+            }
+            // Nor a realm whose tax base moved under it. `recompute` rebuilds
+            // a realm's city list from who owns the ground, so a town gained
+            // or lost this year is taxed on one side of the comparison and
+            // not the other.
+            if w.polities[p].cities.len() != cities_before {
+                continue;
+            }
+            // Nor one that fought a whole war inside the tick. A realm's war
+            // list only grows, so a change of length means a declaration —
+            // and a war declared in the fifth phase can be lost, looted and
+            // settled by the eighth, which leaves `at_war` false at both
+            // ends of the comparison and somebody else's gold in the
+            // treasury.
+            if w.polities[p].wars.len() != wars_before {
+                continue;
+            }
+            let now = w.polities[p].treasury;
+            // The treasury is clamped at both ends, and a clamped value
+            // tells us nothing about the arithmetic that produced it.
+            if !(-59.9..=599.9).contains(&now) {
+                continue;
+            }
+            let got = now - was;
+            assert!(
+                (got - predicted).abs() <= 0.05 + gross * 0.04,
+                "realm {} in year {}: treasury moved {:.4} but the breakdown \
+                 totals {:.4} (gross {:.4})",
+                p,
+                w.year,
+                got,
+                predicted,
+                gross
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 200,
+        "only {} realm-years were clean enough to check",
+        checked
+    );
+}
+
 /// No living population may grow without bound.
 ///
 /// Every population here is a queue: members arrive, members leave, and by

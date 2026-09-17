@@ -991,7 +991,7 @@ const MEANINGFUL_WORLD: usize = 300;
 const SEA_REACH_BASE: f32 = 3.0;
 
 /// The phases of a tick, in the order `World::tick` runs them.
-pub const PHASES: [&str; 27] = [
+pub const PHASES: [&str; 28] = [
     "grow_and_migrate",
     "form_polities",
     "expand",
@@ -1019,6 +1019,7 @@ pub const PHASES: [&str; 27] = [
     "recompute",
     "eras",
     "flows",
+    "grow_cities",
 ];
 
 /// Per-phase timings, accumulated only while `on` is set. The flag is
@@ -2127,6 +2128,9 @@ impl World {
         phase!(2, politics::expand(self));
         phase!(3, politics::found_cities(self));
         phase!(4, politics::economy(self));
+        // And the towns grow after the crown has assessed them: see
+        // `people::grow_cities`.
+        phase!(27, people::grow_cities(self));
         phase!(5, war::diplomacy(self));
         phase!(6, war::alliances(self));
         phase!(7, war::tribute(self));
@@ -2140,6 +2144,14 @@ impl World {
         phase!(12, magic::tick(self));
         phase!(13, people::culture_drift(self));
         phase!(14, climate::tick(self));
+        // Trade stays *after* the economy that taxes it, which looks like
+        // the wrong way round and is not. A toll roll is assessed in
+        // arrears: the crown levies this year on last year's traffic. The
+        // alternative was tried, and it costs more than it buys — every
+        // other input to the income arithmetic is a year's opening value,
+        // so counting the roads first is the one thing that stops
+        // `explain::income_factors` from being checkable against the
+        // treasury it describes.
         phase!(15, trade::tick(self));
         phase!(16, tech::tick(self));
         phase!(17, events::disasters(self));

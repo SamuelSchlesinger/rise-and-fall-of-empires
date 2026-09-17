@@ -164,7 +164,22 @@ pub fn grow_and_migrate(w: &mut World) {
             cs.pop = 0.0;
         }
     }
-    // Cities grow on their own account.
+}
+
+/// Cities grow on their own account.
+///
+/// Its own phase, and it runs *after* the economy that taxes the towns. A
+/// crown assesses a town as it stood at the start of the year and the town
+/// grows afterwards, which is both the sensible reading and the one that
+/// lets `explain::income_factors` state where the money came from: every
+/// other input to that arithmetic is a year's opening value, and while this
+/// one was not, the breakdown ran up to a tenth out on a realm whose one
+/// town was booming.
+///
+/// It also means a city grows on the prosperity this year gave it rather
+/// than last year's, which is the better way round.
+pub fn grow_cities(w: &mut World) {
+    let tn = w.tuning;
     for c in 0..w.cities.len() {
         if w.cities[c].destroyed.is_some() {
             continue;

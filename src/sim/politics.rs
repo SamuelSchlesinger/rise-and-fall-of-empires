@@ -803,11 +803,19 @@ pub fn economy(w: &mut World) {
             // astride the roads is worth attacking.
             target += (w.city_trade(c) * TRADE_TO_PROSPERITY).min(0.6);
             let city = &mut w.cities[c];
+            // Taxed on the year's opening prosperity, before this year's
+            // adjustment. A treasury is filled from what was actually
+            // produced, and prosperity is a slow-moving stock rather than a
+            // flow — but the real reason the order matters is that `explain`
+            // has to be able to state where the money came from, and it can
+            // only read the world as it stands, not as this loop is about to
+            // leave it. An explanation that is a percent out is worse than
+            // none, because a reader checks the parts against the whole.
+            income += city.pop * city.prosperity * tn.city_income_factor;
             city.prosperity += (target - city.prosperity) * tn.prosperity_adjust_rate;
             city.prosperity = city.prosperity.clamp(0.05, 2.5);
             city.walls += (dev * 0.8 - city.walls) * 0.03;
             prosp_sum += city.prosperity;
-            income += city.pop * city.prosperity * tn.city_income_factor;
         }
         let avg_prosp = if cities.is_empty() {
             0.3

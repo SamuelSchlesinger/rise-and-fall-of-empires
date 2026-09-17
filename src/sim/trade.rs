@@ -186,7 +186,7 @@ const HINTERLAND: i32 = 4;
 /// How often the routes are worked out again. Cities are founded and fall
 /// slowly, so this does not need to be yearly — and it is the one sweep in
 /// this module that costs anything.
-const REFRESH: i32 = 20;
+pub const REFRESH: i32 = 20;
 
 /// What a city can offer: the goods of its own hinterland, as a bitset.
 fn hinterland(w: &World, city: usize) -> u16 {

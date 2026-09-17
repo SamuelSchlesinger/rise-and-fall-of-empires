@@ -1101,6 +1101,58 @@ fn realm_page(
             ));
             out.push(line("", FG, 0));
         }
+        // And where the money comes from. Stability had an explanation from
+        // the beginning and money never did, which left the two economic
+        // entries in the block above — the full treasury, the prosperous
+        // cities — as the only visible economics in the game, both of them
+        // effects with no stated cause.
+        let money = explain::income_shown(w, p, 5);
+        if !money.is_empty() {
+            out.push(line("Money", ACCENT, BOLD));
+            // Every line of it: `income_factors` already trims the
+            // revenues and keeps all the costs, so the figures shown add
+            // up to the total printed beneath them.
+            for f in money.iter() {
+                let (mark, c) = if f.weight > 0.0 {
+                    (if ascii { '+' } else { '▲' }, Rgb(230, 200, 120))
+                } else {
+                    (if ascii { '-' } else { '▼' }, Rgb(200, 140, 120))
+                };
+                for (k, l) in term::wrap(&f.text, w2.saturating_sub(18))
+                    .into_iter()
+                    .enumerate()
+                {
+                    let pre = if k == 0 {
+                        format!("  {} {:>6}  ", mark, format!("{:+.2}", f.weight))
+                    } else {
+                        "            ".to_string()
+                    };
+                    out.push(line(format!("{}{}", pre, l), c, 0));
+                }
+            }
+            let net = explain::income_total(w, p);
+            let years_to_empty = if net < -0.01 {
+                let t = w.polities[p].treasury;
+                if t > 0.0 {
+                    format!(", and empty in {:.0} years at that rate", t / -net)
+                } else {
+                    ", and already in debt".to_string()
+                }
+            } else {
+                String::new()
+            };
+            out.push(line(
+                format!(
+                    "  the treasury {} about {:.2} a year{}",
+                    if net >= 0.0 { "gains" } else { "loses" },
+                    net.abs(),
+                    years_to_empty
+                ),
+                DIMC,
+                DIM,
+            ));
+            out.push(line("", FG, 0));
+        }
         // Four separate pressures, so no single bar can stand for them: the
         // one that used to sit here drew from overextension alone and was
         // full for any realm past its reach, above three numbers it said
