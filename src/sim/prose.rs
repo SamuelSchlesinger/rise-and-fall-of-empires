@@ -17,6 +17,8 @@
 //!   short name ("Velen") afterwards. [`realm_full`] and [`realm`] make
 //!   that rule easy to follow.
 
+pub mod diplomacy;
+pub mod dynasty;
 pub mod events;
 pub mod genesis;
 pub mod magic;
@@ -26,6 +28,8 @@ mod people;
 mod politics;
 mod stories;
 
+pub use diplomacy::*;
+pub use dynasty::*;
 pub use events::*;
 pub use genesis::*;
 pub use magic::*;

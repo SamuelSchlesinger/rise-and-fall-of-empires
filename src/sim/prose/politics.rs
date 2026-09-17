@@ -194,34 +194,6 @@ pub fn elected(w: &World, p: usize, kind: PolityKind, heir: usize, old: usize) -
     }
 }
 
-/// A quiet, expected succession. One draw.
-pub fn succession_smooth(w: &World, p: usize, heir: usize, dynasty: &str, pick: &Pick) -> String {
-    let hon = w.honorific(p, w.persons[heir].gender);
-    let name = &w.persons[heir].name;
-    let house = if dynasty.trim().is_empty() {
-        String::new()
-    } else {
-        format!(" {} is of {}.", name, dynasty)
-    };
-    if pick.index(2) == 0 {
-        format!(
-            "{} {} succeeded to the throne of {} without dispute.{}",
-            hon,
-            name,
-            realm_full(w, p),
-            house
-        )
-    } else {
-        format!(
-            "By right of blood the throne passed to {} {} of {}.{}",
-            hon,
-            name,
-            realm_full(w, p),
-            house
-        )
-    }
-}
-
 /// No heir, so the strongest hand takes the throne. No draw.
 pub fn succession_usurped(
     w: &World,
@@ -241,40 +213,6 @@ pub fn succession_usurped(
         realm_full(w, p),
         new_dynasty,
         ended
-    )
-}
-
-/// Two heirs, and the realm goes to war with itself. No draw.
-pub fn succession_war(
-    w: &World,
-    p: usize,
-    rebel: usize,
-    name_a: &str,
-    name_b: &str,
-    seat_a: &str,
-) -> String {
-    let seat_b = w.polities[rebel]
-        .cities
-        .first()
-        .map(|&c| w.cities[c].name.clone())
-        .unwrap_or_else(|| "the provinces".to_string());
-    format!(
-        "Two children of the dead ruler claimed the throne of {}. {} held {} and the treasury; {} raised banners in {} and would not bend. {} went to war with itself.",
-        realm_full(w, p),
-        name_a,
-        seat_a,
-        name_b,
-        seat_b,
-        realm(w, p)
-    )
-}
-
-/// A disputed succession settled without a war. No draw.
-pub fn succession_disputed(w: &World, p: usize, name_a: &str) -> String {
-    format!(
-        "{} took the throne of {} after a bitter dispute among the heirs.",
-        name_a,
-        realm_full(w, p)
     )
 }
 
@@ -488,9 +426,20 @@ pub fn shattered(
     w: &World,
     p: usize,
     old_name: &str,
-    successor_names: &[String],
+    successors: &[usize],
     capital: &str,
 ) -> String {
+    // Name whoever crowned themselves where there is somebody to name: a
+    // successor state with a face is a thread the reader can follow, and an
+    // anonymous one is a line of scenery.
+    let successor_names: Vec<String> = successors
+        .iter()
+        .map(|&sp| match w.polities[sp].ruler {
+            Some(r) => format!("{} under {}", w.polities[sp].name, w.persons[r].name),
+            None => w.polities[sp].name.clone(),
+        })
+        .collect();
+    let successor_names = &successor_names[..];
     let now = realm_full(w, p);
     let remnant = if now == old_name {
         format!("What remained held only the lands about {}.", capital)

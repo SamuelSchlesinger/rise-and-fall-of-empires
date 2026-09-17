@@ -148,7 +148,11 @@ pub fn make_artifact(
 pub fn artifact_passes(w: &mut World, a: usize, to: Holder, how: &str) {
     w.artifacts[a].holder = to;
     w.artifacts[a].hands += 1;
-    if let Holder::Lost = to {
+    // Clearing this belongs to the *finding*, not the losing: every caller
+    // that loses a relic records where it fell just before calling, and that
+    // cell is the only thing that can ever bring it back (see
+    // `tick_artifacts`). Wiping it here buried every relic for good.
+    if !matches!(to, Holder::Lost) {
         w.artifacts[a].lost_at = None;
     }
     let name = w.artifacts[a].name.clone();
@@ -399,33 +403,23 @@ pub fn tick_artifacts(w: &mut World) {
             _ => {}
         }
     }
-    // Holders gain a little from their relics.
+    // Holders gain prestige from their relics. Prestige is a stock that
+    // decays a little every year in `politics::economy`, so adding to it
+    // here is safe; stability is not, and its relic bonus is applied to the
+    // *target* in `economy` instead — see `World::artifact_stability`.
     for p in w.living_polities() {
         let held = w.artifacts_of(p);
         if held.is_empty() {
             continue;
         }
-        let mut stab = 0.0;
-        let mut prestige = 0.0;
-        for &a in &held {
-            let pw = w.artifacts[a].power;
-            prestige += pw * 0.4;
-            match w.artifacts[a].kind {
-                ArtifactKind::Crown | ArtifactKind::Banner | ArtifactKind::Horn => {
-                    stab += 0.01 * pw;
-                }
-                ArtifactKind::Chalice | ArtifactKind::Mirror => stab += 0.005 * pw,
-                _ => {}
-            }
-        }
-        let pol = &mut w.polities[p];
-        pol.stability = (pol.stability + stab).min(1.0);
-        pol.prestige += prestige;
+        let prestige: f32 = held.iter().map(|&a| w.artifacts[a].power * 0.4).sum();
+        w.polities[p].prestige += prestige;
     }
 }
 
-/// Army multiplier from relics.
+/// What relics do for whoever holds them.
 impl World {
+    /// Army multiplier from relics.
     pub fn artifact_army_mult(&self, p: usize) -> f32 {
         let mut m = 1.0;
         for a in self.artifacts_of(p) {
@@ -437,6 +431,31 @@ impl World {
             }
         }
         m
+    }
+
+    /// How much a realm's regalia adds to the stability it tends toward.
+    ///
+    /// This used to be added straight to the stored stability every year,
+    /// which made it a ratchet rather than a bonus: a realm with a few
+    /// crowns climbed to total stability and stayed there no matter how
+    /// overextended, decadent or war-weary it became, because the faucet
+    /// ran faster than every drain put together. As a *target* term it does
+    /// what it was always meant to do — a crown is worth something, but it
+    /// is not worth more than governing badly costs.
+    ///
+    /// Capped, because a treasury full of relics should not be a substitute
+    /// for a state.
+    pub fn artifact_stability(&self, p: usize) -> f32 {
+        let mut s = 0.0;
+        for a in self.artifacts_of(p) {
+            let pw = self.artifacts[a].power;
+            match self.artifacts[a].kind {
+                ArtifactKind::Crown | ArtifactKind::Banner | ArtifactKind::Horn => s += 0.04 * pw,
+                ArtifactKind::Chalice | ArtifactKind::Mirror => s += 0.02 * pw,
+                _ => {}
+            }
+        }
+        s.min(0.12)
     }
 }
 
@@ -689,6 +708,12 @@ pub fn tick_legends(w: &mut World) {
 
 impl World {
     pub fn children_of(&self, r: usize) -> Vec<usize> {
+        // The kin list is authoritative and already in birth order; the old
+        // full scan of `persons` is kept only for people who predate it,
+        // which is anything loaded from a version-1 save.
+        if !self.persons[r].children.is_empty() {
+            return self.persons[r].children.clone();
+        }
         self.persons
             .iter()
             .filter(|p| p.parent == Some(r))

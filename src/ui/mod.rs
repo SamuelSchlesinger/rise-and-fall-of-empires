@@ -4,7 +4,7 @@
 //! commands and `/` search, with mouse and modified arrows as well.
 
 mod commands;
-mod detail;
+pub(crate) mod detail;
 mod input;
 mod learn;
 mod recap;
@@ -1040,11 +1040,11 @@ impl Ui {
             out.push((
                 size * 0.02 + x.battles as f32 * 0.5,
                 format!(
-                    "{}: {} v {}, {} years, {}",
+                    "{}: {} v {}, {}, {}",
                     x.name,
                     w.polities[a].short,
                     w.polities[d].short,
-                    w.year - x.started,
+                    crate::sim::prose::years((w.year - x.started).max(1) as i64),
                     lean
                 ),
                 Ref::War(x.id),
@@ -1087,6 +1087,44 @@ impl Ui {
                     Ref::Polity(p),
                 ));
             }
+        }
+        // The figures of the age, weighted above almost everything else.
+        // A reader who looks up once a century should find the name that
+        // century will be remembered by without going hunting for it, and
+        // the deed is carried with the name so it means something the first
+        // time they see it.
+        for r in 0..w.persons.len() {
+            let per = &w.persons[r];
+            if !per.alive() || !per.is_acclaimed() {
+                continue;
+            }
+            let Some(p) = per.polity.filter(|&p| w.polities[p].alive()) else {
+                continue;
+            };
+            let deed = crate::sim::dynasty::standing(w, r)
+                .first()
+                .map(|c| c.what.clone())
+                .unwrap_or_else(|| "is spoken of everywhere".into());
+            // Weighted above the ordinary run of wars and unrest: a living
+            // figure is the most interesting thing in a century, and the
+            // line is kept short so it fits a sidebar row without wrapping.
+            out.push((
+                30.0 + per.greatness * 0.02,
+                format!("{} of {}: {}", per.full_name(), w.polities[p].short, deed),
+                Ref::Person(r),
+            ));
+        }
+        // The power of the age, if there is one.
+        if let Some(h) = crate::sim::war::hegemon(w) {
+            out.push((
+                26.0,
+                format!(
+                    "{} holds {:.0}% of the world",
+                    w.polities[h].short,
+                    crate::sim::dynasty::world_share(w, h) * 100.0
+                ),
+                Ref::Polity(h),
+            ));
         }
         for pl in &w.plagues {
             let names: Vec<&str> = pl

@@ -2,6 +2,7 @@
 //! helpers every subsystem uses to name things and write history.
 
 pub mod chronicle;
+pub mod dynasty;
 pub mod events;
 pub mod explain;
 pub mod genesis;
@@ -224,6 +225,133 @@ impl PolityKind {
     }
 }
 
+/// A ruling family, across every throne it ever held and every century it
+/// lasted.
+///
+/// A dynasty used to be a bare `String` on the realm, which meant it had no
+/// identity: two realms ruled by the same family could not be known to be
+/// related, a cadet branch that went off and founded its own kingdom was
+/// simply a different word, and nothing could be looked up, clicked or
+/// followed. A house is an entity so that a thousand years of one family is
+/// something the reader can actually open and read down.
+///
+/// Like every other entity vector this one is append-only: a house that dies
+/// out is marked with the year and stays where it is.
+pub struct House {
+    pub id: usize,
+    /// "the Tashkatoi dynasty", "House Dherrandu".
+    pub name: String,
+    pub culture: usize,
+    /// Whoever the house is named for.
+    pub founder: Option<usize>,
+    pub founded: i32,
+    /// The year the last of the line died or lost the last throne.
+    pub ended: Option<i32>,
+    /// Everyone born or married into it, in the order they joined.
+    pub members: Vec<usize>,
+    /// Every realm it has ruled, in the order it first ruled them.
+    pub realms: Vec<usize>,
+    /// Those who actually held a throne, in the order they came to one.
+    /// This is the spine of the house, and what the family tree draws.
+    pub seniors: Vec<usize>,
+    /// The house this one branched off, if it is a cadet line.
+    pub parent: Option<usize>,
+    /// The most thrones it held at one time.
+    pub peak_realms: usize,
+}
+
+impl House {
+    /// Whether anyone of the line still lives.
+    pub fn alive(&self) -> bool {
+        self.ended.is_none()
+    }
+    /// How long it lasted, or has lasted so far.
+    pub fn span(&self, year: i32) -> i32 {
+        self.ended.unwrap_or(year) - self.founded
+    }
+}
+
+/// Where two realms stand with one another, beyond the bare
+/// [`Polity::tension`] that decides whether they come to blows.
+///
+/// Tension is a temperature; a stance is a commitment. They are kept apart
+/// because a realm can be furious with an ally and placid towards a rival
+/// it has not got round to yet.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Stance {
+    /// No standing arrangement. Never stored: an absent key means this.
+    Neutral,
+    /// A declared enmity. Rivals join wars against each other's friends.
+    Rival,
+    /// A defensive tie. Allies are called into each other's wars.
+    Allied,
+    /// The two houses have married. A marriage can put one realm's heir on
+    /// the other's throne, which is how a union happens without a war.
+    Married,
+}
+
+impl Default for Stance {
+    /// An arrangement nobody has made.
+    fn default() -> Stance {
+        Stance::Neutral
+    }
+}
+
+impl Stance {
+    /// The word the interface uses.
+    pub fn name(self) -> &'static str {
+        match self {
+            Stance::Neutral => "neutral",
+            Stance::Rival => "rival",
+            Stance::Allied => "allied",
+            Stance::Married => "married",
+        }
+    }
+}
+
+/// How a throne passes when its holder dies.
+///
+/// This is the single most consequential thing about a realm that nothing in
+/// the world can see from the outside, and it is what decides whether a
+/// conqueror's work outlives them or is divided among their children the
+/// year they die.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Inheritance {
+    /// The eldest surviving child takes everything.
+    Primogeniture,
+    /// Every adult child takes a share, and a great realm becomes several.
+    Partition,
+    /// The strongest claimant takes it, and the others may not accept that.
+    Tanistry,
+    /// Somebody is chosen, and blood counts for little.
+    Elective,
+}
+
+impl Inheritance {
+    /// The word the interface uses.
+    pub fn name(self) -> &'static str {
+        match self {
+            Inheritance::Primogeniture => "primogeniture",
+            Inheritance::Partition => "partition",
+            Inheritance::Tanistry => "tanistry",
+            Inheritance::Elective => "election",
+        }
+    }
+    /// Whether blood counts at all under this custom.
+    pub fn has_heirs(self) -> bool {
+        self != Inheritance::Elective
+    }
+    /// How the detail page explains it in a clause.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Inheritance::Primogeniture => "the eldest child takes the whole",
+            Inheritance::Partition => "the realm is divided among the heirs",
+            Inheritance::Tanistry => "the strongest kinsman takes the throne",
+            Inheritance::Elective => "the throne is not inherited",
+        }
+    }
+}
+
 /// A realm: land, cities, a ruler, an army and a treasury, and the running
 /// tallies that decide whether it grows, holds or comes apart.
 pub struct Polity {
@@ -276,6 +404,40 @@ pub struct Polity {
     pub last_kind_change: i32,
     pub culture_counts: BTreeMap<usize, u32>,
     pub truce: BTreeMap<usize, i32>,
+    /// Standing arrangements with other realms. An absent key is
+    /// [`Stance::Neutral`], so the map holds only what was decided.
+    pub stance: BTreeMap<usize, Stance>,
+    /// The year each stance was taken, for the prose and the detail page.
+    pub stance_since: BTreeMap<usize, i32>,
+    /// Whom this realm pays tribute to, if it has been made to.
+    pub overlord: Option<usize>,
+    /// Realms that pay tribute here. Kept in step with their `overlord`.
+    pub tributaries: Vec<usize>,
+    /// How its throne passes.
+    pub inheritance: Inheritance,
+    /// The house on the throne. [`Polity::dynasty`] is its name, kept in
+    /// step by `World::seat_house`; this is its identity.
+    pub house: Option<usize>,
+    /// The share of the settled world this realm held when it was largest.
+    /// A hegemon is remembered as one even after it breaks.
+    pub peak_share: f32,
+    /// The year the world first acknowledged this realm as the power of the
+    /// age, if it ever did. Recorded so that the acknowledgement happens
+    /// once rather than every year it stays large.
+    pub hegemon_since: Option<i32>,
+    /// Living children of the ruling house with a claim here, oldest first.
+    pub heirs: Vec<usize>,
+    /// How far the realm's land lies from its seat, as a multiple of the
+    /// reach a realm of its development can govern. 1.0 is a realm whose
+    /// average province sits exactly at the edge of comfortable rule.
+    ///
+    /// This is the brake that size alone never provided. Administrative
+    /// capacity grows with cities, and a conqueror takes cities, so conquest
+    /// used to pay for its own administration and nothing stopped a realm
+    /// that got ahead. Distance does not work that way: taking a province
+    /// two months' ride from the capital makes the next one harder, not
+    /// easier, and an empire breaks along its far edge first.
+    pub sprawl: f32,
 }
 
 impl Polity {
@@ -312,6 +474,9 @@ pub enum Role {
     Rebel,
     Explorer,
     Martyr,
+    /// Born to a ruling house and never came to a throne. Appended last so
+    /// that the save format's role table keeps its existing positions.
+    Noble,
 }
 
 impl Role {
@@ -327,6 +492,7 @@ impl Role {
             Role::Rebel => "rebel",
             Role::Explorer => "explorer",
             Role::Martyr => "martyr",
+            Role::Noble => "noble",
         }
     }
 }
@@ -416,6 +582,12 @@ impl Traits {
 }
 
 /// Somebody worth remembering: a ruler, a general, a mage, a prophet.
+///
+/// A person carries their *own* tally of what they did, beside the realm's
+/// [`Polity::reign_gained`] and friends. The realm's counters reset at every
+/// accession, which is what they are for; a life has to outlast the throne
+/// it sat on, because the whole point of a figure like a great conqueror is
+/// that the chronicle still knows what they did four hundred years later.
 pub struct Person {
     #[allow(dead_code)]
     pub id: usize,
@@ -435,6 +607,44 @@ pub struct Person {
     pub renown: f32,
     pub parent: Option<usize>,
     pub battles_won: u32,
+    // --- kin ---
+    /// Who they married, if anyone. Symmetric: both halves point at each other.
+    pub spouse: Option<usize>,
+    /// Their children, oldest first, living and dead.
+    pub children: Vec<usize>,
+    /// The house they belong to, which is not always the house they founded.
+    pub house: Option<usize>,
+    // --- what they did, for as long as the world remembers ---
+    /// Land the realm gained while they held it, less what it lost —
+    /// settlement and conquest together.
+    pub gained: i32,
+    /// Of that, the land taken from somebody else in war. Kept apart
+    /// because a conqueror and a coloniser are not the same figure, and
+    /// "took 50 lands in war" must not be said of a ruler who cleared
+    /// forest for fifty years.
+    pub taken: i32,
+    pub cities_founded: u32,
+    pub cities_taken: u32,
+    pub wars_won: u32,
+    /// Years on the throne, totalled across every realm they ruled.
+    pub reign_years: i32,
+    /// The year they first came to any throne. The realm's `reign_start`
+    /// only describes whoever sits there *now*, so it cannot date a dead
+    /// ruler's accession — which is what a line of succession is drawn
+    /// along.
+    pub crowned: Option<i32>,
+    /// A style won rather than inherited: "the Great", "Emperor of the West".
+    pub title: Option<String>,
+    /// How far they stand above their contemporaries, in points. Recomputed
+    /// every year they live; frozen at death.
+    pub greatness: f32,
+    /// The year the world first called them great, if it ever did. This is
+    /// the difference between a figure and an obituary.
+    pub acclaimed: Option<i32>,
+    /// A contemporary they are measured against.
+    pub rival: Option<usize>,
+    /// The ruler they rose under, which is how a general becomes a successor.
+    pub served: Option<usize>,
 }
 
 impl Person {
@@ -448,6 +658,38 @@ impl Person {
     /// Whether they are still living.
     pub fn alive(&self) -> bool {
         self.died.is_none()
+    }
+    /// Their age in `year`, or their age at death if they are dead.
+    pub fn age(&self, year: i32) -> i32 {
+        self.died.unwrap_or(year) - self.born
+    }
+    /// Whether the world has called them great in their own lifetime.
+    pub fn is_acclaimed(&self) -> bool {
+        self.acclaimed.is_some()
+    }
+    /// "she", "he" or "they", for prose that has to refer back to them.
+    pub fn they(&self) -> &'static str {
+        match self.gender {
+            Gender::F => "she",
+            Gender::M => "he",
+            Gender::N => "they",
+        }
+    }
+    /// "her", "his" or "their".
+    pub fn their(&self) -> &'static str {
+        match self.gender {
+            Gender::F => "her",
+            Gender::M => "his",
+            Gender::N => "their",
+        }
+    }
+    /// "her", "him" or "them".
+    pub fn them(&self) -> &'static str {
+        match self.gender {
+            Gender::F => "her",
+            Gender::M => "him",
+            Gender::N => "them",
+        }
     }
 }
 
@@ -528,6 +770,9 @@ pub enum WarKind {
 pub struct War {
     #[allow(dead_code)]
     pub id: usize,
+    /// The realm that declared it, and the principal on the other side.
+    /// These two name the war and settle the peace; `allies_a` and
+    /// `allies_d` are everyone else who came in.
     pub attacker: usize,
     pub defender: usize,
     pub started: i32,
@@ -539,6 +784,41 @@ pub struct War {
     pub result: String,
     pub cells_taken: i32,
     pub kind: WarKind,
+    /// Realms fighting alongside the attacker, in the order they joined.
+    pub allies_a: Vec<usize>,
+    /// Realms fighting alongside the defender.
+    pub allies_d: Vec<usize>,
+    /// What the attacker says it is for, and what a peace has to settle.
+    pub aim: WarAim,
+    /// Whether the aim was met when the war ended.
+    pub aim_met: bool,
+}
+
+/// What a war is actually *for*: the thing a peace has to resolve.
+///
+/// A war without an aim can only end in a draw worth no sentence, which is
+/// what made most of them forgettable. An aim gives the declaration a
+/// promise, the peace a verdict, and the loser something to remember.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WarAim {
+    /// Take and keep a stretch of the enemy's border.
+    Border,
+    /// Take one named city.
+    City(usize),
+    /// Make the enemy a tributary rather than take its land.
+    Vassalage,
+    /// Throw off an overlord.
+    Independence,
+    /// Put a particular claimant on the enemy's throne.
+    Claimant(usize),
+    /// Make the enemy accept the attacker's school.
+    Faith,
+    /// Seize a particular relic.
+    Relic(usize),
+    /// Loot, and go home.
+    Plunder,
+    /// Break the strongest realm in the world before it swallows everyone.
+    Containment,
 }
 
 impl War {
@@ -654,14 +934,17 @@ pub struct Stats {
 }
 
 /// The phases of a tick, in the order `World::tick` runs them.
-pub const PHASES: [&str; 19] = [
+pub const PHASES: [&str; 22] = [
     "grow_and_migrate",
     "form_polities",
     "expand",
     "found_cities",
     "economy",
     "diplomacy",
+    "alliances",
+    "tribute",
     "resolve_wars",
+    "dynasty",
     "rulers",
     "unrest",
     "magic",
@@ -714,6 +997,7 @@ pub struct World {
     pub cities: Vec<City>,
     pub polities: Vec<Polity>,
     pub persons: Vec<Person>,
+    pub houses: Vec<House>,
     pub schools: Vec<School>,
     pub wars: Vec<War>,
     pub eras: Vec<Era>,
@@ -728,6 +1012,27 @@ pub struct World {
     pub century_pop_start: f64,
     pub battlefield_names: BTreeMap<usize, String>,
     pub ticks_ms: f64,
+    /// Every realm still standing, ascending by id.
+    ///
+    /// The same bargain as [`World::alive_persons`]: the polity vector is
+    /// append-only and holds every realm that has ever existed, so scanning
+    /// it to find the living costs the whole history of the world — and
+    /// `living_polities` is called several times a tick by several phases.
+    ///
+    /// Appended to by `politics::found_polity` and pruned by
+    /// `politics::fall` and `recompute`.
+    pub alive_polities: Vec<usize>,
+    /// Everyone still living, ascending by id.
+    ///
+    /// Kept beside `persons` for the same reason `owner_cells` is kept
+    /// beside `cells`: the person vector is append-only and holds everybody
+    /// who has ever lived, so a phase that walks it costs the whole history
+    /// of the world every year. Mortality and the yearly scoring of
+    /// standing both walk the living, which is a bounded set.
+    ///
+    /// Appended to by `new_person` and pruned once a tick by
+    /// `World::forget_the_dead`.
+    pub alive_persons: Vec<usize>,
     /// Cells owned by each polity, ascending. Rebuilt by `recompute` and kept
     /// exact in between by `claim` and `fall`, so that no subsystem has to
     /// scan the whole map to find one realm's land.
@@ -750,7 +1055,10 @@ impl World {
             cultures: Vec::new(),
             cities: Vec::new(),
             polities: Vec::new(),
+            houses: Vec::new(),
             persons: Vec::new(),
+            alive_persons: Vec::new(),
+            alive_polities: Vec::new(),
             schools: Vec::new(),
             wars: Vec::new(),
             eras: Vec::new(),
@@ -822,7 +1130,10 @@ impl World {
             cultures: Vec::new(),
             cities: Vec::new(),
             polities: Vec::new(),
+            houses: Vec::new(),
             persons: Vec::new(),
+            alive_persons: Vec::new(),
+            alive_polities: Vec::new(),
             schools: Vec::new(),
             wars: Vec::new(),
             eras: Vec::new(),
@@ -937,6 +1248,190 @@ impl World {
         }
     }
 
+    /// Drop the dead from [`World::alive_persons`], once a tick.
+    ///
+    /// Costs the number of living rather than the number who have ever
+    /// lived, and keeps the list sorted, which several phases rely on for
+    /// a stable visit order.
+    pub fn forget_the_dead(&mut self) {
+        let persons = &self.persons;
+        self.alive_persons.retain(|&i| persons[i].alive());
+    }
+
+    // -- houses -----------------------------------------------------------
+
+    /// Found a house and return its index.
+    pub fn new_house(&mut self, name: String, culture: usize, founder: Option<usize>) -> usize {
+        let id = self.houses.len();
+        self.houses.push(House {
+            id,
+            name,
+            culture,
+            founder,
+            founded: self.year,
+            ended: None,
+            members: Vec::new(),
+            realms: Vec::new(),
+            seniors: Vec::new(),
+            parent: None,
+            peak_realms: 0,
+        });
+        if let Some(f) = founder {
+            // A house is as old as its founder's reign, not as old as the
+            // moment the world got round to naming it: a chiefdom that
+            // becomes a kingdom names the dynasty of a ruler who has
+            // already been on the throne for years, and dating it from the
+            // promotion put the founder's accession before the founding of
+            // his own house.
+            if let Some(crowned) = self.persons[f].crowned {
+                self.houses[id].founded = crowned.min(self.houses[id].founded);
+            }
+            // Somebody who already belonged to a house and now founds one
+            // is starting a cadet branch, not appearing from nowhere. The
+            // link is what lets the family tree show where it forked.
+            let old = self.persons[f].house;
+            self.houses[id].parent = old;
+            if let Some(o) = old {
+                // They keep their place among the old house's *members* —
+                // blood does not change — but they come off its line of
+                // succession, because from here they rule as the first of
+                // their own. Left on both, they appeared twice in two
+                // different families' trees.
+                self.houses[o].seniors.retain(|&x| x != f);
+            }
+            self.join_house(f, id);
+        }
+        id
+    }
+
+    /// Enrol somebody in a house, once.
+    pub fn join_house(&mut self, person: usize, house: usize) {
+        if self.persons[person].house == Some(house) {
+            return;
+        }
+        self.persons[person].house = Some(house);
+        if !self.houses[house].members.contains(&person) {
+            self.houses[house].members.push(person);
+        }
+        // Somebody joining is proof the line is not extinct after all,
+        // which happens when a cadet branch outlives the senior one.
+        self.houses[house].ended = None;
+    }
+
+    /// Seat a house on a realm's throne, keeping the realm's display name
+    /// for the dynasty in step with the house's own.
+    ///
+    /// Every write to `Polity::dynasty` goes through here. The string and
+    /// the index are two views of one fact, and the only way to keep them
+    /// from drifting is to have one place that sets both.
+    pub fn seat_house(&mut self, p: usize, house: usize) {
+        self.polities[p].house = Some(house);
+        self.polities[p].dynasty = self.houses[house].name.clone();
+        if !self.houses[house].realms.contains(&p) {
+            self.houses[house].realms.push(p);
+        }
+        let held = self.houses[house]
+            .realms
+            .iter()
+            .filter(|&&q| self.polities[q].alive() && self.polities[q].house == Some(house))
+            .count();
+        if held > self.houses[house].peak_realms {
+            self.houses[house].peak_realms = held;
+        }
+        self.houses[house].ended = None;
+    }
+
+    /// Record that somebody of this house has come to a throne. The list is
+    /// the spine the family tree is drawn along.
+    pub fn house_accession(&mut self, person: usize) {
+        if let Some(h) = self.persons[person].house {
+            if !self.houses[h].seniors.contains(&person) {
+                self.houses[h].seniors.push(person);
+            }
+            // The realm goes on the house's list whether or not it formally
+            // took the house's name: a reader looking at the line of
+            // succession sees the realm each ruler held, and every one of
+            // those has to be a throne the house is listed as having held.
+            if let Some(p) = self.persons[person].polity {
+                if !self.houses[h].realms.contains(&p) {
+                    self.houses[h].realms.push(p);
+                }
+            }
+        }
+    }
+
+    /// Mark a house as ended, if nothing of it is left.
+    ///
+    /// A house is not finished merely because it has lost a throne — cadet
+    /// branches and living members outlast a deposition — so this checks
+    /// both before writing the year down.
+    pub fn close_house_if_spent(&mut self, house: usize) {
+        if self.houses[house].ended.is_some() {
+            return;
+        }
+        let holds_throne = self.houses[house]
+            .realms
+            .iter()
+            .any(|&p| self.polities[p].alive() && self.polities[p].house == Some(house));
+        if holds_throne {
+            return;
+        }
+        let living = self.houses[house]
+            .members
+            .iter()
+            .any(|&m| self.persons[m].alive());
+        if !living {
+            self.houses[house].ended = Some(self.year);
+        }
+    }
+
+    // -- crediting a life -------------------------------------------------
+    //
+    // Every deed is recorded twice: once against the realm, whose counters
+    // reset at the next accession, and once against the person, whose do
+    // not. The pair is what lets the chronicle still know four centuries
+    // later which ruler took the land.
+
+    /// Land won or lost, credited to the realm and to whoever rules it.
+    pub fn credit_land(&mut self, p: usize, delta: i32) {
+        self.polities[p].reign_gained += delta;
+        if let Some(r) = self.polities[p].ruler {
+            self.persons[r].gained += delta;
+        }
+    }
+
+    /// Land taken from, or lost to, another realm in war. Counted against
+    /// the total as well, so `taken` is always a subset of `gained`.
+    pub fn credit_conquest(&mut self, p: usize, delta: i32) {
+        self.credit_land(p, delta);
+        if let Some(r) = self.polities[p].ruler {
+            self.persons[r].taken += delta;
+        }
+    }
+
+    /// A city founded by this realm.
+    pub fn credit_city_founded(&mut self, p: usize) {
+        self.polities[p].reign_cities += 1;
+        if let Some(r) = self.polities[p].ruler {
+            self.persons[r].cities_founded += 1;
+        }
+    }
+
+    /// A city stormed or taken by this realm.
+    pub fn credit_city_taken(&mut self, p: usize) {
+        if let Some(r) = self.polities[p].ruler {
+            self.persons[r].cities_taken += 1;
+        }
+    }
+
+    /// A war brought to a victorious peace by this realm.
+    pub fn credit_war_won(&mut self, p: usize) {
+        self.polities[p].reign_wars_won += 1;
+        if let Some(r) = self.polities[p].ruler {
+            self.persons[r].wars_won += 1;
+        }
+    }
+
     /// Bring somebody into the world and return their index.
     pub fn new_person(
         &mut self,
@@ -973,7 +1468,24 @@ impl World {
             renown: 0.0,
             parent: None,
             battles_won: 0,
+            spouse: None,
+            children: Vec::new(),
+            house: None,
+            gained: 0,
+            taken: 0,
+            cities_founded: 0,
+            cities_taken: 0,
+            wars_won: 0,
+            reign_years: 0,
+            crowned: None,
+            title: None,
+            greatness: 0.0,
+            acclaimed: None,
+            rival: None,
+            served: None,
         });
+        // Ids only ever increase, so appending keeps the list sorted.
+        self.alive_persons.push(id);
         id
     }
 
@@ -1116,6 +1628,8 @@ impl World {
     /// Rebuild every aggregate: cell counts, populations, neighbours and the
     /// owner index. Run once a year and after loading.
     pub fn recompute(&mut self) {
+        self.forget_the_fallen();
+        self.forget_the_dead();
         for p in self.polities.iter_mut() {
             p.cells = 0;
             p.pop = 0.0;
@@ -1205,10 +1719,30 @@ impl World {
             self.cultures[c.culture].pop += c.pop as f64;
             total_pop += c.pop as f64;
         }
+        // Mean distance of a realm's land from its seat. One pass over the
+        // owner index, which is already built, so this costs the map once
+        // rather than the map times the number of realms.
+        let mut sprawl_sum: Vec<f64> = Vec::with_capacity(self.polities.len());
+        for p in 0..self.polities.len() {
+            sprawl_sum.push(match self.capital_cell(p) {
+                Some(seat) => self.owner_cells[p]
+                    .iter()
+                    .map(|&i| self.terrain.dist(seat, i) as f64)
+                    .sum(),
+                None => 0.0,
+            });
+        }
+        let reach_base = self.tuning.expand_reach_base;
+        let reach_dev = self.tuning.expand_reach_dev_weight;
         for p in self.polities.iter_mut() {
             if p.cells > 0 {
                 p.foreign_share = foreign[p.id] as f32 / p.cells as f32;
                 p.avg_fertility = fert[p.id] / p.cells as f32;
+                let mean = (sprawl_sum[p.id] / p.cells as f64) as f32;
+                let reach = (reach_base + p.dev * reach_dev).max(1.0);
+                p.sprawl = mean / reach;
+            } else {
+                p.sprawl = 0.0;
             }
             p.cultures_within = p.culture_counts.len();
             if p.cells > p.peak_cells {
@@ -1217,6 +1751,12 @@ impl World {
             }
             if p.cities.len() > p.peak_cities {
                 p.peak_cities = p.cities.len();
+            }
+            if owned > 0 {
+                let share = p.cells as f32 / owned as f32;
+                if share > p.peak_share {
+                    p.peak_share = share;
+                }
             }
         }
         for c in self.cultures.iter_mut() {
@@ -1264,19 +1804,25 @@ impl World {
         phase!(3, politics::found_cities(self));
         phase!(4, politics::economy(self));
         phase!(5, war::diplomacy(self));
-        phase!(6, war::resolve_wars(self));
-        phase!(7, politics::rulers(self));
-        phase!(8, politics::unrest(self));
-        phase!(9, magic::tick(self));
-        phase!(10, people::culture_drift(self));
-        phase!(11, events::disasters(self));
-        phase!(12, events::notables(self));
-        phase!(13, events::wonders(self));
-        phase!(14, stories::tick_artifacts(self));
-        phase!(15, stories::tick_prophecies(self));
-        phase!(16, stories::tick_legends(self));
-        phase!(17, self.recompute());
-        phase!(18, events::eras(self));
+        phase!(6, war::alliances(self));
+        phase!(7, war::tribute(self));
+        phase!(8, war::resolve_wars(self));
+        // Houses run before rulers: a succession has to be able to draw on
+        // heirs who were born, named and grown up in front of the reader,
+        // and who are current as of this year.
+        phase!(9, dynasty::tick(self));
+        phase!(10, politics::rulers(self));
+        phase!(11, politics::unrest(self));
+        phase!(12, magic::tick(self));
+        phase!(13, people::culture_drift(self));
+        phase!(14, events::disasters(self));
+        phase!(15, events::notables(self));
+        phase!(16, events::wonders(self));
+        phase!(17, stories::tick_artifacts(self));
+        phase!(18, stories::tick_prophecies(self));
+        phase!(19, stories::tick_legends(self));
+        phase!(20, self.recompute());
+        phase!(21, events::eras(self));
         self.chronicle.compact(self.tuning.chronicle_cap);
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);
@@ -1361,11 +1907,13 @@ impl World {
 
     /// The indices of every realm that still stands.
     pub fn living_polities(&self) -> Vec<usize> {
-        self.polities
-            .iter()
-            .filter(|p| p.alive())
-            .map(|p| p.id)
-            .collect()
+        self.alive_polities.clone()
+    }
+
+    /// Drop the fallen from [`World::alive_polities`].
+    pub fn forget_the_fallen(&mut self) {
+        let polities = &self.polities;
+        self.alive_polities.retain(|&p| polities[p].alive());
     }
 
     /// The cell the realm's capital sits on, if it has one standing.

@@ -70,7 +70,7 @@ in the game for the full key list — it is the authority, and it scrolls.
 | `r` | a recap of the last fifty years (of the selected realm or city, if one is selected) |
 | `/name`, `n`, `N` | search realms, cities, peoples, people, schools, wars, places, relics; cycle matches |
 | `f` | follow: the cursor jumps to each major event as it happens |
-| `e` | lists: realms, cities, peoples, schools, persons, wars, places, relics, prophecies |
+| `e` | lists: realms, cities, peoples, schools, persons, wars, places, relics, prophecies, figures, houses |
 | `c` | the full chronicle (`f` or `v` cycles importance 0–3, `/` filters by text) |
 | `x` | the Hand of Fate: intervene in the selected realm |
 | `D`, `v` | cycle simulation detail; the event log's level (1 everything, 2 the notable, 3 only the great) |
@@ -79,6 +79,16 @@ in the game for the full key list — it is the authority, and it scrolls.
 
 Uppercase aliases work on the map where the lowercase key is taken by a
 motion: `C` chronicle, `R` recap, `F` follow, `X` fate, `T` top story.
+
+**Figures** lists everyone the world has called great, the living first, with
+the deed each is remembered for. **Houses** lists the ruling families; opening
+one shows its whole line of succession, century by century, with every throne
+it has held.
+
+On a detail page the letter in brackets follows that link: `[r]` ruler,
+`[c]` people, `[K]` capital, `[f]` family, `[H]` house, `[m]` spouse,
+`[v]` whoever they served under, `[O]` overlord, `[s]` school, `[p]` parent
+realm or school, `[b]` the house this one branched from. Backspace retraces.
 
 Everywhere off the map: `j`/`k` scroll, Ctrl-d/Ctrl-u half a page,
 Ctrl-f/Ctrl-b a page, `gg`/`G` top and bottom, `m` shows the thing on the
@@ -160,6 +170,16 @@ on adding a field.
 # zoom = 1               # 1-4, how many world cells per character
 
 # tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning
+#
+# Dials worth turning, with the shape of the world they change:
+#   tune.stability_sprawl_weight = 0.28   # how hard distance punishes a big realm
+#   tune.hegemon_share = 0.2              # share of the world that provokes a coalition
+#   tune.alliance_chance = 0.035          # how readily realms swear to each other
+#   tune.tribute_share = 0.2              # what a tributary owes its overlord
+#   tune.marriage_chance = 0.22           # how often a ruler finds a match
+#   tune.birth_chance = 0.16              # how many heirs a house produces
+#   tune.diadochi_min_generals = 2        # generals a dead conqueror needs to be
+#                                         # carved up between them
 
 # map w k                # examples: map <S-Up> K, map <C-p> :, map ; :
 ```
@@ -263,8 +283,37 @@ where mana is high or a people is mystical. They spread along trade and
 conquest, are adopted as state doctrine or persecuted, split in schisms, and
 an arcane order that reaches too far can unmake the city that raised it.
 
-**Stories.** Rulers found dynasties whose heirs and rival claimants carry
-their blood; cruel rulers become tyrants, renowned generals and poets become
+**Houses and figures.** Rulers marry — at home, or into a neighbouring house,
+which quiets that border for a generation — and their children are born, named
+and grow up in the chronicle. When a throne falls vacant the realm's own
+inheritance custom decides what happens: the eldest takes the whole, or every
+adult child takes a share and a great realm becomes several, or the strongest
+kinsman takes it and a passed-over sibling raises the provinces against them.
+A conqueror the world acclaimed who leaves no grown heir may have the realm
+divided between the generals who marched with him. A consort who is the
+nearest heir of a realm with none of its own can bring two crowns under one
+head without a battle.
+
+Standing is scored every year from what somebody has actually done, weighted
+towards the *rate* of conquest rather than the total, and when a life stands
+clear of its contemporaries the world names it great **at the time** rather
+than in an obituary. A faith with reach may crown a pious and successful
+ruler, which is the one road to an empire that does not run through conquest.
+
+**Alliances, tribute and coalitions.** Realms take standing positions, not
+just temperatures: oaths sworn against a common enemy, marriages between
+houses, tributaries that keep their crown and their customs and send money
+every year. Every war is declared *for* something — a border, a named city,
+tribute, a relic, a conversion, a claimant's throne, plunder — and the peace
+reports whether that was achieved. Allies are called into wars worth their
+blood, and their armies count on the field. When one realm grows past a fifth
+of the settled world, its neighbours and theirs begin to fear it more than
+they fear each other, and combine.
+
+Size is its own punishment: a realm is judged on how far its provinces lie
+from its seat, so an empire frays at its edge first.
+
+**Stories.** Cruel rulers become tyrants, renowned generals and poets become
 legends. Seers utter prophecies with deadlines that later come true or fail.
 Relics are forged for great rulers, wonders and schools, carried off as
 spoils, lost in sacks and dug up centuries later, and give their holders a

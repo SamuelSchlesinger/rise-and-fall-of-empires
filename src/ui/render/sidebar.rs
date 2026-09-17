@@ -96,7 +96,10 @@ pub(crate) struct Share {
 }
 
 /// The most rows a block may take, however much it has to say.
-const STORY_CAP: usize = 4;
+/// The storyteller earns a couple more rows than the other blocks: it is
+/// where a living figure of the age appears, and a reader who glances at the
+/// sidebar once a century should find that name without hunting for it.
+const STORY_CAP: usize = 6;
 const HERE_CAP: usize = 7;
 const SEL_CAP: usize = 8;
 /// The key is the only thing on screen that says which realm is which

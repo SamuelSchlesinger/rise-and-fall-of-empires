@@ -3,7 +3,7 @@
 
 use super::chronicle::{EventKind, Ref};
 use super::prose::{self, Pick};
-use super::{City, Polity, PolityKind, Role, Traits, World};
+use super::{City, Inheritance, Polity, PolityKind, Role, Traits, World};
 use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
@@ -300,7 +300,34 @@ pub fn found_polity(
         last_kind_change: w.year,
         culture_counts: BTreeMap::new(),
         truce: BTreeMap::new(),
+        stance: BTreeMap::new(),
+        stance_since: BTreeMap::new(),
+        overlord: None,
+        tributaries: Vec::new(),
+        inheritance: super::dynasty::inheritance_for(w, culture, kind),
+        house: None,
+        peak_share: 0.0,
+        hegemon_since: None,
+        heirs: Vec::new(),
+        sprawl: 0.0,
     });
+    // A realm founded as a kingdom is founded with a house. Building the
+    // dynasty name here but not the house left the realm with a family in
+    // name only until its next promotion, and its founder off the tree.
+    if w.persons[ruler].crowned.is_none() {
+        w.persons[ruler].crowned = Some(w.year);
+    }
+    if kind.has_dynasty() {
+        match w.persons[ruler].house {
+            Some(h) => w.seat_house(id, h),
+            None => {
+                let name = w.polities[id].dynasty.clone();
+                let h = w.new_house(name, culture, Some(ruler));
+                w.seat_house(id, h);
+            }
+        }
+        w.house_accession(ruler);
+    }
     for &c in cells {
         claim(w, id, c);
     }
@@ -321,6 +348,7 @@ pub fn found_polity(
     pol.name = naming.name;
     pol.short = naming.short;
     pol.adj = adj;
+    w.alive_polities.push(id);
     w.century_polities_born += 1;
     id
 }
@@ -538,7 +566,7 @@ pub fn expand(w: &mut World) {
         for cell in claims {
             if w.cells[cell].owner.is_none() {
                 claim(w, p, cell);
-                w.polities[p].reign_gained += 1;
+                w.credit_land(p, 1);
             }
         }
     }
@@ -670,7 +698,7 @@ pub fn found_cities(w: &mut World) {
         if let Some(i) = best {
             let culture = w.cells[i].culture.unwrap_or(w.polities[p].culture);
             let c = found_city(w, Some(p), i, culture);
-            w.polities[p].reign_cities += 1;
+            w.credit_city_founded(p);
             let place = w.place_phrase(i, Some(p));
             let text = prose::city_founded(w, p, c, &place, &Pick::rolled(&rng));
             w.log(
@@ -707,6 +735,7 @@ pub fn economy(w: &mut World) {
         }
         let (army_mult, stab_bonus, dev_bonus, prosp_bonus) = w.school_effects(p);
         let art_mult = w.artifact_army_mult(p);
+        let art_stab = w.artifact_stability(p);
         let culture = w.polities[p].culture;
         let vals = w.cultures[culture].values;
         let at_war = w.polities[p].at_war();
@@ -834,9 +863,11 @@ pub fn economy(w: &mut World) {
             + stab_bonus
             + kind_stab
             - (over - 1.0).max(0.0) * tn.stability_overextension_weight
+            - (pol.sprawl - 1.0).max(0.0) * tn.stability_sprawl_weight
             - pol.foreign_share * tn.stability_foreign_weight
             - pol.exhaustion * tn.stability_exhaustion_weight
             - pol.decadence * tn.stability_decadence_weight
+            + art_stab
             + (avg_prosp - 0.4) * 0.15
             + vals.tradition * 0.05
             + (pol.treasury / 600.0).max(-0.2) * 0.2;
@@ -963,24 +994,56 @@ pub fn ruler_dies(w: &mut World, p: usize, cause: &str, importance: u8) {
     succession(w, p, r);
 }
 
+/// Hand a throne on after its holder has died.
+///
+/// The old version of this conjured an heir at the graveside: a brand-new
+/// `Person` with no history, whom the reader had never met. Now it draws on
+/// the realm's actual [`Polity::heirs`] — children who were born, named and
+/// grown up in the chronicle — and the realm's own
+/// [`Polity::inheritance`] custom decides what happens to them:
+///
+/// * **Primogeniture** — the eldest takes the whole, and a younger sibling
+///   may refuse.
+/// * **Partition** — every adult child takes a share, which is how a great
+///   reign is undone by its own law rather than by an enemy.
+/// * **Tanistry** — the most capable kinsman takes it, and the passed-over
+///   do not always accept the judgement.
+/// * **Elective** — blood counts for nothing and somebody is chosen.
+///
+/// Only if there is nobody at all does it fall back to inventing a usurper,
+/// which is now the exception rather than the rule.
 fn succession(w: &mut World, p: usize, old: usize) {
     let rng = w.rng.clone();
-    let pol = &w.polities[p];
-    let culture = pol.culture;
-    let kind = pol.kind;
-    let stability = pol.stability;
-    let old_traits = w.persons[old].traits;
-    let dynasty = pol.dynasty.clone();
-    if !kind.has_dynasty() {
-        let heir = w.new_person(
-            culture,
-            Role::Ruler,
-            Some(p),
-            w.year - rng.int(25, 50),
-            None,
-        );
-        install_ruler(w, p, heir);
-        let text = prose::elected(w, p, kind, heir, old);
+    let custom = w.polities[p].inheritance;
+    let heirs = super::dynasty::adult_heirs(w, p);
+    let minors: Vec<usize> = w.polities[p]
+        .heirs
+        .iter()
+        .copied()
+        .filter(|&h| w.persons[h].alive() && w.persons[h].age(w.year) < super::dynasty::MAJORITY)
+        .collect();
+
+    // The Diadochi. A conqueror the world acclaimed, no grown child to hold
+    // what they took, and generals who each command a share of the army:
+    // the realm does not pass, it is divided among the men who won it.
+    if w.persons[old].is_acclaimed() && heirs.is_empty() {
+        let generals: Vec<usize> = w.polities[p]
+            .generals
+            .iter()
+            .copied()
+            .filter(|&g| w.persons[g].alive())
+            .collect();
+        if generals.len() >= w.tuning.diadochi_min_generals
+            && w.polities[p].cells >= w.tuning.diadochi_min_cells
+        {
+            diadochi(w, p, old, &generals);
+            return;
+        }
+    }
+
+    if !custom.has_heirs() {
+        let heir = elect(w, p, old);
+        let text = prose::elected(w, p, w.polities[p].kind, heir, old);
         w.log(
             1,
             EventKind::Politics,
@@ -990,130 +1053,324 @@ fn succession(w: &mut World, p: usize, old: usize) {
         );
         return;
     }
-    let p_smooth = w.tuning.succession_smooth_base
-        + stability as f64 * w.tuning.succession_smooth_stability_weight;
-    if rng.chance(p_smooth) {
-        let heir = w.new_person(
-            culture,
-            Role::Ruler,
-            Some(p),
-            w.year - rng.int(16, 40),
-            Some(old_traits.inherit(&rng)),
-        );
-        w.persons[heir].parent = Some(old);
-        install_ruler(w, p, heir);
-        let text = prose::succession_smooth(w, p, heir, &dynasty, &Pick::rolled(&rng));
-        w.log(
-            1,
-            EventKind::Politics,
-            &[Ref::Person(heir), Ref::Polity(p)],
-            w.capital_cell(p),
-            text,
-        );
-        return;
-    }
-    // Crisis.
-    let roll = rng.f64();
-    if roll < 0.4 || w.polities[p].cells < 25 {
-        // Usurper founds a new dynasty.
-        let usurper = w.new_person(
-            culture,
-            Role::Ruler,
-            Some(p),
-            w.year - rng.int(25, 50),
-            None,
-        );
-        w.persons[usurper].traits.ambition = (w.persons[usurper].traits.ambition + 0.3).min(1.0);
-        let dyn_name = dynasty_name(w, culture, &w.persons[usurper].name.clone());
-        w.polities[p].dynasty = dyn_name.clone();
-        install_ruler(w, p, usurper);
-        w.polities[p].stability = (w.polities[p].stability - 0.2).max(0.0);
-        let text = prose::succession_usurped(w, p, usurper, &dyn_name, &dynasty);
-        w.log(
-            2,
-            EventKind::Politics,
-            &[Ref::Person(usurper), Ref::Polity(p)],
-            w.capital_cell(p),
-            text,
-        );
-    } else if roll < 0.75 {
-        // Succession war: the realm splits.
-        let claimant_a = w.new_person(
-            culture,
-            Role::Ruler,
-            Some(p),
-            w.year - rng.int(20, 45),
-            Some(old_traits.inherit(&rng)),
-        );
-        w.persons[claimant_a].parent = Some(old);
-        install_ruler(w, p, claimant_a);
-        let claimant_b = w.new_person(
-            culture,
-            Role::Rebel,
-            None,
-            w.year - rng.int(20, 45),
-            Some(old_traits.inherit(&rng)),
-        );
-        w.persons[claimant_b].parent = Some(old);
-        let name_a = w.persons[claimant_a].name.clone();
-        let name_b = w.persons[claimant_b].name.clone();
-        if let Some(rebel) = split_off(w, p, Some(claimant_b), None) {
-            let claim = prose::succession_claim(w, p, &name_b);
-            w.wars_start(rebel, p, super::WarKind::Succession, claim);
-            // A realm whose every city has been destroyed has no capital left
-            // to name, so the claimant holds out for the realm itself.
-            let seat_a = w.polities[p]
-                .capital
-                .map_or_else(|| w.polities[p].short.clone(), |c| w.cities[c].name.clone());
-            let text = prose::succession_war(w, p, rebel, &name_a, &name_b, &seat_a);
+
+    // A minor and no adult: a regency, with the child the reader has
+    // already met rather than a stranger.
+    if heirs.is_empty() {
+        if let Some(&child) = minors.first() {
+            install_ruler(w, p, child);
+            w.polities[p].stability = (w.polities[p].stability - 0.25).max(0.0);
+            let text = prose::succession_regency(w, p, child);
             w.log(
                 2,
                 EventKind::Politics,
-                &[
-                    Ref::Polity(p),
-                    Ref::Polity(rebel),
-                    Ref::Person(claimant_a),
-                    Ref::Person(claimant_b),
-                ],
+                &[Ref::Person(child), Ref::Polity(p)],
                 w.capital_cell(p),
                 text,
             );
-        } else {
-            let text = prose::succession_disputed(w, p, &name_a);
-            w.log(
-                1,
-                EventKind::Politics,
-                &[Ref::Person(claimant_a), Ref::Polity(p)],
-                w.capital_cell(p),
-                text,
-            );
+            return;
         }
-    } else {
-        // Weak regency.
-        let regent = w.new_person(
+        usurpation(w, p, old);
+        return;
+    }
+
+    // Who gets the seat.
+    let chosen = match custom {
+        Inheritance::Tanistry => *heirs
+            .iter()
+            .max_by(|&&a, &&b| {
+                let key = |x: usize| {
+                    let t = w.persons[x].traits;
+                    t.ambition * 0.5 + t.valor * 0.3 + t.charisma * 0.2
+                };
+                key(a).total_cmp(&key(b)).then(b.cmp(&a))
+            })
+            .unwrap(),
+        _ => heirs[0],
+    };
+    let rest: Vec<usize> = heirs.iter().copied().filter(|&h| h != chosen).collect();
+
+    // Partition: the realm is divided, and a conqueror's work with it.
+    if custom == Inheritance::Partition && !rest.is_empty() && w.polities[p].cells >= 30 {
+        partition(w, p, old, chosen, &rest);
+        return;
+    }
+
+    install_ruler(w, p, chosen);
+    let house = w.polities[p].dynasty.clone();
+    let text = prose::heir_succeeds(w, p, chosen, old, &house);
+    w.log(
+        1,
+        EventKind::Politics,
+        &[Ref::Person(chosen), Ref::Polity(p)],
+        w.capital_cell(p),
+        text,
+    );
+
+    // A passed-over sibling with ambition and a weak throne takes the
+    // provinces with them. This is the succession war, but now it is fought
+    // between two people with names, ages and traits the reader has seen.
+    if let Some(&loser) = rest.first() {
+        let t = w.persons[loser].traits;
+        let anger = t.ambition * 0.6 + (0.6 - w.polities[p].stability).max(0.0);
+        let bar = if custom == Inheritance::Tanistry {
+            0.35
+        } else {
+            0.5
+        };
+        if anger > bar && rng.chance(0.55) {
+            w.persons[loser].role = Role::Rebel;
+            if let Some(rebel) = split_off(w, p, Some(loser), None) {
+                let claim = prose::succession_claim(w, p, &w.persons[loser].name.clone());
+                w.wars_start_aim(
+                    rebel,
+                    p,
+                    super::WarKind::Succession,
+                    super::WarAim::Claimant(loser),
+                    claim,
+                );
+                let text = prose::sibling_war(w, p, rebel, chosen, loser);
+                w.log(
+                    3,
+                    EventKind::Politics,
+                    &[
+                        Ref::Polity(p),
+                        Ref::Polity(rebel),
+                        Ref::Person(chosen),
+                        Ref::Person(loser),
+                    ],
+                    w.capital_cell(p),
+                    text,
+                );
+            }
+        }
+    }
+
+    // A crown can arrive by marriage as easily as by war: if the new
+    // ruler's spouse is the nearest heir of a realm with none of its own,
+    // the two come under one head.
+    personal_union(w, p, chosen);
+}
+
+/// A realm with no dynasty chooses somebody.
+fn elect(w: &mut World, p: usize, old: usize) -> usize {
+    let rng = w.rng.clone();
+    let culture = w.polities[p].culture;
+    // Prefer somebody already in the realm's service: a general or a
+    // grown child of the last holder. An election the reader can follow
+    // beats a stranger with a new name.
+    let mut pool: Vec<usize> = w.polities[p]
+        .generals
+        .iter()
+        .copied()
+        .filter(|&g| w.persons[g].alive() && w.persons[g].age(w.year) >= 25)
+        .collect();
+    pool.extend(super::dynasty::adult_heirs(w, p));
+    pool.retain(|&x| x != old);
+    pool.sort_unstable();
+    pool.dedup();
+    let heir = match pool.first() {
+        Some(_) => {
+            let best = *pool
+                .iter()
+                .max_by(|&&a, &&b| {
+                    let key = |x: usize| {
+                        let t = w.persons[x].traits;
+                        t.charisma * 0.5 + t.wisdom * 0.4 + w.persons[x].renown * 0.02
+                    };
+                    key(a).total_cmp(&key(b)).then(b.cmp(&a))
+                })
+                .unwrap();
+            best
+        }
+        None => w.new_person(
             culture,
             Role::Ruler,
             Some(p),
-            w.year - rng.int(8, 14),
-            Some(old_traits.inherit(&rng)),
-        );
-        w.persons[regent].parent = Some(old);
-        install_ruler(w, p, regent);
-        w.polities[p].stability = (w.polities[p].stability - 0.25).max(0.0);
-        let text = prose::succession_regency(w, p, regent);
+            w.year - rng.int(25, 50),
+            None,
+        ),
+    };
+    install_ruler(w, p, heir);
+    heir
+}
+
+/// Nobody had a claim: somebody takes it anyway.
+fn usurpation(w: &mut World, p: usize, old: usize) {
+    let rng = w.rng.clone();
+    let culture = w.polities[p].culture;
+    let dynasty = w.polities[p].dynasty.clone();
+    // A living general who served the dead ruler is a far better usurper
+    // than a stranger, because the reader already knows what they did.
+    let general = w.polities[p]
+        .generals
+        .iter()
+        .copied()
+        .find(|&g| w.persons[g].alive() && w.persons[g].age(w.year) >= 20);
+    let usurper = match general {
+        Some(g) => g,
+        None => w.new_person(
+            culture,
+            Role::Ruler,
+            Some(p),
+            w.year - rng.int(25, 50),
+            None,
+        ),
+    };
+    w.persons[usurper].traits.ambition = (w.persons[usurper].traits.ambition + 0.3).min(1.0);
+    w.persons[usurper].served = Some(old);
+    let dyn_name = dynasty_name(w, culture, &w.persons[usurper].name.clone());
+    let old_house = w.polities[p].house;
+    let house = w.new_house(dyn_name.clone(), culture, Some(usurper));
+    w.seat_house(p, house);
+    install_ruler(w, p, usurper);
+    if let Some(oh) = old_house {
+        w.close_house_if_spent(oh);
+    }
+    w.polities[p].stability = (w.polities[p].stability - 0.2).max(0.0);
+    let text = prose::succession_usurped(w, p, usurper, &dyn_name, &dynasty);
+    w.log(
+        2,
+        EventKind::Politics,
+        &[Ref::Person(usurper), Ref::Polity(p)],
+        w.capital_cell(p),
+        text,
+    );
+}
+
+/// Divide a realm between the heirs, by its own law.
+fn partition(w: &mut World, p: usize, old: usize, eldest: usize, rest: &[usize]) {
+    install_ruler(w, p, eldest);
+    let mut shares: Vec<(usize, String)> = Vec::new();
+    for &h in rest.iter().take(3) {
+        w.persons[h].role = Role::Ruler;
+        if let Some(np) = split_off(w, p, Some(h), None) {
+            // A partition is a settlement, not a revolt: the new realms
+            // start out at peace with the senior line and inherit its law.
+            w.polities[np].inheritance = w.polities[p].inheritance;
+            if let Some(house) = w.polities[p].house {
+                w.seat_house(np, house);
+            }
+            let until = w.year + 20;
+            w.polities[np].truce.insert(p, until);
+            w.polities[p].truce.insert(np, until);
+            super::dynasty::set_stance(w, p, np, super::Stance::Married);
+            let name = w.polities[np].name.clone();
+            shares.push((h, name));
+        }
+    }
+    if shares.is_empty() {
+        let house = w.polities[p].dynasty.clone();
+        let text = prose::heir_succeeds(w, p, eldest, old, &house);
         w.log(
             1,
             EventKind::Politics,
-            &[Ref::Person(regent), Ref::Polity(p)],
+            &[Ref::Person(eldest), Ref::Polity(p)],
             w.capital_cell(p),
             text,
         );
+        return;
     }
+    let text = prose::partitioned(w, p, old, eldest, &shares);
+    let mut refs = vec![Ref::Polity(p), Ref::Person(old), Ref::Person(eldest)];
+    for (h, _) in &shares {
+        refs.push(Ref::Person(*h));
+    }
+    w.log(3, EventKind::Politics, &refs, w.capital_cell(p), text);
+}
+
+/// The generals of a dead conqueror divide what he took between them.
+fn diadochi(w: &mut World, p: usize, old: usize, generals: &[usize]) {
+    let mut successors = Vec::new();
+    let mut names = Vec::new();
+    for &g in generals.iter().take(4) {
+        w.persons[g].role = Role::Ruler;
+        w.persons[g].served = Some(old);
+        if let Some(np) = split_off(w, p, Some(g), None) {
+            w.polities[np].inheritance = w.polities[p].inheritance;
+            successors.push(np);
+            names.push(w.polities[np].name.clone());
+        }
+    }
+    if successors.is_empty() {
+        usurpation(w, p, old);
+        return;
+    }
+    // Whoever is left holding the old capital is just another successor
+    // now, so the senior line gets a general too.
+    let remaining: Vec<usize> = generals
+        .iter()
+        .copied()
+        .filter(|&g| w.persons[g].alive())
+        .collect();
+    if let Some(&keeper) = remaining
+        .iter()
+        .find(|&&g| !successors.iter().any(|&s| w.polities[s].ruler == Some(g)))
+    {
+        install_ruler(w, p, keeper);
+        w.persons[keeper].served = Some(old);
+    } else {
+        usurpation(w, p, old);
+    }
+    w.polities[p].stability = (w.polities[p].stability - 0.25).max(0.0);
+    let text = prose::generals_divide(w, p, old, &names, &successors);
+    let mut refs = vec![Ref::Polity(p), Ref::Person(old)];
+    for &s in &successors {
+        refs.push(Ref::Polity(s));
+    }
+    w.log(3, EventKind::Politics, &refs, w.capital_cell(p), text);
+}
+
+/// A crown that arrives by marriage rather than by war.
+///
+/// If the new ruler's consort is the nearest surviving heir of a realm that
+/// has run out of its own, the two realms come under one head. This is the
+/// quietest way a great power is ever assembled, and the chronicle says so.
+fn personal_union(w: &mut World, p: usize, ruler: usize) {
+    let spouse = match w.persons[ruler].spouse {
+        Some(s) if w.persons[s].alive() => s,
+        _ => return,
+    };
+    let q = match w.persons[spouse].polity {
+        Some(q) if q != p && w.polities[q].alive() => q,
+        _ => return,
+    };
+    if w.polities[q].ruler.is_some() || !super::dynasty::adult_heirs(w, q).is_empty() {
+        return;
+    }
+    if w.war_between(p, q).is_some() || w.polities[q].cells == 0 {
+        return;
+    }
+    // The junior crown is absorbed: one realm, one ruler, and a chronicle
+    // line for the realm that ended without a battle.
+    let cause = prose::united_by_marriage(w, p, q);
+    let text = prose::personal_union(w, ruler, p, q);
+    let refs = vec![Ref::Person(ruler), Ref::Polity(p), Ref::Polity(q)];
+    let loc = w.capital_cell(q);
+    fall(w, q, &cause, Some(p), 3);
+    w.log(3, EventKind::Politics, &refs, loc, text);
 }
 
 pub fn install_ruler(w: &mut World, p: usize, r: usize) {
     w.persons[r].polity = Some(p);
     w.persons[r].role = Role::Ruler;
+    // A house is joined by birth, by marriage, or by founding it — never
+    // by being handed a crown. Enrolling every new ruler in whatever house
+    // the realm last had turned an elective chiefdom into a four-hundred
+    // year "dynasty" of unrelated strangers, and made every line of
+    // succession read "kinsman".
+    //
+    // What an accession *can* do is seat a house that already exists: a
+    // ruler who belongs to one brings it to the throne with them.
+    if let Some(h) = w.persons[r].house {
+        if w.polities[p].kind.has_dynasty() && w.polities[p].house != Some(h) {
+            w.seat_house(p, h);
+        }
+    }
+    if w.persons[r].crowned.is_none() {
+        w.persons[r].crowned = Some(w.year);
+    }
+    w.house_accession(r);
     let pol = &mut w.polities[p];
     pol.ruler = Some(r);
     pol.reign_start = w.year;
@@ -1296,6 +1553,7 @@ pub fn fall(
     let pol = &mut w.polities[p];
     pol.fell = Some(w.year);
     pol.fall_cause = cause.to_string();
+    w.alive_polities.retain(|&x| x != p);
     let peak = pol.peak_cells;
     let imp = if peak > 150 {
         3
@@ -1481,6 +1739,21 @@ fn kind_changes(w: &mut World, p: usize) {
     if new == old {
         return;
     }
+    apply_kind_change(w, p, new);
+}
+
+/// Crown a realm an empire outright, for the one path to the purple that
+/// does not run through conquest (see `dynasty::coronations`).
+pub fn promote_to_empire(w: &mut World, p: usize) {
+    if w.polities[p].kind != PolityKind::Empire {
+        apply_kind_change(w, p, PolityKind::Empire);
+    }
+}
+
+/// Rename and restyle a realm that has changed what kind of thing it is.
+fn apply_kind_change(w: &mut World, p: usize, new: PolityKind) {
+    let old = w.polities[p].kind;
+    let culture = w.polities[p].culture;
     let short = w.polities[p].short.clone();
     let cap_name = w.polities[p].capital.map(|c| w.cities[c].name.clone());
     let naming = name_realm(w, p, new, &short, culture, cap_name.as_deref());
@@ -1497,11 +1770,13 @@ fn kind_changes(w: &mut World, p: usize) {
     pol.short = new_short;
     pol.adj = new_adj;
     pol.last_kind_change = w.year;
-    if new.has_dynasty() && pol.dynasty.is_empty() {
+    if new.has_dynasty() && pol.house.is_none() {
         if let Some(r) = pol.ruler {
             let founder = w.persons[r].name.clone();
             let d = dynasty_name(w, culture, &founder);
-            w.polities[p].dynasty = d;
+            let house = w.new_house(d, culture, Some(r));
+            w.seat_house(p, house);
+            w.house_accession(r);
         }
     }
     let capital = cap_name.unwrap_or_else(|| short.clone());
@@ -1565,6 +1840,24 @@ fn fragment(w: &mut World, p: usize) {
         }
     }
     let oldname = w.polities[p].name.clone();
+    // Somebody crowns themselves in each fragment, and the chronicle would
+    // rather name them. Living generals first, then grown heirs of the
+    // house, because "the Kingdom of Xatath under Shass, who had commanded
+    // the northern army" is a sentence and "a kingdom appeared" is not.
+    let mut claimants: Vec<usize> = w.polities[p]
+        .generals
+        .iter()
+        .copied()
+        .filter(|&g| w.persons[g].alive() && w.persons[g].age(w.year) >= 18)
+        .collect();
+    claimants.extend(
+        super::dynasty::adult_heirs(w, p)
+            .into_iter()
+            .filter(|&h| Some(h) != w.polities[p].ruler),
+    );
+    claimants.sort_unstable();
+    claimants.dedup();
+    let mut next_claimant = claimants.into_iter();
     let mut successors = Vec::new();
     for (s, region) in regions.iter().enumerate() {
         if region.len() < 4 {
@@ -1577,7 +1870,11 @@ fn fragment(w: &mut World, p: usize) {
         } else {
             PolityKind::Chiefdom
         };
-        let np = found_polity(w, culture, seat, kind, Some(p), region, None);
+        let leader = next_claimant.next().map(|l| {
+            w.persons[l].role = Role::Ruler;
+            l
+        });
+        let np = found_polity(w, culture, seat, kind, Some(p), region, leader);
         successors.push(np);
     }
     let pol = &mut w.polities[p];
@@ -1597,12 +1894,8 @@ fn fragment(w: &mut World, p: usize) {
         pol.short = naming.short;
         pol.adj = adj;
     }
-    let names: Vec<String> = successors
-        .iter()
-        .map(|&s| w.polities[s].name.clone())
-        .collect();
     let capital_name = w.cities[capital].name.clone();
-    let text = prose::shattered(w, p, &oldname, &names, &capital_name);
+    let text = prose::shattered(w, p, &oldname, &successors, &capital_name);
     let mut refs = vec![Ref::Polity(p)];
     for &s in &successors {
         refs.push(Ref::Polity(s));

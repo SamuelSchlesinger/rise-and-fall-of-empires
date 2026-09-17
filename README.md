@@ -26,8 +26,8 @@ for your machine:
 For example, on an Apple Silicon Mac:
 
 ```sh
-tar xzf empires-v0.1.2-aarch64-apple-darwin.tar.gz
-./empires-v0.1.2-aarch64-apple-darwin/empires
+tar xzf empires-v0.2.0-aarch64-apple-darwin.tar.gz
+./empires-v0.2.0-aarch64-apple-darwin/empires
 ```
 
 Or install from a checkout with Rust 1.70 or newer:
@@ -69,7 +69,7 @@ place and the world's current stories.
 | Enter | Inspect the place under the cursor |
 | Tab / Shift+Tab | Change map layer |
 | `zi` / `zo` | Zoom in / out |
-| `e` / `c` / `r` | Entity lists / chronicle / fifty-year recap |
+| `e` / `c` / `r` | Entity lists (realms, houses, figures, …) / chronicle / recap |
 | `/` | Search by name |
 | `:` | Enter a command, such as `:w`, `:speed 25` or `:theme paper` |
 | Esc | Go back |

@@ -17,6 +17,7 @@ pub enum Ref {
     Race(usize),
     Feature(usize),
     Artifact(usize),
+    House(usize),
 }
 
 /// What sort of thing happened, for colouring and for `:mute`.

@@ -10,6 +10,118 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [0.2.0] - 2026-09-17
+
+The world now has people in it. Rulers marry, have children the chronicle
+watches grow up, and are called great while they are alive to hear it; realms
+take standing positions towards one another instead of only temperatures; and
+an empire that grows too large manufactures the coalition that pulls it down.
+
+### Added
+
+- **Houses.** A dynasty is an entity rather than a string on a realm, with its
+  own page: the whole line of succession down the centuries, every throne it
+  has held, where it forked into cadet branches, and who of it never ruled. The
+  tree is drawn down *time* rather than down descent, so a thousand-year family
+  stays one column wide and fits a terminal. New `Houses` and `Figures` lists
+  (`e`, or `:list houses`), and `[H]`, `[m]`, `[v]`, `[O]`, `[b]` links between
+  people, houses, spouses and overlords.
+- **Kin that exist before they matter.** Rulers marry at home or into a
+  neighbouring house; children are born, named, and grow up with traits of
+  their own; some do not survive childhood. A succession draws on people the
+  reader has already met.
+- **Inheritance customs** drawn from a culture's values: primogeniture,
+  partition, tanistry, or election. Partition divides a great realm among the
+  heirs, which is how a conqueror's work is undone by his own law. A passed-over
+  sibling may take the provinces with them.
+- **The Diadochi.** An acclaimed conqueror who leaves no grown heir may have
+  the realm divided among the generals who marched with him, each founding a
+  line. Realms that shatter now name whoever crowned themselves in each
+  fragment.
+- **Personal union.** A consort who is the nearest heir of a realm with none of
+  its own brings both crowns under one head, with no battle.
+- **Standing, scored every year.** What a life amounts to, in points, itemised
+  on the person's page. Weighted towards the rate of conquest rather than the
+  total, so a figure is acclaimed young with a lifetime left to be followed.
+  The world names them great in a line of its own, naming the deed that earned
+  it, rather than in their obituary.
+- **Coronation by a faith**: a state faith with reach may crown a pious and
+  successful ruler, granting a title they keep and the one road to an empire
+  that does not run through conquest.
+- **Alliances, rivalries and dynastic ties** as standing arrangements, formed
+  against a common enemy and allowed to lapse when the reason for them goes.
+- **Tribute.** A defeated realm can be made a tributary: it keeps its crown and
+  its customs, pays a share of its income, and tests its overlord's grip when
+  that overlord looks weak.
+- **Coalitions.** A realm holding more than a fifth of the settled world is
+  recognised as the power of the age, and its neighbours and theirs come to fear
+  it more than they fear each other. Allies are called into wars worth their
+  blood and their armies count on the field.
+- **War aims.** Every declaration states what it is for — a border, a named
+  city, tribute, a relic, a conversion, a claimant's throne, plunder, or
+  breaking the hegemon — and every peace returns a verdict on it, including the
+  victory that did not get what it came for.
+- Figures and spent houses in the fifty-year recap; the great houses and a
+  count of figures per century in `--stats`, with the largest realm's stability
+  broken down by `explain` so the two cannot silently disagree.
+
+### Changed
+
+- *World-changing.* Every seed produces a different history. Nearly every draw
+  in the simulation has moved.
+- **Size is its own punishment.** A realm is judged on how far its provinces lie
+  from its seat (`stability_sprawl_weight`). Administrative capacity rises with
+  the cities a conqueror takes, so conquest used to pay for its own
+  administration and nothing could stop a realm that got ahead; distance does
+  not work that way, and an empire now frays at its edge first. Great realms
+  reach 37–63% of the settled world at their height and then break, where they
+  previously plateaued around 10%.
+- **Wars are fought by sides, not realms.** Front lines, field strength,
+  casualties and captured ground all account for everyone present, with a
+  penalty for the divided command of a coalition.
+- Battles, rulers, cities and wars are credited to the *person* as well as the
+  realm, so the chronicle still knows four centuries later who took the land.
+  Land taken in war is counted apart from land settled.
+- Everyone who is not on a throne now grows old and dies. Only rulers had a
+  death roll, so a king's younger children never died: a house accumulated
+  immortal claimants for a thousand years.
+- Relic regalia raise the stability a realm *tends toward* instead of being
+  added to its stored stability every year. As a yearly addition it was a
+  ratchet rather than a bonus, and a realm with a few crowns climbed to total
+  stability however badly it was governed.
+- Wars are numbered by name rather than by the pair fighting them, so three
+  different realms no longer each fight a "First War of the Ngerrilm Plain",
+  and a war named for its aim says so.
+- Non-neighbour tension is bounded and expired truces are swept, so a realm
+  weighs the powers that matter now rather than every power that ever
+  frightened it.
+- Config errors are reported in headless and snapshot runs, which have no
+  status line to show them on.
+
+### Fixed
+
+- **Lost relics could never be found again.** Every caller that loses a relic
+  records where it fell, and `artifact_passes` then cleared that record — so
+  relics sacked, buried with their owner or lost in a realm's ruin were gone for
+  good, and only relics *born* lost could ever be dug up. Rediscoveries over
+  three thousand years go from 1–24 to 143–161, and the world's stock of relics
+  grows instead of draining away.
+- `Polity::house` and `Polity::sprawl` are saved. Without them a reloaded world
+  had no dynasties and governed its first year on a zero, and diverged from the
+  world that wrote the file.
+- A fifty-year recap can no longer overrun the page it was given.
+- The check for "1 lands" no longer fires on the tail of a decimal.
+
+### Performance
+
+- Living realms and living people are maintained as indexes beside their
+  append-only vectors, the way `owner_cells` already was. Phases that filtered
+  the raw vectors cost the whole history of the world every year.
+- Greatness is scored without building the sentences that explain it; the prose
+  is written only when somebody is going to read it.
+- A year costs about 0.40 ms at 160x64 over 1500 years, against 0.26 ms before
+  this release, and no phase grows with the age of the world.
+
 ## [0.1.2] - 2026-09-16
 
 ### Added

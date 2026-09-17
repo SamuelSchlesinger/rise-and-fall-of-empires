@@ -243,6 +243,15 @@ fn main() {
             eprintln!("empires: {}", e);
         }
     }
+    // Config complaints reach the interface through its status line, which
+    // a headless or snapshot run does not have. The config template
+    // promises that a name this build does not know is reported when the
+    // game starts, so say it here too rather than swallowing it.
+    if !cfg.errors.is_empty() && (args.headless.is_some() || args.snapshot.is_some()) {
+        for e in &cfg.errors {
+            eprintln!("empires: config: {}", e);
+        }
+    }
     if args.load.is_some() && args.headless.is_some() {
         // A loaded world keeps its own detail unless one was given explicitly.
         if std::env::args().any(|a| a == "--detail" || a == "-d") {

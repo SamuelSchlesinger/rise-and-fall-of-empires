@@ -2,11 +2,11 @@
 
 use super::words;
 use crate::sim::chronicle::{EventKind, Ref};
-use crate::sim::explain;
-use crate::sim::{SchoolKind, World};
+use crate::sim::{dynasty, explain};
+use crate::sim::{SchoolKind, Stance, World};
 use crate::term::{self, Rgb, BOLD, DIM};
 
-pub const LIST_TABS: [&str; 9] = [
+pub const LIST_TABS: [&str; 11] = [
     "Realms",
     "Cities",
     "Peoples",
@@ -16,6 +16,8 @@ pub const LIST_TABS: [&str; 9] = [
     "Places",
     "Relics",
     "Prophecies",
+    "Figures",
+    "Houses",
 ];
 
 pub struct Line {
@@ -76,6 +78,11 @@ pub fn ref_color(w: &World, r: Ref) -> Rgb {
         Ref::Race(_) => ACCENT,
         Ref::Feature(_) => Rgb(120, 170, 240),
         Ref::Artifact(_) => Rgb(255, 200, 80),
+        Ref::House(h) => w.houses[h]
+            .realms
+            .first()
+            .map(|&p| w.polities[p].color)
+            .unwrap_or(ACCENT),
     }
 }
 
@@ -90,6 +97,7 @@ pub fn entity_name(w: &World, r: Ref) -> String {
         Ref::Race(x) => format!("the {}", w.races[x].plural),
         Ref::Feature(f) => w.terrain.features[f].display(),
         Ref::Artifact(a) => w.artifacts[a].name.clone(),
+        Ref::House(h) => w.houses[h].name.clone(),
     }
 }
 
@@ -114,6 +122,13 @@ pub fn entity_loc(w: &World, r: Ref) -> Option<usize> {
             Some(w.terrain.idx(c.0, c.1))
         }
         Ref::Artifact(a) => w.artifact_loc(a),
+        // A house is wherever it last sat: the seat of the newest realm it
+        // holds, or of the last one it held.
+        Ref::House(h) => w.houses[h]
+            .realms
+            .iter()
+            .rev()
+            .find_map(|&p| w.capital_cell(p)),
     }
 }
 
@@ -144,11 +159,38 @@ pub fn stability_color(v: f32) -> Rgb {
 pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
     let mut out = Vec::new();
     match r {
+        Ref::House(h) => {
+            let ho = &w.houses[h];
+            out.push((ho.name.clone(), ACCENT));
+            out.push((
+                format!(
+                    "{} of the {}",
+                    if ho.alive() {
+                        "a house"
+                    } else {
+                        "a spent house"
+                    },
+                    w.cultures[ho.culture].plural
+                ),
+                FG,
+            ));
+            out.push((
+                format!(
+                    "{} years · {} who ruled",
+                    ho.span(w.year).max(0),
+                    ho.seniors.len()
+                ),
+                DIMC,
+            ));
+        }
         Ref::Polity(p) => {
             let pol = &w.polities[p];
             out.push((pol.name.clone(), pol.color));
             if let Some(y) = pol.fell {
                 out.push((format!("fell in year {}", y), DIMC));
+            }
+            if let Some(o) = pol.overlord {
+                out.push((crate::sim::prose::tributary_line(w, o), Rgb(240, 160, 90)));
             }
             out.push((
                 format!(
@@ -334,6 +376,8 @@ pub fn list_header(tab: usize) -> &'static str {
         5 => "  war                                       attacker vs defender          years",
         6 => "  place                                   kind",
         7 => "  relic                                   kind      made   held by",
+        9 => "  figure                        points  realm               lived      chiefly remembered for",
+        10 => "  house                               people           ruled  thrones  span",
         _ => "  prophecy                                                          seer                 by     outcome",
     }
 }
@@ -570,6 +614,82 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                 rows.push((row, Ref::Person(pr.seer)));
             }
         }
+        // The figures of the age: everyone the world has ever called great,
+        // the living first. `Persons` lists everybody who was ever named;
+        // this lists the handful who mattered, which is the list a reader
+        // actually wants when they ask who is alive right now and why they
+        // should care.
+        9 => {
+            let mut fs: Vec<usize> = (0..w.persons.len())
+                .filter(|&i| w.persons[i].is_acclaimed() || w.persons[i].greatness >= 80.0)
+                .collect();
+            fs.sort_by(|&a, &b| {
+                let (pa, pb) = (&w.persons[a], &w.persons[b]);
+                pa.died
+                    .is_some()
+                    .cmp(&pb.died.is_some())
+                    .then_with(|| pb.greatness.total_cmp(&pa.greatness))
+                    .then_with(|| a.cmp(&b))
+            });
+            for i in fs.into_iter().take(400) {
+                let per = &w.persons[i];
+                let realm = per
+                    .polity
+                    .map(|pp| w.polities[pp].short.clone())
+                    .unwrap_or_default();
+                let when = match per.died {
+                    Some(y) => format!("{}-{}", per.born, y),
+                    None => format!("{}-", per.born),
+                };
+                let deed = dynasty::standing(w, i)
+                    .first()
+                    .map(|c| c.what.clone())
+                    .unwrap_or_default();
+                let row = format!(
+                    "{:<30}{:>5}  {:<20}{:<11}{}",
+                    clip(&per.full_name(), 29),
+                    per.greatness.round() as i32,
+                    clip(&realm, 19),
+                    when,
+                    clip(&deed, 34)
+                );
+                rows.push((row, Ref::Person(i)));
+            }
+        }
+        // Every ruling family the world has known, the living ones first
+        // and the longest-lasting at the top of each group.
+        10 => {
+            let mut hs: Vec<usize> = (0..w.houses.len()).collect();
+            hs.sort_by(|&a, &b| {
+                let (ha, hb) = (&w.houses[a], &w.houses[b]);
+                ha.ended
+                    .is_some()
+                    .cmp(&hb.ended.is_some())
+                    .then_with(|| hb.span(w.year).cmp(&ha.span(w.year)))
+                    .then_with(|| a.cmp(&b))
+            });
+            for h in hs {
+                let ho = &w.houses[h];
+                let span = match ho.ended {
+                    Some(y) => format!("{}-{}", ho.founded, y),
+                    None => format!("{}-", ho.founded),
+                };
+                let thrones = ho
+                    .realms
+                    .iter()
+                    .filter(|&&p| w.polities[p].alive() && w.polities[p].house == Some(h))
+                    .count();
+                let row = format!(
+                    "{:<36}{:<17}{:>5}{:>9}  {}",
+                    clip(&ho.name, 35),
+                    clip(&w.cultures[ho.culture].plural, 16),
+                    ho.seniors.len(),
+                    thrones,
+                    span
+                );
+                rows.push((row, Ref::House(h)));
+            }
+        }
         _ => {
             let mut fs: Vec<usize> = (0..w.terrain.features.len()).collect();
             fs.sort_by_key(|&f| {
@@ -616,6 +736,8 @@ pub fn follow_link(w: &World, r: Ref, c: char) -> Option<Ref> {
                 's' => pol.school.map(Ref::School),
                 'p' => pol.parent.map(Ref::Polity),
                 'w' => pol.wars.first().map(|&x| Ref::War(x)),
+                'H' => pol.house.map(Ref::House),
+                'O' => pol.overlord.map(Ref::Polity),
                 _ => None,
             }
         }
@@ -649,6 +771,9 @@ pub fn follow_link(w: &World, r: Ref, c: char) -> Option<Ref> {
                 's' => per.school.map(Ref::School),
                 'f' => per.parent.map(Ref::Person),
                 'h' => w.children_of(pi).first().copied().map(Ref::Person),
+                'H' => per.house.map(Ref::House),
+                'm' => per.spouse.map(Ref::Person),
+                'v' => per.served.map(Ref::Person),
                 _ => None,
             }
         }
@@ -657,6 +782,15 @@ pub fn follow_link(w: &World, r: Ref, c: char) -> Option<Ref> {
             'd' => Some(Ref::Polity(w.wars[x].defender)),
             _ => None,
         },
+        Ref::House(h) => {
+            let ho = &w.houses[h];
+            match c {
+                'c' => Some(Ref::Culture(ho.culture)),
+                'f' => ho.founder.map(Ref::Person),
+                'b' => ho.parent.map(Ref::House),
+                _ => None,
+            }
+        }
         Ref::Artifact(a) => {
             let ar = &w.artifacts[a];
             match c {
@@ -729,6 +863,7 @@ pub fn detail_lines(w: &World, r: Ref, width: usize, ascii: bool) -> Vec<Line> {
         Ref::Race(x) => race_page(w, x, r, width, w2, &mut out),
         Ref::Artifact(a) => relic_page(w, a, r, width, w2, ascii, &mut out),
         Ref::Feature(f) => place_page(w, f, r, width, w2, &mut out),
+        Ref::House(h) => house_page(w, h, r, width, w2, ascii, &mut out),
     }
     out
 }
@@ -782,7 +917,16 @@ fn realm_page(
             ));
         }
         if !pol.dynasty.is_empty() {
-            out.push(line(format!("    Dynasty   {}", pol.dynasty), FG, 0));
+            let label = if pol.house.is_some() {
+                "[H] House    "
+            } else {
+                "    Dynasty  "
+            };
+            out.push(line(
+                format!("{} {}", label, pol.dynasty),
+                if pol.house.is_some() { LINK } else { FG },
+                0,
+            ));
         }
     }
     out.push(line(
@@ -957,6 +1101,85 @@ fn realm_page(
                 ));
             }
         }
+        // How the throne passes is the single most consequential thing
+        // about a realm that cannot be seen on the map: it decides whether
+        // a conqueror's work survives them.
+        out.push(line(
+            format!(
+                "    Succession {} — {}",
+                pol.inheritance.name(),
+                pol.inheritance.describe()
+            ),
+            DIMC,
+            0,
+        ));
+        if !pol.heirs.is_empty() {
+            let names: Vec<String> = pol
+                .heirs
+                .iter()
+                .take(5)
+                .map(|&h| {
+                    let age = w.persons[h].age(w.year);
+                    format!("{} ({})", w.persons[h].name, age)
+                })
+                .collect();
+            labelled(out, "    Heirs     ", &names.join(", "), w2, DIMC);
+        }
+        // Standing arrangements, which the border colours cannot show.
+        if let Some(o) = pol.overlord {
+            out.push(line(
+                format!("[O] Overlord   {}", w.polities[o].name),
+                Rgb(240, 160, 90),
+                0,
+            ));
+        }
+        if !pol.tributaries.is_empty() {
+            let names: Vec<String> = pol
+                .tributaries
+                .iter()
+                .filter(|&&t| w.polities[t].alive())
+                .map(|&t| w.polities[t].short.clone())
+                .collect();
+            if !names.is_empty() {
+                labelled(
+                    out,
+                    "    Tributaries",
+                    &names.join(", "),
+                    w2,
+                    Rgb(240, 200, 120),
+                );
+            }
+        }
+        let allies: Vec<String> = pol
+            .stance
+            .iter()
+            .filter(|&(&q, &st)| st == Stance::Allied && w.polities[q].alive())
+            .map(|(&q, _)| w.polities[q].short.clone())
+            .collect();
+        if !allies.is_empty() {
+            labelled(
+                out,
+                "    Allied with",
+                &allies.join(", "),
+                w2,
+                Rgb(120, 210, 150),
+            );
+        }
+        let kin: Vec<String> = pol
+            .stance
+            .iter()
+            .filter(|&(&q, &st)| st == Stance::Married && w.polities[q].alive())
+            .map(|(&q, _)| w.polities[q].short.clone())
+            .collect();
+        if !kin.is_empty() {
+            labelled(
+                out,
+                "    Married to",
+                &kin.join(", "),
+                w2,
+                Rgb(200, 170, 220),
+            );
+        }
         let mut nb: Vec<(usize, u32)> = pol.neighbors.clone();
         nb.sort_by_key(|&(_, l)| std::cmp::Reverse(l));
         if !nb.is_empty() {
@@ -964,13 +1187,24 @@ fn realm_page(
                 .iter()
                 .take(6)
                 .map(|&(q, _)| {
-                    let t = pol.tension.get(&q).copied().unwrap_or(0.0);
-                    let mood = if t > 0.5 {
-                        "hostile"
-                    } else if t > 0.3 {
-                        "wary"
-                    } else {
-                        "calm"
+                    // A stance outranks a temperature: an ally is an ally
+                    // even in a year when the border is tense.
+                    let mood = match pol.stance.get(&q).copied().unwrap_or(Stance::Neutral) {
+                        // A declared arrangement outranks a temperature: an
+                        // ally is an ally even in a tense year.
+                        st @ (Stance::Allied | Stance::Rival) => st.name().to_string(),
+                        Stance::Married => "kin".to_string(),
+                        Stance::Neutral => {
+                            let t = pol.tension.get(&q).copied().unwrap_or(0.0);
+                            if t > 0.5 {
+                                "hostile"
+                            } else if t > 0.3 {
+                                "wary"
+                            } else {
+                                "calm"
+                            }
+                            .to_string()
+                        }
                     };
                     format!("{} ({})", w.polities[q].short, mood)
                 })
@@ -1365,6 +1599,24 @@ fn person_page(
     for l in term::wrap(&explain::standing(w, pi), w2) {
         out.push(line(l, ACCENT, 0));
     }
+    if let Some(t) = &per.title {
+        out.push(line(
+            format!("    Styled    {}", t),
+            Rgb(255, 210, 90),
+            BOLD,
+        ));
+    }
+    if let Some(y) = per.acclaimed {
+        out.push(line(
+            format!(
+                "    Acclaimed in year {}, at the age of {}",
+                y,
+                (y - per.born).max(0)
+            ),
+            Rgb(255, 210, 90),
+            0,
+        ));
+    }
     out.push(line("", FG, 0));
     if let Some(p) = per.polity {
         out.push(line(
@@ -1385,6 +1637,9 @@ fn person_page(
             0,
         ));
     }
+    if let Some(h) = per.house {
+        out.push(line(format!("[H] House     {}", w.houses[h].name), LINK, 0));
+    }
     if per.parent.is_some() {
         out.push(line(format!("[f] Family    {}", w.lineage(pi)), LINK, 0));
     }
@@ -1393,12 +1648,44 @@ fn person_page(
         let names: Vec<String> = kids.iter().map(|&k| w.persons[k].full_name()).collect();
         labelled(out, "[h] Children", &names.join(", "), w2, LINK);
     }
-    if per.battles_won > 0 {
+    if let Some(sp) = per.spouse {
         out.push(line(
-            format!("    Battles   {} won", per.battles_won),
-            DIMC,
+            format!("[m] Married   {}", w.persons[sp].full_name()),
+            LINK,
             0,
         ));
+    }
+    if let Some(sv) = per.served {
+        out.push(line(
+            format!("[v] Served    {}", w.persons[sv].full_name()),
+            LINK,
+            0,
+        ));
+    }
+    // What this life actually amounted to, in the same points the
+    // simulation uses to decide whether the world calls them great. The
+    // list is the greatness score itself, itemised, so a reader can see
+    // exactly why one ruler is remembered and another is not.
+    let deeds = dynasty::standing(w, pi);
+    if !deeds.is_empty() {
+        out.push(line("", FG, 0));
+        out.push(line(
+            format!("Standing — {:.0} points", per.greatness),
+            ACCENT,
+            BOLD,
+        ));
+        for d in deeds.iter().take(8) {
+            let colour = if d.points >= 0.0 {
+                FG
+            } else {
+                Rgb(220, 120, 110)
+            };
+            out.push(line(
+                format!("  {:>+5.0}  {}", d.points, words::capitalize(&d.what)),
+                colour,
+                0,
+            ));
+        }
     }
     let held: Vec<String> = w
         .artifacts
@@ -1777,12 +2064,15 @@ pub const HELP: &[&str] = &[
     "             :fate 3  :q  :wq  :q!",
     "",
     "Browsing     e lists (realms, cities, peoples, schools, persons, wars, places, relics,",
-    "             prophecies)   c the chronicle (f or v cycles importance 0-3, / filters by text)",
+    "             prophecies, figures, houses)   c the chronicle (f or v cycles importance 0-3,",
+    "             / filters by text)   Figures are those the world called great; Houses are the",
+    "             ruling families, each with its whole line of succession.",
     "             Everywhere: j k scroll, Ctrl-d Ctrl-u half a page, Ctrl-f Ctrl-b a page,",
     "             gg G top / bottom, m show on map, q or Esc back.",
     "             In a list: Tab or ] [ change tab, Enter opens, n N move, x the Hand of Fate.",
     "             On a page: the bracketed letter opens that link ([r] ruler, [c] people,",
-    "             [K] capital, [f] family), Backspace retraces, Enter shows it on the map.",
+    "             [K] capital, [f] family, [H] house, [m] spouse, [O] overlord), Backspace",
+    "             retraces, Enter shows it on the map.",
     "",
     "Mouse        click selects, click again opens, wheel scrolls, clicking a chronicle line or",
     "             a sidebar entry jumps there.  --no-mouse or :mouse leaves it to the terminal.",
@@ -1916,6 +2206,332 @@ pub fn hand_of_fate(w: &mut World, p: usize, choice: u8) -> String {
             format!("{} has died", who)
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Houses
+// ---------------------------------------------------------------------------
+
+/// Glyphs for the family tree, in Unicode and in the ASCII fallback.
+struct TreeGlyphs {
+    first: char,
+    mid: char,
+    last: char,
+    only: char,
+    branch: char,
+    stub: char,
+    vert: char,
+}
+
+fn tree_glyphs(ascii: bool) -> TreeGlyphs {
+    if ascii {
+        TreeGlyphs {
+            first: 'o',
+            mid: '+',
+            last: '`',
+            only: 'o',
+            branch: '>',
+            stub: '-',
+            vert: '|',
+        }
+    } else {
+        TreeGlyphs {
+            first: '┬',
+            mid: '├',
+            last: '┴',
+            only: '●',
+            branch: '╞',
+            stub: '─',
+            vert: '│',
+        }
+    }
+}
+
+/// How `child` is related to the person before them in the line of
+/// succession, in one word.
+fn kin_word(w: &World, prev: Option<usize>, who: usize) -> &'static str {
+    let Some(prev) = prev else { return "" };
+    if w.persons[who].parent == Some(prev) {
+        return "child";
+    }
+    if w.persons[prev].parent == Some(who) {
+        return "parent";
+    }
+    let (a, b) = (w.persons[who].parent, w.persons[prev].parent);
+    if a.is_some() && a == b {
+        return "sibling";
+    }
+    if let Some(sp) = w.persons[prev].spouse {
+        if sp == who {
+            return "consort";
+        }
+    }
+    // Same house, no traceable link: a cousin from a cadet line.
+    "kinsman"
+}
+
+/// The page for a ruling house: a thousand years of one family, drawn so
+/// that it fits a terminal.
+///
+/// The hard part of a dynasty at this scale is that an ordinary indented
+/// tree is unreadable: thirty generations is thirty levels of indentation,
+/// and a house with a hundred members cannot be drawn at all on eighty
+/// columns. So the tree here is drawn down **time**, not down descent — the
+/// line of succession is one straight column with a year beside each
+/// accession, and everything else hangs off it as a note. That keeps the
+/// drawing exactly as wide as one name however many centuries it runs, and
+/// it matches what a reader actually wants to follow: who held the throne,
+/// what they were to the one before, and where the line forked.
+fn house_page(
+    w: &World,
+    h: usize,
+    r: Ref,
+    width: usize,
+    w2: usize,
+    ascii: bool,
+    out: &mut Vec<Line>,
+) {
+    let ho = &w.houses[h];
+    let g = tree_glyphs(ascii);
+    out.push(line(ho.name.to_uppercase(), ACCENT, BOLD));
+
+    let mut desc = format!("A house of the {}", w.cultures[ho.culture].plural);
+    if let Some(f) = ho.founder {
+        desc.push_str(&format!(", founded by {}", w.persons[f].full_name()));
+    }
+    desc.push_str(&format!(" in year {}", ho.founded));
+    match ho.ended {
+        Some(y) => desc.push_str(&format!(", and spent by year {}.", y)),
+        None => desc.push('.'),
+    }
+    for l in term::wrap(&desc, w2) {
+        out.push(line(l, FG, 0));
+    }
+    let living = ho.members.iter().filter(|&&m| w.persons[m].alive()).count();
+    out.push(line(
+        format!(
+            "{} years · {} who ruled · {} of the line · {} living",
+            ho.span(w.year).max(0),
+            ho.seniors.len(),
+            ho.members.len(),
+            living
+        ),
+        DIMC,
+        0,
+    ));
+    out.push(line("", FG, 0));
+
+    out.push(line(
+        format!("[c] People    the {}", w.cultures[ho.culture].plural),
+        LINK,
+        0,
+    ));
+    if let Some(f) = ho.founder {
+        out.push(line(
+            format!("[f] Founder   {}", w.persons[f].full_name()),
+            LINK,
+            0,
+        ));
+    }
+    if let Some(pa) = ho.parent {
+        out.push(line(
+            format!("[b] Branch of {}", w.houses[pa].name),
+            LINK,
+            0,
+        ));
+    }
+
+    // The thrones it has held, and when.
+    if !ho.realms.is_empty() {
+        out.push(line("", FG, 0));
+        out.push(line("Thrones held", ACCENT, BOLD));
+        for &p in ho.realms.iter().take(12) {
+            let pol = &w.polities[p];
+            let still = pol.alive() && pol.house == Some(h);
+            let mark = if still { "·" } else { " " };
+            // Just whether the house holds it now: dating the tenure would
+            // mean recording when each accession happened in each realm,
+            // and "since <the realm's founding>" was simply wrong for a
+            // throne the house came to later.
+            let when = if still {
+                "holds it".to_string()
+            } else if pol.alive() {
+                "lost it".to_string()
+            } else {
+                format!("fell {}", pol.fell.unwrap_or(0))
+            };
+            let nw = w2.saturating_sub(when.len() + 6).clamp(10, 34);
+            out.push(line(
+                format!("  {} {:<nw$} {}", mark, clip(&pol.name, nw), when, nw = nw),
+                if still { FG } else { DIMC },
+                0,
+            ));
+        }
+        if ho.peak_realms > 1 {
+            out.push(line(
+                format!(
+                    "    at its height it held {} thrones at once",
+                    ho.peak_realms
+                ),
+                DIMC,
+                DIM,
+            ));
+        }
+    }
+
+    // The line of succession: the spine of the tree.
+    out.push(line("", FG, 0));
+    out.push(line("The line", ACCENT, BOLD));
+    // The table lays itself out from the columns it is given rather than
+    // assuming a wide terminal: the name takes what is left after the fixed
+    // columns, and the realm and the relation are dropped in that order
+    // when there is no room for them. A house page on eighty columns is the
+    // common case and on sixty it still has to be a table.
+    let spine_fixed = 2 + 4 + 1 + 1 + 1 + 5 + 2; // indent, year, gaps, glyph, reign
+    let room = w2.saturating_sub(spine_fixed);
+    let show_realm = room >= 40;
+    let show_kin = room >= 58;
+    let realm_w = if show_realm { 15 } else { 0 };
+    let kin_w = if show_kin { 18 } else { 0 };
+    let name_w = room
+        .saturating_sub(realm_w + kin_w + usize::from(show_realm) + usize::from(show_kin))
+        .clamp(8, 34);
+    if ho.seniors.is_empty() {
+        out.push(line("  never came to a throne", DIMC, DIM));
+    } else {
+        let mut head = format!("  year  {:<name_w$}", "who", name_w = name_w);
+        if show_realm {
+            head.push_str(&format!(" {:<realm_w$}", "realm", realm_w = realm_w));
+        }
+        head.push_str("  reign");
+        if show_kin {
+            head.push_str("  kin");
+        }
+        out.push(line(head, DIMC, DIM));
+    }
+    let mut spine: Vec<usize> = ho.seniors.clone();
+    spine.sort_by_key(|&x| (w.persons[x].crowned.unwrap_or(w.persons[x].born), x));
+    let n = spine.len();
+    let mut prev: Option<usize> = None;
+    for (i, &who) in spine.iter().enumerate() {
+        let per = &w.persons[who];
+        // Their accession year, recorded when they were crowned. The realm's
+        // own `reign_start` describes whoever sits there now, so it cannot
+        // date a predecessor and the line came out in the wrong order.
+        let came = per.crowned.unwrap_or(per.born).max(0);
+        let realm = per
+            .polity
+            .map(|p| w.polities[p].short.clone())
+            .unwrap_or_default();
+        let glyph = if n == 1 {
+            g.only
+        } else if i == 0 {
+            g.first
+        } else if i + 1 == n {
+            g.last
+        } else {
+            g.mid
+        };
+        let reign = if per.alive() {
+            format!("{}y…", per.reign_years)
+        } else {
+            format!("{}y", per.reign_years)
+        };
+        let kin = kin_word(w, prev, who);
+        let siblings = per
+            .parent
+            .map(|pa| w.persons[pa].children.iter().filter(|&&c| c != who).count())
+            .unwrap_or(0);
+        let extra = if siblings > 0 {
+            format!("{}, +{} more", kin, siblings)
+        } else {
+            kin.to_string()
+        };
+        let mut row = format!(
+            "  {:>4} {} {:<name_w$}",
+            came,
+            glyph,
+            clip(&per.full_name(), name_w),
+            name_w = name_w
+        );
+        if show_realm {
+            row.push_str(&format!(
+                " {:<realm_w$}",
+                clip(&realm, realm_w),
+                realm_w = realm_w
+            ));
+        }
+        row.push_str(&format!(" {:>5}", reign));
+        if show_kin {
+            row.push_str(&format!("  {}", clip(&extra, kin_w)));
+        }
+        out.push(line(
+            row,
+            if per.alive() { FG } else { DIMC },
+            if per.is_acclaimed() { BOLD } else { 0 },
+        ));
+        // A member who founded a house of their own is where the tree
+        // actually forks, and that is worth a line even though it leaves
+        // this page.
+        for (bi, br) in w
+            .houses
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.parent == Some(h) && x.founder == Some(who))
+        {
+            let _ = bi;
+            out.push(line(
+                format!("       {} {}{} {}", g.vert, g.branch, g.stub, br.name),
+                Rgb(200, 170, 220),
+                0,
+            ));
+        }
+        prev = Some(who);
+    }
+
+    // Everyone else: born to the house, never held a throne. At millennia
+    // scale this is the long tail, so it is counted rather than listed in
+    // full, with the most recent shown.
+    let others: Vec<usize> = ho
+        .members
+        .iter()
+        .copied()
+        .filter(|m| !spine.contains(m))
+        .collect();
+    if !others.is_empty() {
+        out.push(line("", FG, 0));
+        out.push(line(
+            format!("Others of the line ({})", others.len()),
+            ACCENT,
+            BOLD,
+        ));
+        let start = others.len().saturating_sub(24);
+        if start > 0 {
+            out.push(line(format!("  … {} earlier omitted", start), DIMC, DIM));
+        }
+        for &m in &others[start..] {
+            let per = &w.persons[m];
+            let when = match per.died {
+                Some(y) => format!("{}–{}", per.born, y),
+                None => format!("{}–, living", per.born),
+            };
+            let nw = w2
+                .saturating_sub(when.len() + per.role.name().len() + 5)
+                .clamp(10, 32);
+            out.push(line(
+                format!(
+                    "  {:<nw$} {:<14} {}",
+                    clip(&per.full_name(), nw),
+                    when,
+                    per.role.name(),
+                    nw = nw
+                ),
+                if per.alive() { FG } else { DIMC },
+                0,
+            ));
+        }
+    }
+    history(w, r, width, out, 200);
 }
 
 #[cfg(test)]
