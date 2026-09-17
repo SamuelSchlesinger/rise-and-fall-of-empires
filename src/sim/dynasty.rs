@@ -7,12 +7,12 @@
 //! so the reader met Alexander as a corpse and Charlemagne as an estate to
 //! be divided.
 //!
-//! Three things fix that, and they are the three halves of this file:
+//! Three things fix that, and they are the three parts of this file:
 //!
 //! * **Kin that exist before they matter.** Rulers marry and have children,
-//!   and those children are real [`Person`]s who grow up in the chronicle
-//!   with names and traits. Succession then draws on people the reader has
-//!   already met rather than conjuring an heir at the graveside.
+//!   and those children are real [`super::Person`]s who grow up in the
+//!   chronicle with names and traits. Succession then draws on people the
+//!   reader has already met rather than conjuring an heir at the graveside.
 //! * **Standing, computed every year.** [`greatness`] scores a living
 //!   career in points. When somebody crosses the line that separates a ruler
 //!   from a figure, the world says so *at the time*, in [`acclaim`], and
