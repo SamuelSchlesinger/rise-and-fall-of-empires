@@ -540,6 +540,18 @@ pub(crate) fn for_test(world: World, cols: usize, rows: usize) -> Ui {
     ui
 }
 
+/// A paused interface looking at a given layer with the cursor on a given
+/// cell, for the tests that check what reaches the screen.
+#[cfg(test)]
+pub(crate) fn for_test_at(world: World, cols: usize, rows: usize, layer: Layer, cell: usize) -> Ui {
+    let mut ui = for_test(world, cols, rows);
+    ui.layer = layer;
+    let (x, y) = ui.world.terrain.xy(cell);
+    ui.cursor = (x, y);
+    ui.center_view();
+    ui
+}
+
 #[cfg(test)]
 pub(crate) fn time_frames(world: World, cols: usize, rows: usize, frames: u32) -> f64 {
     let mut ui = Ui::new(world, false, false, cols, rows);
@@ -1178,6 +1190,16 @@ impl Ui {
     ///
     /// The second number is the world's count before the page was trimmed,
     /// so the footer can say when there is more history than fits.
+    /// Compose one frame and say whether `mark` reached the screen.
+    ///
+    /// The screen buffer is the interface's own business, so a test asks a
+    /// question about it rather than being handed it.
+    #[cfg(test)]
+    pub(crate) fn frame_shows(&mut self, mark: char) -> bool {
+        self.compose();
+        (0..self.screen.h).any(|y| (0..self.screen.w).any(|x| self.screen.cell(x, y).ch == mark))
+    }
+
     fn list_rows(&self) -> (Vec<(String, Ref)>, usize) {
         let (rows, total) = detail::list_rows(&self.world, self.list_tab);
         if self.list_filter.is_empty() {

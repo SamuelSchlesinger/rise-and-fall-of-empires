@@ -2277,3 +2277,48 @@ fn prosperity_does_not_pile_against_its_ceiling() {
         median
     );
 }
+
+/// A plague must be visible at the speed a plague happens.
+///
+/// It lasts three to six years, which at twenty-five years a second is a
+/// hundred and fifty milliseconds and at a hundred is forty. That was a
+/// wash of green over a whole realm and nothing else, so what a player saw
+/// was a flash of colour with no explanation — and on three of the newer
+/// layers the green meant something already. On the settling layer it means
+/// people *arriving*, so a plague was washing the ground in the colour of
+/// the opposite thing.
+#[test]
+fn a_plague_is_marked_on_every_layer_that_shows_it() {
+    use crate::ui::Layer;
+    let mut w = World::new(79, 120, 60, Detail::Medium);
+    run(&mut w, 300);
+    // Put one where it can be found rather than waiting for one.
+    // On open country rather than in a town: a standing city keeps its own
+    // glyph and shows a plague by its colour alone, which a text buffer
+    // cannot be asked about.
+    let cell = (0..w.cells.len())
+        .find(|&i| w.terrain.is_land(i) && w.cells[i].city.is_none() && w.cells[i].pop > 0.1)
+        .expect("a 300 year world has peopled open country");
+    w.cells[cell].plague = 3;
+
+    for layer in Layer::all() {
+        // Biomes draws flat biome colours and deliberately carries no
+        // overlays at all.
+        if layer == Layer::Biomes {
+            continue;
+        }
+        let mut ui = crate::ui::for_test_at(w_clone(&mut w), 80, 30, layer, cell);
+        let marked = ui.frame_shows('\u{2020}');
+        assert!(
+            marked,
+            "a plague leaves no mark on the {} layer",
+            layer.name()
+        );
+    }
+}
+
+/// Duplicate a world through a save file, since `World` is not `Clone`.
+fn w_clone(w: &mut World) -> World {
+    let bytes = ser::save(w);
+    ser::load(&bytes).expect("a fresh save must load")
+}

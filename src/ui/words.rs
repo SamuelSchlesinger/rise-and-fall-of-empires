@@ -352,6 +352,7 @@ pub fn legend_parts(layer: Layer, ascii: bool) -> Vec<String> {
         ],
         Layer::Population => vec![
             "dark to gold to red as people crowd in".into(),
+            format!("{} plague", if ascii { '&' } else { '†' }),
             "the sea is left bare".into(),
             "@ # cities".into(),
         ],
@@ -388,6 +389,7 @@ pub fn legend_parts(layer: Layer, ascii: bool) -> Vec<String> {
         // to name a direction rather than a quantity.
         Layer::Settling => vec![
             format!("{} people arriving", if ascii { '+' } else { '▲' }),
+            format!("{} plague", if ascii { '&' } else { '†' }),
             format!("{} people leaving", if ascii { '-' } else { '▼' }),
             "green fills, red empties".into(),
             "measured against what the land can feed".into(),

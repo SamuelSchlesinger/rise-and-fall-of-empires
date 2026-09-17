@@ -633,8 +633,42 @@ impl Ui {
                     }
                     Layer::Terrain => {}
                 }
+                // A plague. It lasts three to six years, which at any speed
+                // above a crawl is a flash of colour with no explanation —
+                // so it carries a glyph as well as a wash, because a mark
+                // reads at forty milliseconds and a hue does not.
+                //
+                // And the wash is held back on the layers whose own palette
+                // already speaks green. On the settling layer green means
+                // people arriving, so a plague — people dying — was washing
+                // the ground in the colour of the opposite thing.
                 if cs.plague > 0 && self.layer != Layer::Biomes {
-                    bg = bg.mix(Rgb(120, 200, 60), 0.35);
+                    // Sickly green, except on the layers whose own palette
+                    // already speaks green: on the settling layer green
+                    // means people *arriving*, so a plague was washing the
+                    // ground in the colour of the opposite thing. There it
+                    // takes a violet nothing else uses, rather than going
+                    // unmarked.
+                    let wash =
+                        if matches!(self.layer, Layer::Goods | Layer::Harvest | Layer::Settling) {
+                            Rgb(175, 90, 195)
+                        } else {
+                            Rgb(120, 200, 60)
+                        };
+                    bg = bg.mix(wash, 0.35);
+                    // And a mark, because three to six years is forty
+                    // milliseconds at the fastest speed, and a hue that
+                    // brief reads as a flash with no explanation. Never over
+                    // a standing city, which keeps its own glyph; the wash
+                    // carries it there.
+                    let in_town = cs
+                        .city
+                        .is_some_and(|c| self.world.cities[c].destroyed.is_none());
+                    if !in_town {
+                        ch = if self.ascii { '&' } else { '†' };
+                        fg = bg.mix(Rgb(255, 255, 255), 0.55);
+                        attr |= BOLD;
+                    }
                 }
                 // Cities.
                 if let Some(c) = cs.city {
