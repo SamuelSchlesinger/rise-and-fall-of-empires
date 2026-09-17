@@ -243,26 +243,31 @@ impl Ui {
             return;
         }
         if was == Mode::Map && self.mode != Mode::Fate {
-            self.away_mark = Some(self.world.chronicle.len());
+            self.away_year = Some(self.world.year);
             return;
         }
         if self.mode == Mode::Map {
-            if let Some(mark) = self.away_mark.take() {
+            if let Some(mark) = self.away_year.take() {
                 self.since_note = self.missed_since(mark);
             }
         }
     }
 
-    /// One plain sentence about the major events after chronicle entry
-    /// `mark`, or nothing if the world stayed quiet.
-    fn missed_since(&self, mark: usize) -> Option<String> {
+    /// One plain sentence about the major events since year `mark`, or
+    /// nothing if the world stayed quiet.
+    ///
+    /// Takes a year rather than a chronicle index, because compaction
+    /// removes events and slides every later index backwards. The old
+    /// guard here — refuse when the index is past the end — protected
+    /// against the rarer half of that: the common case is an index that
+    /// still lands *inside* the vector but seven thousand entries too
+    /// early, and the note then cheerfully reported a thousand things over
+    /// nine hundred years for a two-minute absence.
+    fn missed_since(&self, mark: i32) -> Option<String> {
         let events = &self.world.chronicle.events;
-        if mark >= events.len() {
-            return None;
-        }
-        let major: Vec<&crate::sim::chronicle::Event> = events[mark..]
+        let major: Vec<&crate::sim::chronicle::Event> = events
             .iter()
-            .filter(|e| e.importance >= 2 && !self.muted.contains(&e.kind))
+            .filter(|e| e.year > mark && e.importance >= 2 && !self.muted.contains(&e.kind))
             .collect();
         let first = major.first()?;
         let years = self.world.year - first.year;

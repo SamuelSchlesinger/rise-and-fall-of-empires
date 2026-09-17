@@ -66,7 +66,6 @@ impl Ui {
                 self.selected = None;
                 self.back.clear();
                 self.search_results.clear();
-                self.last_follow_event = self.world.chronicle.len();
                 self.mode = Mode::Map;
                 self.paused = true;
                 self.jump_to_selected();
@@ -249,7 +248,6 @@ impl Ui {
                 self.selected = None;
                 self.back.clear();
                 self.search_results.clear();
-                self.last_follow_event = 0;
                 self.mode = Mode::Map;
                 let home = self.world.races.first().map(|r| r.home).unwrap_or(0);
                 self.goto_cell(home);

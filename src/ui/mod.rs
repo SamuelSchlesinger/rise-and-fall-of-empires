@@ -417,7 +417,6 @@ pub struct Ui {
     fps_last: Instant,
     frames: u32,
     fps: u32,
-    last_follow_event: usize,
     // vim-style input state
     mouse: bool,
     count: Option<usize>,
@@ -454,7 +453,11 @@ pub struct Ui {
     recap_scope: Option<usize>,
     /// The chronicle length when the viewer last left the map, and the
     /// note built from whatever happened while they were away.
-    away_mark: Option<usize>,
+    /// The year the viewer left the map, for the "while you were away"
+    /// note. A year and not an index into the chronicle: compaction removes
+    /// events, so a stored index slides backwards through history and the
+    /// note then reports things from long before they left.
+    away_year: Option<i32>,
     since_note: Option<String>,
     last_mode: Mode,
 }
@@ -651,8 +654,9 @@ pub fn snapshot(
         // As if the viewer had spent the last stretch of history on another
         // screen and just come back to the map.
         "missed" => {
-            let n = ui.world.chronicle.len();
-            ui.away_mark = Some(n.saturating_sub(40));
+            // Far enough back that a good stretch of history counts as
+            // missed, in years rather than entries.
+            ui.away_year = Some(ui.world.year - 40);
             ui.last_mode = Mode::List;
         }
         "recap" => {
@@ -778,7 +782,6 @@ impl Ui {
             fps_last: Instant::now(),
             frames: 0,
             fps: 0,
-            last_follow_event: 0,
             mouse,
             count: None,
             pending: None,
@@ -809,7 +812,7 @@ impl Ui {
             recap_years: 50,
             recap_scroll: 0,
             recap_scope: None,
-            away_mark: None,
+            away_year: None,
             since_note: None,
             last_mode: Mode::Map,
         };
@@ -920,24 +923,32 @@ impl Ui {
     }
 
     /// When following, jump the cursor to the latest major event.
+    /// Jump the cursor to this year's most recent notable event.
+    ///
+    /// Asks the year rather than remembering an index. It used to keep a
+    /// watermark into `chronicle.events` and scan everything above it —
+    /// but `Chronicle::compact` *removes* events, so the watermark pointed
+    /// at a different event afterwards and the scan was skipped entirely
+    /// for that tick. An index into a vector that shrinks is not a name for
+    /// anything, which is the rule the rest of this tree already keeps.
+    ///
+    /// This runs once a tick, so "logged this year" is exactly "logged
+    /// since I last looked", and a year is a fact about an event that
+    /// compaction cannot touch.
     fn follow_events(&mut self) {
         if !self.follow || self.mode != Mode::Map {
             return;
         }
-        let n = self.world.chronicle.len();
-        let mut target = None;
-        let mut i = n;
-        while i > self.last_follow_event && i > 0 {
-            i -= 1;
-            let e = &self.world.chronicle.events[i];
-            if e.importance >= 2 {
-                if let Some(l) = e.loc {
-                    target = Some(l);
-                    break;
-                }
-            }
-        }
-        self.last_follow_event = n;
+        let year = self.world.year;
+        let target = self
+            .world
+            .chronicle
+            .events
+            .iter()
+            .rev()
+            .take_while(|e| e.year >= year)
+            .find(|e| e.importance >= 2 && e.loc.is_some())
+            .and_then(|e| e.loc);
         if let Some(l) = target {
             self.goto_cell(l);
         }
@@ -1139,10 +1150,22 @@ impl Ui {
         }
     }
 
+    /// Open whatever chronicle entry `e` is, if it is still there.
+    ///
+    /// `log_rows` and `chron_rows` hold raw indices from the frame that drew
+    /// them, and compaction can remove events between a frame and the click
+    /// that follows it. Today the loop polls input before ticking so the
+    /// window is closed, but that is an ordering accident rather than a
+    /// guarantee, and the cost of not relying on it is one `get`.
     fn jump_to_event(&mut self, e: usize) {
-        let (loc, first, year) = {
-            let ev = &self.world.chronicle.events[e];
-            (ev.loc, ev.refs.first().copied(), ev.year)
+        let Some((loc, first, year)) = self
+            .world
+            .chronicle
+            .events
+            .get(e)
+            .map(|ev| (ev.loc, ev.refs.first().copied(), ev.year))
+        else {
+            return;
         };
         if let Some(r) = first {
             self.selected = Some(r);
@@ -1570,6 +1593,78 @@ mod tests {
             w.tick();
         }
         w
+    }
+
+    /// Leaving the map and coming back must report only what happened
+    /// while the viewer was gone.
+    ///
+    /// The mark used to be an index into `chronicle.events`, and
+    /// `Chronicle::compact` removes events — so the index slid backwards
+    /// through history and the note reported things from long before the
+    /// viewer left. The guard against it only caught the rarer half: an
+    /// index past the end is refused, but the common case is an index that
+    /// still lands inside the vector, several thousand entries too early.
+    /// The note then read "a thousand notable things over nine hundred
+    /// years" for a two-minute absence.
+    ///
+    /// The mark is a year now, which is a fact about an event that
+    /// compaction cannot shift. So: be away a known number of years across
+    /// a compaction, and demand the note does not claim more.
+    #[test]
+    fn coming_back_reports_only_what_was_missed() {
+        let mut w = World::new(23, 60, 30, Detail::Medium);
+        // Small enough that compaction runs, and runs often.
+        w.tuning.chronicle_cap = 300;
+        for _ in 0..400 {
+            w.tick();
+        }
+        let mut ui = Ui::new(w, false, false, 100, 40);
+        ui.paused = true;
+        // On the map, then away.
+        ui.mode = Mode::Map;
+        ui.compose();
+        ui.mode = Mode::List;
+        ui.compose();
+        let left_in = ui.world.year;
+
+        // Time passes, and the chronicle is compacted while it does.
+        let before = ui.world.chronicle.dropped;
+        for _ in 0..30 {
+            ui.world.tick();
+        }
+        assert!(
+            ui.world.chronicle.dropped > before,
+            "no compaction happened, so this proves nothing"
+        );
+        let away = ui.world.year - left_in;
+
+        ui.mode = Mode::Map;
+        ui.compose();
+        // There must *be* a note. The index-based mark produced none at all
+        // once compaction had shrunk the chronicle below it — the report
+        // silently stopped working — so a test that only checked the note
+        // when one appeared passed happily against the bug.
+        let note = ui
+            .since_note
+            .clone()
+            .expect("thirty years of a busy world went unreported");
+        // And the span it names must fit inside the time actually away.
+        let rest = note
+            .split(" over the ")
+            .nth(1)
+            .expect("a note about many things names a span");
+        let years: i32 = rest
+            .split_whitespace()
+            .next()
+            .and_then(|n| n.parse().ok())
+            .expect("the span is a number");
+        assert!(
+            years <= away,
+            "away for {} years, but the note claims {}: {:?}",
+            away,
+            years,
+            note
+        );
     }
 
     fn frame(ascii: bool, mode: Mode, cols: usize, rows: usize) -> Ui {
