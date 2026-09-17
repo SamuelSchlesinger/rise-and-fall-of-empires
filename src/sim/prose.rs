@@ -17,6 +17,7 @@
 //!   short name ("Velen") afterwards. [`realm_full`] and [`realm`] make
 //!   that rule easy to follow.
 
+pub mod circles;
 pub mod diplomacy;
 pub mod dynasty;
 pub mod events;
@@ -29,6 +30,7 @@ mod politics;
 mod stories;
 pub mod trade;
 
+pub use circles::*;
 pub use diplomacy::*;
 pub use dynasty::*;
 pub use events::*;
@@ -642,8 +644,13 @@ mod tests {
     /// English. Checks are generic so new prose is covered automatically.
     #[test]
     fn a_century_of_chronicle_is_well_formed() {
+        // Long enough to reach the events that only a developed world
+        // produces — rivalries, patronage, trade closing, a strain
+        // surfacing, an innovation named. A hundred years reached none of
+        // them, so a lost line continuation in one of those sentences sat
+        // in the tree until somebody read the chronicle by eye.
         let mut w = World::new(11, 96, 48, Detail::High);
-        for _ in 0..100 {
+        for _ in 0..500 {
             w.tick();
         }
         assert!(w.chronicle.len() > 50, "the world should have a history");

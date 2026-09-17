@@ -3,6 +3,7 @@
 
 pub mod blood;
 pub mod chronicle;
+pub mod circles;
 pub mod dynasty;
 pub mod events;
 pub mod explain;
@@ -988,7 +989,7 @@ const MEANINGFUL_WORLD: usize = 300;
 const SEA_REACH_BASE: f32 = 3.0;
 
 /// The phases of a tick, in the order `World::tick` runs them.
-pub const PHASES: [&str; 24] = [
+pub const PHASES: [&str; 25] = [
     "grow_and_migrate",
     "form_polities",
     "expand",
@@ -1007,6 +1008,7 @@ pub const PHASES: [&str; 24] = [
     "tech",
     "disasters",
     "notables",
+    "circles",
     "wonders",
     "artifacts",
     "prophecies",
@@ -2072,12 +2074,13 @@ impl World {
         phase!(15, tech::tick(self));
         phase!(16, events::disasters(self));
         phase!(17, events::notables(self));
-        phase!(18, events::wonders(self));
-        phase!(19, stories::tick_artifacts(self));
-        phase!(20, stories::tick_prophecies(self));
-        phase!(21, stories::tick_legends(self));
-        phase!(22, self.recompute());
-        phase!(23, events::eras(self));
+        phase!(18, circles::tick(self));
+        phase!(19, events::wonders(self));
+        phase!(20, stories::tick_artifacts(self));
+        phase!(21, stories::tick_prophecies(self));
+        phase!(22, stories::tick_legends(self));
+        phase!(23, self.recompute());
+        phase!(24, events::eras(self));
         self.chronicle.compact(self.tuning.chronicle_cap);
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);

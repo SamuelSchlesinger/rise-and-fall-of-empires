@@ -467,6 +467,17 @@ pub struct Tuning {
     /// How much a hegemon's share adds to everyone else's tension with it.
     pub containment_tension: f32,
 
+    // -- the ties between people -------------------------------------------
+    /// Yearly chance a rivalry sets in somewhere in the world.
+    pub rivalry_chance: f64,
+    /// Yearly chance somebody of standing takes up a protege.
+    pub patronage_chance: f64,
+    /// Yearly chance a pupil who has outgrown their patron is said to have.
+    pub protege_surpasses_chance: f64,
+    /// Yearly chance a losing rival takes the short road, before their own
+    /// cruelty and foolishness are counted.
+    pub rival_murder_chance: f64,
+
     // -- what the world learns ---------------------------------------------
     /// Yearly chance a city of ordinary size and prosperity works something
     /// out, before its people, its faith and its wealth are counted.
@@ -699,6 +710,10 @@ impl Default for Tuning {
             tributary_revolt_chance: 0.02,
             hegemon_share: 0.2,
             containment_tension: 0.05,
+            rivalry_chance: 0.12,
+            patronage_chance: 0.09,
+            protege_surpasses_chance: 0.05,
+            rival_murder_chance: 0.06,
             tech_discover_chance: 0.0045,
             tech_frontier_drag: 0.5,
             tech_effort: 14.0,
@@ -924,6 +939,10 @@ impl Tuning {
             "tributary_revolt_chance" => self.tributary_revolt_chance = v,
             "hegemon_share" => self.hegemon_share = v as f32,
             "containment_tension" => self.containment_tension = v as f32,
+            "rivalry_chance" => self.rivalry_chance = v,
+            "patronage_chance" => self.patronage_chance = v,
+            "protege_surpasses_chance" => self.protege_surpasses_chance = v,
+            "rival_murder_chance" => self.rival_murder_chance = v,
             "tech_discover_chance" => self.tech_discover_chance = v,
             "tech_frontier_drag" => self.tech_frontier_drag = v,
             "tech_effort" => self.tech_effort = v as f32,
