@@ -943,6 +943,15 @@ fn person<S: Io>(s: &mut S, p: &mut Person) {
         opt_usize(s, &mut p.rival);
         opt_usize(s, &mut p.served);
     }
+    if s.ver() >= 3 {
+        // Blood. Not derivable from the expressed traits: the whole point
+        // of an allele is that it can be carried without being shown.
+        for g in p.genes.iter_mut() {
+            s.u8(g);
+        }
+        s.f32(&mut p.vigour);
+        s.f32(&mut p.inbred);
+    }
 }
 
 fn house<S: Io>(s: &mut S, h: &mut House) {
@@ -1063,6 +1072,9 @@ fn blank_person() -> Person {
         acclaimed: None,
         rival: None,
         served: None,
+        genes: [128; crate::sim::blood::GENES],
+        vigour: 1.0,
+        inbred: 0.0,
     }
 }
 
@@ -1508,7 +1520,7 @@ sections! {
     T_CULT = b"cult", 2, cultures;
     T_CITY = b"city", 1, cities;
     T_POLY = b"poly", 3, polities;
-    T_PERS = b"pers", 2, persons;
+    T_PERS = b"pers", 3, persons;
     T_HOUS = b"hous", 1, houses;
     T_TECH = b"tech", 1, techs;
     T_SCHL = b"schl", 1, schools;

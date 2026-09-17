@@ -831,3 +831,70 @@ fn the_sea_is_crossed_both_ways() {
         "no island in four worlds was ever peopled across water"
     );
 }
+
+/// Blood behaves like blood: variation survives the generations, a strain
+/// can hide and resurface, and marrying close costs a line its vigour.
+///
+/// The model it replaced blended a single parent's value toward the middle,
+/// so four generations after a remarkable ruler the line was unremarkable
+/// and nothing could ever skip a generation.
+#[test]
+fn a_line_keeps_its_blood() {
+    use crate::sim::blood;
+    let mut w = world(19);
+    run(&mut w, 900);
+
+    // Variation has not collapsed toward the middle.
+    let born_here: Vec<usize> = (0..w.persons.len())
+        .filter(|&i| w.persons[i].parent.is_some())
+        .collect();
+    assert!(born_here.len() > 40, "too few children to judge");
+    let spread = born_here
+        .iter()
+        .filter(|&&i| {
+            let t = w.persons[i].traits;
+            t.ambition > 0.75 || t.ambition < 0.25 || t.cruelty > 0.75 || t.wisdom > 0.75
+        })
+        .count();
+    assert!(
+        spread * 8 >= born_here.len(),
+        "only {} of {} children were remarkable in any trait: the line has flattened",
+        spread,
+        born_here.len()
+    );
+
+    // Somebody carries something they do not show.
+    let carriers = (0..w.persons.len())
+        .filter(|&i| !blood::carried(&w.persons[i].genes).is_empty())
+        .count();
+    assert!(carriers > 0, "no unexpressed strain exists anywhere");
+
+    // Crossing two carriers of the same rare allele can double it.
+    let rng = crate::rng::Rng::new(5);
+    let mut a = [128u8; blood::GENES];
+    let mut b = [128u8; blood::GENES];
+    a[0] = 250;
+    b[0] = 250;
+    let mut doubled = 0;
+    for _ in 0..200 {
+        if blood::surfaced(&blood::cross(&a, &b, &rng)) == Some(0) {
+            doubled += 1;
+        }
+    }
+    assert!(
+        doubled > 20,
+        "two carriers produced a doubled recessive only {} times in 200",
+        doubled
+    );
+
+    // And a child of close kin is the weaker for it.
+    let close: Vec<usize> = (0..w.persons.len())
+        .filter(|&i| w.persons[i].inbred > 0.3)
+        .collect();
+    for &i in close.iter().take(20) {
+        assert!(
+            w.persons[i].vigour < 1.0,
+            "a child of close kin paid nothing for it"
+        );
+    }
+}

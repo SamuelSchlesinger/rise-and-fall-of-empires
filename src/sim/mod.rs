@@ -1,6 +1,7 @@
 //! The world simulation: entities, per-year tick, aggregates and the
 //! helpers every subsystem uses to name things and write history.
 
+pub mod blood;
 pub mod chronicle;
 pub mod dynasty;
 pub mod events;
@@ -567,18 +568,6 @@ impl Traits {
             charisma: rng.trait_value(0.5, 0.22),
         }
     }
-    /// A child's traits: the parent's, pulled back towards the middle.
-    pub fn inherit(&self, rng: &Rng) -> Traits {
-        let mix = |v: f32| rng.trait_value(v as f64 * 0.6 + 0.2, 0.2);
-        Traits {
-            ambition: mix(self.ambition),
-            valor: mix(self.valor),
-            wisdom: mix(self.wisdom),
-            piety: mix(self.piety),
-            cruelty: mix(self.cruelty),
-            charisma: mix(self.charisma),
-        }
-    }
     /// The two or three traits that stand out, in words.
     pub fn describe(&self) -> String {
         let mut parts: Vec<&str> = Vec::new();
@@ -684,6 +673,17 @@ pub struct Person {
     pub rival: Option<usize>,
     /// The ruler they rose under, which is how a general becomes a successor.
     pub served: Option<usize>,
+    // --- blood ---
+    /// Two alleles for each of the six traits. What [`Person::traits`]
+    /// shows is read out of this, so a strain can lie hidden in a line for
+    /// generations and surface when it meets another copy of itself.
+    pub genes: blood::Genome,
+    /// What their parents' closeness cost them, or their distance gave
+    /// them: below 1.0 for a child of close kin. Scales how long they live
+    /// and how readily they have children of their own.
+    pub vigour: f32,
+    /// How closely their parents were related.
+    pub inbred: f32,
 }
 
 impl Person {
@@ -976,6 +976,11 @@ pub struct Stats {
 /// mastery of the sea is forgiven. At 0.5, land across water is half as far
 /// from the capital as the map says.
 const SEA_BINDS_FACTOR: f32 = 0.5;
+
+/// How much settled land there must be before a realm's share of it means
+/// anything. Below this the world is still being peopled and holding all of
+/// it says nothing.
+const MEANINGFUL_WORLD: usize = 300;
 
 /// The water a realm can cross the moment it first builds sea-going hulls,
 /// before its people's seafaring and its own development are counted.
@@ -1637,6 +1642,9 @@ impl World {
             acclaimed: None,
             rival: None,
             served: None,
+            genes: blood::fresh(&self.rng),
+            vigour: 1.0,
+            inbred: 0.0,
         });
         // Ids only ever increase, so appending keeps the list sorted.
         self.alive_persons.push(id);
@@ -1976,7 +1984,11 @@ impl World {
             if p.cities.len() > p.peak_cities {
                 p.peak_cities = p.cities.len();
             }
-            if owned > 0 {
+            // Only once there is a world to hold a share of. A realm founded
+            // in year two, when five cells in all are settled, holds every
+            // one of them — and recorded a peak of 100% for ever after,
+            // which is a sentence about an empty map rather than an empire.
+            if owned >= MEANINGFUL_WORLD {
                 let share = p.cells as f32 / owned as f32;
                 if share > p.peak_share {
                     p.peak_share = share;

@@ -1695,6 +1695,37 @@ fn person_page(
         let names: Vec<String> = kids.iter().map(|&k| w.persons[k].full_name()).collect();
         labelled(out, "[h] Children", &names.join(", "), w2, LINK);
     }
+    // Blood. What a person carries without showing is the thing a reader
+    // following a house for two centuries is actually watching for.
+    let carried = crate::sim::blood::carried(&per.genes);
+    if !carried.is_empty() {
+        let names: Vec<&str> = carried
+            .iter()
+            .map(|&t| crate::sim::blood::trait_name(t))
+            .collect();
+        labelled(
+            out,
+            "    Carries",
+            &names.join(", "),
+            w2,
+            Rgb(200, 140, 240),
+        );
+    }
+    if per.inbred > 0.12 {
+        out.push(line(
+            format!(
+                "    Blood     parents of one line ({:.0}% shared), and {} for it",
+                per.inbred * 100.0,
+                if per.vigour < 0.85 {
+                    "the weaker"
+                } else {
+                    "no weaker"
+                }
+            ),
+            Rgb(220, 140, 130),
+            0,
+        ));
+    }
     if let Some(sp) = per.spouse {
         out.push(line(
             format!("[m] Married   {}", w.persons[sp].full_name()),

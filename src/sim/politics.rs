@@ -1428,7 +1428,7 @@ pub fn rulers(w: &mut World) {
         };
         let per = &w.persons[r];
         let age = (w.year - per.born) as f32;
-        let lifespan = w.races[per.race].lifespan;
+        let lifespan = (w.races[per.race].lifespan * per.vigour).max(1.0);
         let rel = age / lifespan;
         let p_nat = tn.ruler_death_base + tn.ruler_death_age_weight * rel.powi(6);
         let stability = w.polities[p].stability;

@@ -283,7 +283,9 @@ fn mortality(w: &mut World) {
                 continue;
             }
         }
-        let lifespan = w.races[per.race].lifespan.max(1.0);
+        // A weak constitution shortens a life: the span a person is
+        // measured against is their people's, scaled by their own blood.
+        let lifespan = (w.races[per.race].lifespan * per.vigour).max(1.0);
         let rel = per.age(w.year) as f32 / lifespan;
         let p_die = tn.ruler_death_base + tn.ruler_death_age_weight * rel.powi(6);
         if !rng.chance(p_die as f64) {
@@ -318,7 +320,8 @@ fn child_deaths(w: &mut World) {
             if !w.persons[h].alive() || w.persons[h].age(w.year) >= MAJORITY {
                 continue;
             }
-            if !rng.chance(w.tuning.child_death_chance) {
+            let frailty = (2.0 - w.persons[h].vigour).clamp(0.85, 1.9) as f64;
+            if !rng.chance(w.tuning.child_death_chance * frailty) {
                 continue;
             }
             w.persons[h].died = Some(w.year);
@@ -631,7 +634,13 @@ fn births(w: &mut World) {
             continue;
         }
         let fecund = w.races[w.persons[r].race].fecund;
-        let chance = w.tuning.birth_chance * (0.6 + fecund as f64) * (1.0 - rel as f64).max(0.1);
+        // A line that has married its own for generations does not breed
+        // as readily as one that married out.
+        let stock = (w.persons[r].vigour + w.persons[spouse].vigour) * 0.5;
+        let chance = w.tuning.birth_chance
+            * (0.6 + fecund as f64)
+            * (1.0 - rel as f64).max(0.1)
+            * stock as f64;
         if !rng.chance(chance) {
             continue;
         }
@@ -639,8 +648,14 @@ fn births(w: &mut World) {
             continue;
         }
         let culture = w.polities[p].culture;
-        let traits = w.persons[r].traits.inherit(&rng);
-        let child = w.new_person(culture, Role::Noble, Some(p), w.year, Some(traits));
+        // Both parents, at last. The consort has been a real person with
+        // real traits since marriages were built, and contributed nothing
+        // to their own children until now.
+        let born = super::blood::conceive(w, r, spouse, &rng);
+        let child = w.new_person(culture, Role::Noble, Some(p), w.year, Some(born.traits));
+        w.persons[child].genes = born.genes;
+        w.persons[child].vigour = born.vigour;
+        w.persons[child].inbred = born.inbred;
         w.persons[child].parent = Some(r);
         if let Some(h) = w.polities[p].house {
             w.join_house(child, h);
@@ -655,6 +670,7 @@ fn births(w: &mut World) {
             w.capital_cell(p),
             text,
         );
+        super::blood::note_if_remarkable(w, child, p, (r, spouse), born.surfaced);
     }
 }
 
