@@ -1100,6 +1100,297 @@ fn time_each_century() {
     println!("worst century: {:.3} ms/year", worst);
 }
 
+/// The stability breakdown must name the number the realm is drifting
+/// towards.
+///
+/// `explain::stability_factors` mirrors the target that `politics::economy`
+/// computes each year, and the module says so at the top of the file — but
+/// saying so is not a guarantee, and the mirror had already drifted. Its
+/// treasury term was a second copy of a ratio against a ceiling of six
+/// hundred. When the ceiling was removed the simulation moved to a
+/// saturating curve and the copy went on dividing, so a realm holding three
+/// thousand was told its full treasury was worth a hundred and four points
+/// of stability — five times more than anything in the list can be worth,
+/// and printed at the top of the page as the reason for everything.
+///
+/// A drift like that is invisible in the simulation and plain in the
+/// explanation, which is the argument for checking the explanation against
+/// the simulation rather than against itself.
+///
+/// Two demands, because stability has many writers and income has few. A
+/// rebellion, a persecution, a rival's knife and a dozen other things move
+/// it directly, so a single year cannot be held to the target exactly — the
+/// *typical* year can, which is what the median is for. And no single pull
+/// on a number that lives between nought and one may be worth more than a
+/// good fraction of that range, which is the bound the broken term failed
+/// by a factor of two and which needs no statistics at all.
+#[test]
+fn the_stability_breakdown_names_the_right_target() {
+    use crate::sim::explain;
+    let mut w = world(43);
+    run(&mut w, 200);
+    // A realm richer than the old ceiling, because that is the regime the
+    // drift showed up in and a young world never reaches it on its own. With
+    // the broken term this one line is enough: three thousand against a
+    // divisor of six hundred is a pull worth one whole point of stability.
+    {
+        let rich = *w
+            .alive_polities
+            .first()
+            .expect("a 200 year world has realms");
+        for t in [3_000.0f32, 50_000.0] {
+            w.polities[rich].treasury = t;
+            for f in explain::stability_factors(&w, rich) {
+                assert!(
+                    f.weight.abs() <= 0.6,
+                    "a realm holding {:.0} is told {:?} is worth {:.2} of a \
+                     stability range of 1.0",
+                    t,
+                    f.text,
+                    f.weight
+                );
+            }
+        }
+        w.polities[rich].treasury = 0.0;
+    }
+
+    let mut errors: Vec<f32> = Vec::new();
+    let mut widest = (0.0f32, String::new());
+    for _ in 0..80 {
+        let before: Vec<(usize, f32, f32)> = w
+            .alive_polities
+            .iter()
+            .copied()
+            .map(|p| (p, w.polities[p].stability, explain::stability_target(&w, p)))
+            .collect();
+        // No pull on stability may be worth more than a good fraction of the
+        // range stability lives in. The broken treasury term was worth 104
+        // points out of 100.
+        for &(p, _, _) in &before {
+            for f in explain::stability_factors(&w, p) {
+                if f.weight.abs() > widest.0 {
+                    widest = (f.weight.abs(), f.text.clone());
+                }
+            }
+        }
+        w.tick();
+        for (p, was, target) in before {
+            if !w.polities[p].alive() {
+                continue;
+            }
+            let now = w.polities[p].stability;
+            // Clamped at both ends, and jostled by a small random nudge each
+            // year, so a year spent against either limit says nothing.
+            if !(0.02..=0.98).contains(&now) || !(0.02..=0.98).contains(&was) {
+                continue;
+            }
+            let want = (target - was) * w.tuning.stability_adjust_rate;
+            errors.push((now - was - want).abs());
+        }
+    }
+    assert!(
+        widest.0 <= 0.6,
+        "a single pull on stability is worth {:.2} of a range of 1.0: {:?}",
+        widest.0,
+        widest.1
+    );
+    assert!(
+        errors.len() > 300,
+        "only {} realm-years were checked",
+        errors.len()
+    );
+    errors.sort_by(f32::total_cmp);
+    let median = errors[errors.len() / 2];
+    // The yearly nudge alone is worth 0.02, so this is the nudge and little
+    // else.
+    assert!(
+        median <= 0.022,
+        "the typical year missed the breakdown's target by {:.4}",
+        median
+    );
+}
+
+/// A treasury must settle at what a realm earns, not climb with the years.
+///
+/// Gold used to be pinned by a ceiling of six hundred, and the ceiling
+/// destroyed every fact about wealth above it: eight of the ten richest
+/// realms in a world sat at exactly the cap, drawing the identical bonus to
+/// their stability. What the cap was standing in for is a drain — a
+/// treasury's only cost was upkeep, which scales with the army and the land
+/// and not at all with how full the coffers are, so gold was an accumulator
+/// with no matching outflow.
+///
+/// Three drains replace it, all proportional to wealth: a court that spends
+/// what it has, corruption that skims the tax roll, and soldiers bought with
+/// gold who then cost upkeep. The invariant they buy is the one that matters
+/// — the same one the schools and the martyrs needed — that the quantity
+/// settles where its inflow and outflow meet rather than growing with the
+/// length of the game.
+///
+/// So this asserts the settling point: a treasury near what the court's
+/// share implies, and not a figure that depends on how long the world has
+/// run. The second half of the test switches the drains off and demands that
+/// the bound *fails*, because a bound nothing can breach proves nothing —
+/// and without them a world reaches a million and a half.
+#[test]
+fn a_treasury_settles_at_what_a_realm_earns() {
+    use crate::sim::explain;
+    let bound = |w: &World| -> (f32, f32, usize) {
+        // Where the court's share puts the equilibrium: the war chest, plus
+        // what a realm earns divided by the fraction spent above it. Six
+        // times over is generous for the richest realm in a world.
+        let share = w.tuning.court_spend_share.max(0.0001);
+        let mut worst = (0.0f32, 0.0f32, 0usize);
+        for &p in &w.alive_polities {
+            let t = w.polities[p].treasury;
+            let gross: f32 = explain::income_factors(w, p)
+                .iter()
+                .filter(|f| f.weight > 0.0)
+                .map(|f| f.weight)
+                .sum();
+            let ceiling = w.tuning.court_reserve + gross / share * 6.0;
+            if t / ceiling.max(1.0) > worst.0 / worst.1.max(1.0) {
+                worst = (t, ceiling, p);
+            }
+        }
+        worst
+    };
+
+    let mut w = world(37);
+    run(&mut w, 1500);
+    let (held, ceiling, p) = bound(&w);
+    assert!(
+        held <= ceiling,
+        "realm {} holds {:.0} against a settling point of {:.0}",
+        p,
+        held,
+        ceiling
+    );
+    assert!(
+        held > w.tuning.court_reserve,
+        "no realm in a 1500 year world got past its war chest ({:.0} held)",
+        held
+    );
+
+    // And the same world with nothing draining it must break that bound,
+    // because otherwise the bound is not measuring the drains.
+    let mut loose = world(37);
+    loose.tuning.court_spend_share = 0.0;
+    loose.tuning.corruption_decadence_weight = 0.0;
+    loose.tuning.corruption_sprawl_weight = 0.0;
+    loose.tuning.army_gold_weight = 0.0;
+    run(&mut loose, 1500);
+    let richest = loose
+        .alive_polities
+        .iter()
+        .map(|&p| loose.polities[p].treasury)
+        .fold(0.0f32, f32::max);
+    // Compared against the *tuned* settling point, since the loose world has
+    // no share to divide by.
+    let tuned_ceiling = ceiling.max(w.tuning.court_reserve * 4.0);
+    assert!(
+        richest > tuned_ceiling,
+        "with no drains the richest realm held only {:.0}, under {:.0} — the \
+         bound above is not measuring anything",
+        richest,
+        tuned_ceiling
+    );
+}
+
+/// Wealth rots a court, and the rot takes its cut of the next tax roll.
+///
+/// The point of spending gold on splendour is that it is not free: it buys
+/// prestige and it buys decadence, and decadence is worth a great deal of
+/// stability and a share of the revenue. Before this, decadence grew from a
+/// realm's *age* and its overextension and never from its riches, so an
+/// empire at the height of its wealth rotted at exactly the same rate as one
+/// scraping by.
+#[test]
+fn a_rich_court_rots_and_skims() {
+    use crate::sim::{corruption_share, court_spending};
+    let w = world(41);
+    let tn = &w.tuning;
+
+    // A court spends only what is above the war chest, and more of it the
+    // richer it is.
+    assert_eq!(court_spending(tn, tn.court_reserve - 1.0), 0.0);
+    assert_eq!(court_spending(tn, 0.0), 0.0);
+    let modest = court_spending(tn, tn.court_reserve + 100.0);
+    let grand = court_spending(tn, tn.court_reserve + 1000.0);
+    assert!(modest > 0.0 && grand > modest * 5.0);
+
+    // Rot and distance both take a cut, and together they are bounded: a
+    // realm that collected nothing at all would simply dissolve.
+    assert_eq!(corruption_share(tn, 0.0, 1.0), 0.0);
+    assert!(corruption_share(tn, 1.0, 1.0) > corruption_share(tn, 0.3, 1.0));
+    assert!(corruption_share(tn, 0.0, 2.0) > corruption_share(tn, 0.0, 1.0));
+    assert!(corruption_share(tn, 1.0, 9.0) <= 0.75);
+
+    // And a realm really does rot as it spends. Compared within one world
+    // rather than between two, because two worlds given different rules
+    // diverge on the first die roll and are then not comparable at all: the
+    // first attempt at this ran a spendthrift world against a frugal one and
+    // found the frugal one *more* decadent, for the good reason that a court
+    // which hoards its gold buys an army, conquers more than it can govern
+    // and rots from overextension instead.
+    //
+    // So one world is forked through a save file, which is the only way to
+    // get two identical copies of it, and each fork runs a single year.
+    let mut seed_world = world(41);
+    run(&mut seed_world, 300);
+    let bytes = ser::save(&mut seed_world);
+    let rich = *seed_world
+        .alive_polities
+        .first()
+        .expect("a 300 year world has a realm");
+
+    let rot = |spend: f32| -> f32 {
+        let mut w = ser::load(&bytes).expect("a fresh save must load");
+        w.tuning.court_spend_share = spend;
+        // Given far more than any war chest needs, so the court has
+        // something to be extravagant with.
+        w.polities[rich].treasury = w.tuning.court_reserve + 2000.0;
+        let before = w.polities[rich].decadence;
+        w.tick();
+        w.polities[rich].decadence - before
+    };
+    let spending = rot(0.25);
+    let frugal = rot(0.0);
+    assert!(
+        spending > frugal,
+        "a court given two thousand to spend rotted by {:.5}, and one \
+         forbidden to spend it by {:.5}",
+        spending,
+        frugal
+    );
+}
+
+/// Gold buys confidence on a curve, not against a ceiling.
+#[test]
+fn wealth_saturates_rather_than_capping() {
+    use crate::sim::{treasury_confidence, wealth_reach};
+    let w = world(3);
+    let tn = &w.tuning;
+    // Monotonic, and it never reaches one however much is hoarded — so
+    // there is a gradient all the way up and no cliff at the top. The ratio
+    // this replaced gave every wealthy realm the identical bonus.
+    let mut last = treasury_confidence(tn, 0.0);
+    for t in [50.0f32, 200.0, 600.0, 3000.0, 100_000.0] {
+        let v = treasury_confidence(tn, t);
+        assert!(v > last, "confidence fell from {} to {} at {}", last, v, t);
+        assert!(v < 1.0);
+        last = v;
+    }
+    // Debt is worth something on its own account, and bounded.
+    assert!(treasury_confidence(tn, -10.0) < 0.0);
+    assert!(treasury_confidence(tn, -1.0e9) >= -0.2);
+    // And what a hoard can buy is bounded too, or a rich realm fields an
+    // army its people could not feed.
+    assert!(wealth_reach(tn, 0.0) == 0.0);
+    assert!(wealth_reach(tn, 1.0e9) < 1.0);
+    assert!(wealth_reach(tn, tn.court_reserve) > 0.4);
+}
+
 /// A realm's books at the start of a year, for [`the_income_breakdown_adds_up`].
 struct Books {
     realm: usize,
@@ -1449,5 +1740,169 @@ fn time_the_interface() {
             tab(5),
             tab(9),
         );
+    }
+}
+
+/// A list filter can ask what things are, not only what they are called.
+///
+/// The filter matched the text of a rendered row, which answers one question
+/// well and every other question not at all: "which realms are running a
+/// deficit" is not in the text of a row and is in the world.
+#[test]
+fn a_list_can_be_asked_a_question() {
+    use crate::sim::chronicle::Ref;
+    use crate::ui::query::{self, Op, Term};
+    let mut w = world(31);
+    run(&mut w, 400);
+
+    // Parsing: a comparison, and anything else as a word to look for.
+    match &query::parse("lands>200")[0] {
+        Term::Compare { field, op, value } => {
+            assert_eq!(field, "lands");
+            assert_eq!(*op, Op::Gt);
+            assert_eq!(*value, 200.0);
+        }
+        other => panic!("expected a comparison, got {:?}", other),
+    }
+    // `>=` must not parse as `>` and leave an `=` behind.
+    match &query::parse("stability>=30")[0] {
+        Term::Compare { op, value, .. } => {
+            assert_eq!(*op, Op::Ge);
+            assert_eq!(*value, 30.0);
+        }
+        other => panic!("expected a comparison, got {:?}", other),
+    }
+    // A half-typed query is a word, not a term that matches nothing: the
+    // filter is typed one character at a time.
+    assert!(matches!(&query::parse("lands>")[0], Term::Text(_)));
+
+    // And the comparisons agree with the world. The bar is taken from the
+    // world rather than written down, so the test does not depend on how
+    // large a realm grows on a test-sized map.
+    let largest = w
+        .alive_polities
+        .iter()
+        .map(|&p| w.polities[p].cells)
+        .max()
+        .expect("a 400 year world has realms");
+    let bar = largest / 2;
+    let big = query::parse(&format!("lands>{}", bar));
+    let mut over = 0;
+    for &p in &w.alive_polities {
+        let r = Ref::Polity(p);
+        let admitted = query::matches(&w, r, "", &big);
+        assert_eq!(
+            admitted,
+            w.polities[p].cells > bar,
+            "realm {} holds {} lands against a bar of {}",
+            p,
+            w.polities[p].cells,
+            bar
+        );
+        over += usize::from(admitted);
+    }
+    assert!(over > 0, "nothing passed a bar of half the largest realm");
+
+    // Terms combine, and a field that does not apply to a kind of thing
+    // matches nothing rather than everything.
+    let both = query::parse(&format!("lands>{} stability<200", bar));
+    assert!(w
+        .alive_polities
+        .iter()
+        .any(|&p| query::matches(&w, Ref::Polity(p), "", &both)));
+    let wrong = query::parse("prosperity>0");
+    assert!(
+        !w.alive_polities
+            .iter()
+            .any(|&p| query::matches(&w, Ref::Polity(p), "", &wrong)),
+        "a realm answered a question about prosperity, which is a city's"
+    );
+
+    // Every page that advertises fields must advertise ones that work.
+    for tab in 0..crate::ui::detail::LIST_TABS.len() {
+        let (rows, _) = crate::ui::detail::list_rows(&w, tab);
+        for field in query::fields_for(tab).split_whitespace() {
+            assert!(
+                rows.iter()
+                    .any(|(_, r)| query::value_of(&w, *r, field).is_some()),
+                "page {} offers {:?} and no row of it answers to that",
+                crate::ui::detail::LIST_TABS[tab],
+                field
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn probe_treasuries() {
+    let env = |k: &str, d: usize| -> usize {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let mut w = World::new(7, env("W", 288), env("H", 144), Detail::Medium);
+    // With NEUTRAL=1 the new drains are switched off, which isolates what
+    // they did to the world from what the world was already doing.
+    if std::env::var("NEUTRAL").is_ok() {
+        w.tuning.court_spend_share = 0.0;
+        w.tuning.corruption_decadence_weight = 0.0;
+        w.tuning.corruption_sprawl_weight = 0.0;
+        w.tuning.army_gold_weight = 0.0;
+    }
+    for c in 0..env("C", 50) {
+        run(&mut w, 100);
+        let mut t: Vec<f32> = w
+            .alive_polities
+            .iter()
+            .map(|&p| w.polities[p].treasury)
+            .collect();
+        t.sort_by(f32::total_cmp);
+        let n = t.len().max(1);
+        let pick = |q: f32| {
+            t.get(((n as f32 - 1.0) * q) as usize)
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let mean_dec: f32 = w
+            .alive_polities
+            .iter()
+            .map(|&p| w.polities[p].decadence)
+            .sum::<f32>()
+            / n as f32;
+        let mut st: Vec<f32> = w
+            .alive_polities
+            .iter()
+            .map(|&p| w.polities[p].stability)
+            .collect();
+        st.sort_by(f32::total_cmp);
+        let sq = |q: f32| {
+            st.get(((st.len().max(1) as f32 - 1.0) * q) as usize)
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let mean_army: f32 = w
+            .alive_polities
+            .iter()
+            .map(|&p| w.polities[p].army)
+            .sum::<f32>()
+            / n as f32;
+        if c % 5 == 0 || c + 1 == env("C", 50) {
+            println!(
+                "year {:>5}: realms {:>4} treasury med {:>9.0} p90 {:>9.0} max {:>10.0} \
+                 | decadence {:.2} stability p10 {:.2} med {:.2} p90 {:.2} army {:>7.1}",
+                w.year,
+                n,
+                pick(0.5),
+                pick(0.9),
+                t.last().copied().unwrap_or(0.0),
+                mean_dec,
+                sq(0.1),
+                sq(0.5),
+                sq(0.9),
+                mean_army
+            );
+        }
     }
 }

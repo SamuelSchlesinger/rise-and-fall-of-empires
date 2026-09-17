@@ -7,7 +7,7 @@ use crate::sim::{SchoolKind, Stance, World};
 use crate::term::{self, Rgb, BOLD, DIM};
 use std::cmp::Ordering;
 
-pub const LIST_TABS: [&str; 11] = [
+pub const LIST_TABS: [&str; 13] = [
     "Realms",
     "Cities",
     "Peoples",
@@ -19,6 +19,12 @@ pub const LIST_TABS: [&str; 11] = [
     "Prophecies",
     "Figures",
     "Houses",
+    // Two views of the economy. Kept as their own pages rather than as more
+    // columns on Realms and Cities, which are already as wide as a narrow
+    // terminal will take — and because sorting realms by what they are
+    // worth is a different question from sorting them by how large they are.
+    "Wealth",
+    "Roads",
 ];
 
 pub struct Line {
@@ -367,6 +373,16 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
     out
 }
 
+/// The quantities a list page's rows can be compared on, for the hint line.
+pub fn query_fields(tab: usize) -> String {
+    let fields = crate::ui::query::fields_for(tab);
+    if fields.is_empty() {
+        return String::new();
+    }
+    let first = fields.split_whitespace().next().unwrap_or("");
+    format!("filter by name, or {}>0 — {}", first, fields)
+}
+
 pub fn list_header(tab: usize) -> &'static str {
     match tab {
         0 => "  name                              kind          lands    people  stability          ruler",
@@ -379,6 +395,8 @@ pub fn list_header(tab: usize) -> &'static str {
         7 => "  relic                                   kind      made   held by",
         9 => "  figure                        points  realm               lived      chiefly remembered for",
         10 => "  house                               people           ruled  thrones  span",
+        11 => "  realm                             treasury   a year   devt   trade  prosperity",
+        12 => "  road                                            worth  carrying          since",
         _ => "  prophecy                                                          seer                 by     outcome",
     }
 }
@@ -744,6 +762,83 @@ pub fn list_rows(w: &World, tab: usize) -> (Vec<(String, Ref)>, usize) {
                     span
                 );
                 rows.push((row, Ref::House(h)));
+            }
+        }
+        // What each realm is worth, richest first, with what it is gaining
+        // or losing a year beside it: a realm with a full treasury and a
+        // deficit is a different thing from one with the same treasury and
+        // a surplus, and nothing in the interface said so.
+        11 => {
+            let mut ps: Vec<usize> = w.alive_polities.clone();
+            // Treasury first, then what the year will bring. Most great
+            // realms sit at the ceiling of what a treasury can hold, so
+            // without the second key the page was ten realms tied at the
+            // cap in arbitrary order — and a realm with a full treasury and
+            // a deficit is a different thing from one with a surplus.
+            total = keep_best_by_key(&mut ps, LIST_CAP, |p| {
+                (
+                    std::cmp::Reverse((w.polities[p].treasury * 100.0) as i64),
+                    std::cmp::Reverse((explain::income_total(w, p) * 100.0) as i64),
+                )
+            });
+            for p in ps {
+                let pol = &w.polities[p];
+                let prosp = if pol.cities.is_empty() {
+                    0.0
+                } else {
+                    pol.cities
+                        .iter()
+                        .map(|&c| w.cities[c].prosperity)
+                        .sum::<f32>()
+                        / pol.cities.len() as f32
+                };
+                let row = format!(
+                    "{:<34}{:>8.0}  {:>+7.1}  {:>5.2}  {:>6.1}  {:>6.0}%",
+                    clip(&pol.name, 33),
+                    pol.treasury,
+                    explain::income_total(w, p),
+                    pol.dev,
+                    w.realm_trade(p),
+                    prosp * 100.0
+                );
+                rows.push((row, Ref::Polity(p)));
+            }
+        }
+        // The roads themselves, busiest first. The Trade layer draws the
+        // network; this is the same network as a list that can be sorted and
+        // searched, which is the only way to find the one road a war has
+        // shut.
+        12 => {
+            let mut rs: Vec<usize> = (0..w.routes.len())
+                .filter(|&i| {
+                    w.cities[w.routes[i].a].destroyed.is_none()
+                        && w.cities[w.routes[i].b].destroyed.is_none()
+                })
+                .collect();
+            total = keep_best_by_key(&mut rs, LIST_CAP, |i| {
+                (
+                    !w.routes[i].open,
+                    std::cmp::Reverse((w.routes[i].value * 100.0) as i64),
+                )
+            });
+            for i in rs {
+                let r = &w.routes[i];
+                let row = format!(
+                    "{:<46}{:>7.1}  {:<16}{:>6}",
+                    clip(
+                        &format!(
+                            "{} — {}{}",
+                            w.cities[r.a].name,
+                            w.cities[r.b].name,
+                            if r.by_sea { " (by sea)" } else { "" }
+                        ),
+                        45
+                    ),
+                    r.value,
+                    if r.open { "open" } else { "shut by war" },
+                    r.since
+                );
+                rows.push((row, Ref::City(r.a)));
             }
         }
         _ => {

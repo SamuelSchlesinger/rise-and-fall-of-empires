@@ -991,6 +991,75 @@ const MEANINGFUL_WORLD: usize = 300;
 const SEA_REACH_BASE: f32 = 3.0;
 
 /// The phases of a tick, in the order `World::tick` runs them.
+/// How deep into debt a crown may go. Past this its army melts away, which
+/// is the only hard limit a treasury has.
+///
+/// There is deliberately no ceiling to match it. There was — six hundred,
+/// written out in four places, three of which enforced it — and it had to
+/// go, because a cap destroys every fact about wealth above it. The moment
+/// there was a page ranking realms by what they held, eight of the first ten
+/// were tied at exactly the cap, and every one of them drew the identical
+/// `the treasury is full` on its stability, because that read as a ratio
+/// against the ceiling.
+///
+/// What a cap was standing in for is a drain. A treasury's only cost was
+/// upkeep, which scales with the army and the land and not at all with how
+/// full the coffers are, so gold was an accumulator with no matching
+/// outflow — the same shape as the schools that compounded and the martyrs
+/// that piled up, and the reason the number had to be pinned rather than
+/// balanced. Three drains replace it, all proportional to wealth:
+/// [`court_spending`], [`corruption_share`] and the gold term in
+/// `politics::economy`'s army target.
+pub const TREASURY_FLOOR: f32 = -60.0;
+
+/// What a crown's court spends this year out of a treasury of `treasury`.
+///
+/// Everything above the war chest is fair game, at a fixed share. Shared
+/// between the simulation and `explain` so the two cannot disagree about
+/// where the money went.
+pub fn court_spending(tn: &tuning::Tuning, treasury: f32) -> f32 {
+    (treasury - tn.court_reserve).max(0.0) * tn.court_spend_share
+}
+
+/// What share of the tax roll never reaches the crown.
+///
+/// A rotten court takes its cut, and so does distance: a province beyond
+/// the reach the crown can comfortably govern remits less of what it
+/// collects. Capped well below everything, because a realm that collected
+/// nothing at all would simply dissolve and the interesting case is the one
+/// that limps.
+pub fn corruption_share(tn: &tuning::Tuning, decadence: f32, sprawl: f32) -> f32 {
+    let rot = decadence.clamp(0.0, 1.0) * tn.corruption_decadence_weight;
+    let far = (sprawl - 1.0).clamp(0.0, 2.0) * tn.corruption_sprawl_weight;
+    (rot + far).clamp(0.0, 0.75)
+}
+
+/// How far a crown's wealth carries it towards whatever the wealth can buy,
+/// in `[0, 1)`.
+///
+/// Saturating on the war chest, so that a hoard cannot go on buying without
+/// limit. The army term wanted a plain ratio at first, and a realm sitting
+/// on twenty years' income then fielded eight times the soldiers its people
+/// could support — which is not a rich realm, it is a different game.
+pub fn wealth_reach(tn: &tuning::Tuning, treasury: f32) -> f32 {
+    let t = treasury.max(0.0);
+    t / (t + tn.court_reserve.max(1.0))
+}
+
+/// How much confidence a crown's money buys, in `[-0.2, 1]`.
+///
+/// Saturating rather than a ratio against a ceiling, so that there is a
+/// gradient all the way up and no cliff at the top: the first hundred in the
+/// treasury is worth far more than the thousandth.
+pub fn treasury_confidence(tn: &tuning::Tuning, treasury: f32) -> f32 {
+    if treasury <= 0.0 {
+        // Debt is worth something on its own account, and bounded, because
+        // a realm cannot be infinitely alarmed.
+        return (treasury / tn.treasury_stability_half).max(-0.2);
+    }
+    treasury / (treasury + tn.treasury_stability_half.max(1.0))
+}
+
 pub const PHASES: [&str; 28] = [
     "grow_and_migrate",
     "form_polities",

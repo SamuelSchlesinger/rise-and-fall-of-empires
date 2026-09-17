@@ -28,6 +28,7 @@ use super::chronicle::{EventKind, Ref};
 use super::prose;
 use super::World;
 use crate::geo::{Biome, Terrain};
+use std::collections::BTreeMap;
 
 /// What a stretch of country is worth sending somewhere else.
 ///
@@ -216,6 +217,20 @@ fn hinterland(w: &World, city: usize) -> u16 {
 /// route only pays for something dear — which is why spice travels further
 /// than grain, and why the cities that grow rich are the ones in between.
 pub fn refresh(w: &mut World) {
+    // What the roads that already exist have been doing, so that rebuilding
+    // the network does not make them forget it. Every twentieth year this
+    // function replaced the whole list with fresh routes marked open as of
+    // this year — which meant a road shut by a war came back open until
+    // `open_and_close` corrected it later the same tick, and, worse, that
+    // `since` was reset for every road in the world. `since` is what stops
+    // the chronicle reporting the same two cities every three years, so
+    // resetting it silenced the reports for a decade after every rebuild,
+    // and it is what the Roads page shows, where it read as though every
+    // road in the world had been laid in the same year.
+    let mut history: BTreeMap<(usize, usize), (bool, i32)> = BTreeMap::new();
+    for r in &w.routes {
+        history.insert((r.a.min(r.b), r.a.max(r.b)), (r.open, r.since));
+    }
     let live: Vec<usize> = (0..w.cities.len())
         .filter(|&c| w.cities[c].destroyed.is_none())
         .collect();
@@ -255,13 +270,17 @@ pub fn refresh(w: &mut World) {
             if value < 0.35 {
                 continue;
             }
+            let (open, since) = history
+                .get(&(a.min(b), a.max(b)))
+                .copied()
+                .unwrap_or((true, w.year));
             routes.push(Route {
                 a,
                 b,
                 value,
                 by_sea,
-                open: true,
-                since: w.year,
+                open,
+                since,
             });
         }
     }

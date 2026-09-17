@@ -826,8 +826,25 @@ pub fn economy(w: &mut World) {
         income += pol.cells as f32 * tn.cell_income_factor * (1.0 + pol.dev);
         income += trade_income * tn.trade_toll_factor;
         income *= tech_income;
+        // What never reaches the treasury. A rotten court and a long road to
+        // the capital both take their cut of the tax roll before the crown
+        // sees it, which is what gives economic decline a cause of its own
+        // rather than leaving it a consequence of losing wars.
+        let skim = super::corruption_share(&tn, pol.decadence, pol.sprawl);
+        income *= 1.0 - skim;
         let upkeep = pol.army * tn.army_upkeep_factor + pol.cells as f32 * tn.cell_upkeep_factor;
-        pol.treasury = (pol.treasury + income - upkeep).clamp(-60.0, 600.0);
+        // And what the court spends, which is the drain that makes a ceiling
+        // unnecessary: everything above the war chest is fair game, so the
+        // richer a crown is the more it burns, and the burning rots it.
+        let spend = super::court_spending(&tn, pol.treasury);
+        pol.treasury = (pol.treasury + income - upkeep - spend).max(super::TREASURY_FLOOR);
+        if spend > 0.0 {
+            // Gold spent on a court is not wasted — it is how a dynasty is
+            // remembered — but it is how a dynasty rots, too.
+            let scale = spend / tn.court_reserve.max(1.0);
+            pol.prestige += scale * tn.court_prestige_rate;
+            pol.decadence = (pol.decadence + scale * tn.court_decadence_rate).clamp(0.0, 1.0);
+        }
         // Army.
         let kind_mult = match pol.kind {
             PolityKind::Horde => 2.2,
@@ -843,7 +860,11 @@ pub fn economy(w: &mut World) {
             * (1.0 + pol.dev * 0.5)
             * army_mult
             * art_mult
-            * tech_army;
+            * tech_army
+            // Gold buys soldiers, and the soldiers then cost upkeep for as
+            // long as they stand: the third drain, and the one that turns a
+            // hoard into something the rest of the world has to reckon with.
+            * (1.0 + super::wealth_reach(&tn, pol.treasury) * tn.army_gold_weight);
         let rate = if at_war {
             tn.army_build_rate_war
         } else {
@@ -910,7 +931,7 @@ pub fn economy(w: &mut World) {
             + tech_order
             + (avg_prosp - 0.4) * 0.15
             + vals.tradition * 0.05
-            + (pol.treasury / 600.0).max(-0.2) * 0.2;
+            + super::treasury_confidence(&tn, pol.treasury) * 0.2;
         pol.stability +=
             (target - pol.stability) * tn.stability_adjust_rate + rng.range32(-0.02, 0.02);
         pol.stability = pol.stability.clamp(0.0, 1.0);

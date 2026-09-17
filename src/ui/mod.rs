@@ -7,6 +7,7 @@ mod commands;
 pub(crate) mod detail;
 mod input;
 mod learn;
+pub mod query;
 mod recap;
 mod render;
 mod words;
@@ -627,6 +628,18 @@ pub fn snapshot(
         "recap-realm" => ui.open_recap(Some(100)),
         "tour" => ui.tour = true,
         "list" => ui.mode = Mode::List,
+        // Any list page by name, so a snapshot can depict one. `:list
+        // wealth` reaches the same page in play.
+        name if detail::LIST_TABS
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(name)) =>
+        {
+            ui.list_tab = detail::LIST_TABS
+                .iter()
+                .position(|t| t.eq_ignore_ascii_case(name))
+                .unwrap_or(0);
+            ui.mode = Mode::List;
+        }
         "chronicle" => {
             ui.mode = Mode::Chronicle;
             ui.chron_min = 2;
@@ -1160,10 +1173,14 @@ impl Ui {
         if self.list_filter.is_empty() {
             return (rows, total);
         }
-        let f = self.list_filter.to_lowercase();
+        // A filter term is a word to look for or a comparison against a
+        // named quantity — `lands>200`, `income<0` — so a list can be asked
+        // what things *are* and not only what they are called. See
+        // [`query`].
+        let terms = query::parse(&self.list_filter);
         (
             rows.into_iter()
-                .filter(|(s, _)| s.to_lowercase().contains(&f))
+                .filter(|(text, r)| query::matches(&self.world, *r, text, &terms))
                 .collect(),
             total,
         )

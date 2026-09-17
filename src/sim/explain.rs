@@ -64,6 +64,10 @@ pub fn income_factors(w: &World, p: usize) -> Vec<Factor> {
     }
     let tn = &w.tuning;
     let pol = &w.polities[p];
+    // The sources are what each place is assessed for, and what never
+    // arrives is a line of its own below. The other way round — netting the
+    // loss off each source — hides the thing the reader wants to know,
+    // which is whether the realm is poor or merely badly run.
     let tech = w.tech_income_mult(p);
     // Cities, each one's own line when it is worth a line, because the
     // interesting case is a realm living off one port.
@@ -104,6 +108,22 @@ pub fn income_factors(w: &World, p: usize) -> Vec<Factor> {
         tolls,
         "tolls on the roads and the harbours".to_string(),
     );
+    // What never arrives. Stated as its own loss rather than folded
+    // silently into the sources above, because the reader's question is
+    // whether the realm is poor or merely badly run.
+    let gross: f32 = out.iter().map(|f| f.weight).sum();
+    let skim = crate::sim::corruption_share(tn, pol.decadence, pol.sprawl);
+    if skim > 0.0 {
+        let lost = gross * skim;
+        let why = if pol.decadence * tn.corruption_decadence_weight
+            > (pol.sprawl - 1.0).max(0.0) * tn.corruption_sprawl_weight
+        {
+            "taken by the court before it arrives"
+        } else {
+            "lost on the long road to the capital"
+        };
+        push(&mut out, -lost, format!("{:.0}% {}", skim * 100.0, why));
+    }
     // And what it all costs.
     push(
         &mut out,
@@ -114,6 +134,14 @@ pub fn income_factors(w: &World, p: usize) -> Vec<Factor> {
         &mut out,
         -(pol.cells as f32 * tn.cell_upkeep_factor),
         "governors, garrisons and roads".to_string(),
+    );
+    // What the court will spend of what is already in hand. Not a cost of
+    // government but of splendour, and the reason a treasury has no ceiling.
+    let spend = crate::sim::court_spending(tn, pol.treasury);
+    push(
+        &mut out,
+        -spend,
+        "the court's own expenses and splendour".to_string(),
     );
     // Gains largest first, then the costs, rather than everything ranked by
     // size together: a page shows the first handful of a block, and the two
@@ -298,10 +326,15 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         "old custom binds the people to the throne".into(),
     );
 
-    // The treasury.
+    // The treasury. Through the shared curve, not a ratio of its own: this
+    // was a second copy of the old one, dividing by a ceiling of six hundred
+    // that no longer exists, and when the ceiling went it went on dividing —
+    // so a realm sitting on three thousand was told its full treasury was
+    // worth a hundred and four points of stability, five times more than
+    // anything can be worth.
     push(
         &mut out,
-        (pol.treasury / 600.0).max(-0.2) * 0.2,
+        crate::sim::treasury_confidence(&w.tuning, pol.treasury) * 0.2,
         if pol.treasury >= 0.0 {
             "the treasury is full".into()
         } else {

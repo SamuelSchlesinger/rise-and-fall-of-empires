@@ -94,6 +94,11 @@ impl Ui {
                 rows.len(),
                 self.list_filter
             ))
+        } else if !detail::query_fields(self.list_tab).is_empty() && total <= rows.len() {
+            // What may be asked of this page. A filter that can compare
+            // numbers is no use to anybody who cannot discover the names of
+            // the numbers, and they differ from page to page.
+            Some(format!(" / {} ", detail::query_fields(self.list_tab)))
         } else if total > rows.len() {
             Some(format!(
                 " showing {} of {} — press / to search ",

@@ -760,7 +760,9 @@ pub fn tribute(w: &mut World) {
         };
         let due = (w.polities[p].treasury * tn.tribute_share).max(0.0);
         w.polities[p].treasury -= due;
-        w.polities[over].treasury = (w.polities[over].treasury + due).min(600.0);
+        // No ceiling to clip it against any more: what a crown cannot
+        // spend, its court will (see `sim::court_spending`).
+        w.polities[over].treasury += due;
         w.polities[over].prestige += 0.05;
         // A tributary tests the grip when the overlord is weak, stretched or
         // already fighting somebody else.
@@ -1430,6 +1432,11 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
         } else {
             None
         };
+        // Capped like every other way into a treasury. This was the one
+        // writer that was not, so a realm that sacked a great city could sit
+        // above a ceiling the rest of the simulation treats as absolute —
+        // which nothing showed until there was a page that ranked realms by
+        // what they were worth.
         w.polities[winner].treasury += w.cities[city].pop * 2.0;
         prose::city_sacked(w, &name, winner, lost.as_deref())
     } else {
@@ -1584,7 +1591,7 @@ fn settle_aim(w: &mut World, wid: usize, a: usize, d: usize) -> String {
         WarAim::Plunder => {
             let loot = (w.polities[d].treasury * 0.4).max(0.0) + w.polities[d].cells as f32 * 0.2;
             w.polities[d].treasury -= loot * 0.5;
-            w.polities[a].treasury = (w.polities[a].treasury + loot).min(600.0);
+            w.polities[a].treasury += loot;
         }
         WarAim::Containment => {
             // The point of a coalition is not to take the land but to break
