@@ -26,8 +26,8 @@ for your machine:
 For example, on an Apple Silicon Mac:
 
 ```sh
-tar xzf empires-v0.2.0-aarch64-apple-darwin.tar.gz
-./empires-v0.2.0-aarch64-apple-darwin/empires
+tar xzf empires-v0.3.0-aarch64-apple-darwin.tar.gz
+./empires-v0.3.0-aarch64-apple-darwin/empires
 ```
 
 Or install from a checkout with Rust 1.70 or newer:

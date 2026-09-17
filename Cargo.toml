@@ -1,6 +1,6 @@
 [package]
 name = "empires"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Rise and Fall of Empires — a lo-fi passive world simulator for the terminal"
 authors = ["Sam Schlesinger <sgschlesinger@gmail.com>"]
