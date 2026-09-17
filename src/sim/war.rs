@@ -370,9 +370,12 @@ pub fn diplomacy(w: &mut World) {
                     }
                 }
             }
-            // Trade calms things.
-            if vals.mercantilism > 0.5 && w.cultures[qol.culture].values.mercantilism > 0.5 {
-                d -= tn.tension_trade_relief;
+            // Trade calms things — actual trade, now that there is some.
+            // This used to fire when two cultures both merely *valued*
+            // commerce, whether or not anything moved between them.
+            let carried = w.trade_between(p, q);
+            if carried > 0.0 {
+                d -= tn.tension_trade_relief * (1.0 + carried * 0.08).min(3.0);
             }
             // Weak neighbours tempt the ambitious.
             if qol.stability < 0.3 && traits.ambition > 0.5 {

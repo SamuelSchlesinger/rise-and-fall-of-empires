@@ -1008,6 +1008,36 @@ fn innovation<S: Io>(s: &mut S, inn: &mut crate::sim::tech::Innovation) {
     s.f32(&mut inn.spread);
 }
 
+fn route<S: Io>(s: &mut S, r: &mut crate::sim::trade::Route) {
+    s.usize(&mut r.a);
+    s.usize(&mut r.b);
+    s.f32(&mut r.value);
+    s.bool(&mut r.by_sea);
+    s.bool(&mut r.open);
+    s.i32(&mut r.since);
+}
+
+fn blank_route() -> crate::sim::trade::Route {
+    crate::sim::trade::Route {
+        a: 0,
+        b: 0,
+        value: 0.0,
+        by_sea: false,
+        open: true,
+        since: 0,
+    }
+}
+
+/// The standing trades.
+///
+/// Stored rather than rebuilt, even though `trade::refresh` could work them
+/// out again: refresh runs only every few decades, so a running world's
+/// routes are deliberately a little stale, and recomputing them at load
+/// would hand back *fresher* ones than the world that wrote the file had.
+fn routes<S: Io>(s: &mut S, w: &mut World) {
+    seq(s, &mut w.routes, blank_route, route);
+}
+
 fn blank_innovation() -> crate::sim::tech::Innovation {
     crate::sim::tech::Innovation {
         id: 0,
@@ -1363,6 +1393,8 @@ fn terrain_sec<S: Io>(s: &mut S, w: &mut World) {
         // changes, so they are rebuilt rather than stored — a section could
         // only disagree with the map it describes.
         w.terrain.crossings = crate::geo::sea_routes(&w.terrain);
+        // What the ground produces is likewise a pure reading of it.
+        w.goods = crate::sim::trade::goods_of(&w.terrain);
     }
 }
 fn cells<S: Io>(s: &mut S, w: &mut World) {
@@ -1523,6 +1555,7 @@ sections! {
     T_PERS = b"pers", 3, persons;
     T_HOUS = b"hous", 1, houses;
     T_TECH = b"tech", 1, techs;
+    T_TRDE = b"trde", 1, routes;
     T_SCHL = b"schl", 1, schools;
     T_WARS = b"wars", 2, wars;
     T_ERAS = b"eras", 1, eras;

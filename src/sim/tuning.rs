@@ -124,6 +124,9 @@ pub struct Tuning {
     // -- economy -----------------------------------------------------------
     /// Tax taken from a city's people and prosperity each year.
     pub city_income_factor: f32,
+    /// What the crown takes from a point of trade passing through its
+    /// cities each year.
+    pub trade_toll_factor: f32,
     /// Tax taken from each cell of countryside each year.
     pub cell_income_factor: f32,
     /// Yearly cost of each point of army.
@@ -480,6 +483,10 @@ pub struct Tuning {
     /// Chance per year that a cell takes up something a neighbour knows,
     /// before the innovation's own readiness to travel is counted.
     pub tech_spread_chance: f64,
+    /// Chance per year that a trade route carries an idea along with its
+    /// cargo. Higher than plain diffusion, because the far end of a route
+    /// is as near as the near end.
+    pub tech_trade_chance: f64,
     /// Chance that emptied ground forgets what it knew, which is what makes
     /// a dark age possible and a rediscovery worth reading.
     pub tech_forget_chance: f64,
@@ -541,6 +548,7 @@ impl Default for Tuning {
             city_site_pop_weight: 0.75,
             // economy
             city_income_factor: 0.08,
+            trade_toll_factor: 0.05,
             cell_income_factor: 0.012,
             army_upkeep_factor: 0.05,
             cell_upkeep_factor: 0.004,
@@ -695,6 +703,7 @@ impl Default for Tuning {
             tech_frontier_drag: 0.5,
             tech_effort: 14.0,
             tech_spread_chance: 0.02,
+            tech_trade_chance: 0.05,
             tech_forget_chance: 0.03,
             chronicle_cap: 60_000,
         }
@@ -758,6 +767,7 @@ impl Tuning {
             "city_site_pop_weight" => self.city_site_pop_weight = v as f32,
             // economy
             "city_income_factor" => self.city_income_factor = v as f32,
+            "trade_toll_factor" => self.trade_toll_factor = v as f32,
             "cell_income_factor" => self.cell_income_factor = v as f32,
             "army_upkeep_factor" => self.army_upkeep_factor = v as f32,
             "cell_upkeep_factor" => self.cell_upkeep_factor = v as f32,
@@ -918,6 +928,7 @@ impl Tuning {
             "tech_frontier_drag" => self.tech_frontier_drag = v,
             "tech_effort" => self.tech_effort = v as f32,
             "tech_spread_chance" => self.tech_spread_chance = v,
+            "tech_trade_chance" => self.tech_trade_chance = v,
             "tech_forget_chance" => self.tech_forget_chance = v,
             "chronicle_cap" => self.chronicle_cap = v.max(0.0) as usize,
             _ => return Err(UnknownField(name.to_string())),

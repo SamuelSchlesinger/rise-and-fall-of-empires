@@ -898,3 +898,74 @@ fn a_line_keeps_its_blood() {
         );
     }
 }
+
+/// Trade does what trade is for: goods sit where the ground puts them,
+/// routes join places that want what each other has, position on the map is
+/// worth money, and closing a road is felt at both ends.
+#[test]
+fn trade_makes_position_worth_something() {
+    let mut w = world(31);
+    run(&mut w, 700);
+
+    // The ground produces, and produces different things in different places.
+    let kinds: std::collections::BTreeSet<&str> =
+        w.goods.iter().flatten().map(|g| g.name()).collect();
+    assert!(
+        kinds.len() >= 6,
+        "only {} kinds of good exist in the whole world",
+        kinds.len()
+    );
+
+    // Routes exist, and some go by sea.
+    assert!(!w.routes.is_empty(), "no city trades with any other");
+    assert!(
+        w.routes.iter().any(|r| r.by_sea),
+        "nothing is carried by water"
+    );
+
+    // A route joins cities whose hinterlands differ: that is the whole
+    // reason for one to exist.
+    for r in w.routes.iter().take(30) {
+        let a: std::collections::BTreeSet<&str> =
+            w.city_goods(r.a).iter().map(|g| g.name()).collect();
+        let b: std::collections::BTreeSet<&str> =
+            w.city_goods(r.b).iter().map(|g| g.name()).collect();
+        assert!(
+            a.difference(&b).next().is_some() && b.difference(&a).next().is_some(),
+            "{} and {} trade but want nothing from each other",
+            w.cities[r.a].name,
+            w.cities[r.b].name
+        );
+    }
+
+    // Wealth is positional: some cities take far more than the median.
+    let mut takings: Vec<f32> = w
+        .cities
+        .iter()
+        .filter(|c| c.destroyed.is_none())
+        .map(|c| w.city_trade(c.id))
+        .collect();
+    takings.sort_by(f32::total_cmp);
+    let median = takings[takings.len() / 2];
+    let best = *takings.last().unwrap();
+    assert!(
+        best > median * 2.0 && best > 1.0,
+        "the busiest city takes {:.1} against a median of {:.1}: position is worth nothing",
+        best,
+        median
+    );
+
+    // A war between two realms closes the roads between them.
+    let warring = w
+        .wars
+        .iter()
+        .find(|x| x.alive())
+        .map(|x| (x.attacker, x.defender));
+    if let Some((a, b)) = warring {
+        assert_eq!(
+            w.trade_between(a, b),
+            0.0,
+            "two realms at war are still trading with each other"
+        );
+    }
+}

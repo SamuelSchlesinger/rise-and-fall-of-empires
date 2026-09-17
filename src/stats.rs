@@ -207,6 +207,33 @@ pub fn run(world: &mut World, years: i32) {
         );
     }
 
+    // Trade: how much is moving, and how unequal it has made the cities.
+    // A world where every city earns the same from trade has no entrepots
+    // in it, which means position on the map is not worth anything.
+    {
+        let open: Vec<&crate::sim::trade::Route> = world.routes.iter().filter(|r| r.open).collect();
+        let by_sea = open.iter().filter(|r| r.by_sea).count();
+        let carried: f32 = open.iter().map(|r| r.value).sum();
+        let mut takings: Vec<f32> = world
+            .cities
+            .iter()
+            .filter(|c| c.destroyed.is_none())
+            .map(|c| world.city_trade(c.id))
+            .collect();
+        takings.sort_by(f32::total_cmp);
+        let median = takings.get(takings.len() / 2).copied().unwrap_or(0.0);
+        let top = takings.last().copied().unwrap_or(0.0);
+        println!(
+            "trade: {} routes open ({} by sea) carrying {:.0}; the busiest city takes {:.1} \
+             against a median of {:.1}",
+            open.len(),
+            by_sea,
+            carried,
+            top,
+            median
+        );
+    }
+
     // The great houses. A dynasty is the longest thread in the world and
     // the one a reader is most likely to follow, so a balance readout that
     // never mentions one is missing the thing it should be checking.

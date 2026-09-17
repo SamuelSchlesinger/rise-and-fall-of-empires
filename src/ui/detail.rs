@@ -1304,6 +1304,7 @@ fn realm_page(
 
 /// The page for a city.
 fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
+    let w2 = width.saturating_sub(2);
     let city = &w.cities[ci];
     out.push(line(city.name.to_uppercase(), Rgb(255, 255, 255), BOLD));
     let mut desc = format!(
@@ -1320,6 +1321,53 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
         DIMC,
         0,
     ));
+    // What its own country yields, and what passes through. A city's wealth
+    // is as much about where it sits as what grows around it, and this is
+    // where a reader can see which of the two it is living on.
+    let goods = w.city_goods(ci);
+    if !goods.is_empty() {
+        labelled(
+            out,
+            "    Yields",
+            &crate::sim::prose::city_produces(&goods),
+            w2,
+            DIMC,
+        );
+    }
+    let partners = w.trade_partners(ci);
+    if !partners.is_empty() {
+        let takings = w.city_trade(ci);
+        out.push(line(
+            format!(
+                "    Trade     {:.1} a year over {}",
+                takings,
+                crate::sim::prose::count(partners.len() as i64, "road")
+            ),
+            Rgb(230, 200, 120),
+            0,
+        ));
+        let names: Vec<String> = partners
+            .iter()
+            .take(4)
+            .map(|&(c, v, sea)| {
+                format!(
+                    "{} ({:.1}{})",
+                    w.cities[c].name,
+                    v,
+                    if sea { ", by sea" } else { "" }
+                )
+            })
+            .collect();
+        labelled(out, "    With", &names.join(", "), w2, DIMC);
+        // A city that lives on the carrying trade rather than its own land.
+        if let Some(p) = city.polity {
+            if takings > city.pop * 0.35 && takings > 6.0 {
+                for l in term::wrap(&crate::sim::prose::city_entrepot(w, ci, p), w2) {
+                    out.push(line(l, Rgb(230, 200, 120), 0));
+                }
+            }
+        }
+    }
     out.push(line("", FG, 0));
     if let Some(p) = city.polity {
         let cap = if w.polities[p].capital == Some(ci) {

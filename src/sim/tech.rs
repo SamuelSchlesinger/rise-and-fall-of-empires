@@ -906,6 +906,71 @@ pub fn tick(w: &mut World) {
     discover(w);
     if w.year % DIFFUSION_EVERY == 0 {
         diffuse(w);
+        carried_by_trade(w);
+    }
+}
+
+/// What the caravans bring besides cargo.
+///
+/// Diffusion between neighbouring cells crawls: an idea crosses a mountain
+/// range at the speed of the people who walk over it. A trade route does not
+/// crawl — the far end of it is as close as the near end, which is how a
+/// technique reaches a city across a sea years before it reaches the valley
+/// behind that city.
+///
+/// Cheap, because it walks the routes and not the map: a few hundred pairs
+/// rather than ten thousand cells.
+fn carried_by_trade(w: &mut World) {
+    let rng = w.rng.clone();
+    let base = w.tuning.tech_trade_chance * DIFFUSION_EVERY as f64;
+    let pairs: Vec<(usize, usize, f32)> = w
+        .routes
+        .iter()
+        .filter(|r| r.open)
+        .map(|r| (w.cities[r.a].cell, w.cities[r.b].cell, r.value))
+        .collect();
+    for (ca, cb, value) in pairs {
+        for (from, to) in [(ca, cb), (cb, ca)] {
+            let theirs = w.known[from];
+            let mine = w.known[to];
+            let offered = theirs & !mine;
+            if offered == 0 {
+                continue;
+            }
+            let (bent_of, keeps_own_ways) = match w.cells[to].culture {
+                Some(c) => (w.cultures[c].learning, w.cultures[c].values.tradition),
+                None => continue,
+            };
+            let mut take = 0u128;
+            for inn in &w.techs {
+                let b = inn.bit();
+                if offered & b == 0 {
+                    continue;
+                }
+                if !inn
+                    .needs
+                    .iter()
+                    .all(|&need| mine & w.techs[need].bit() != 0)
+                {
+                    continue;
+                }
+                let bent = bent_of[inn.field as usize];
+                if bent < MIN_BENT {
+                    continue;
+                }
+                // A people that keeps to its own ways is slower to copy a
+                // stranger, even one it trades with every season.
+                let welcome = (1.0 - keeps_own_ways as f64 * 0.5).max(0.15);
+                let busy = (value as f64 * 0.12).min(2.0);
+                if rng.chance(base * inn.spread as f64 * welcome * busy * bent as f64) {
+                    take |= b;
+                }
+            }
+            if take != 0 {
+                w.known[to] |= take;
+                w.refresh_yield(to);
+            }
+        }
     }
 }
 

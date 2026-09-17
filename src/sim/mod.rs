@@ -13,6 +13,7 @@ pub mod politics;
 pub mod prose;
 pub mod stories;
 pub mod tech;
+pub mod trade;
 pub mod tuning;
 pub mod war;
 
@@ -987,7 +988,7 @@ const MEANINGFUL_WORLD: usize = 300;
 const SEA_REACH_BASE: f32 = 3.0;
 
 /// The phases of a tick, in the order `World::tick` runs them.
-pub const PHASES: [&str; 23] = [
+pub const PHASES: [&str; 24] = [
     "grow_and_migrate",
     "form_polities",
     "expand",
@@ -1002,6 +1003,7 @@ pub const PHASES: [&str; 23] = [
     "unrest",
     "magic",
     "culture_drift",
+    "trade",
     "tech",
     "disasters",
     "notables",
@@ -1088,6 +1090,16 @@ pub struct World {
     /// What each realm knows anywhere in its lands, gathered by `recompute`
     /// so that `knows` is a bit test rather than a walk over its territory.
     pub polity_known: Vec<u128>,
+    /// What each cell of the world produces, if anything.
+    ///
+    /// A pure reading of the terrain, so it is rebuilt on load rather than
+    /// stored — the same bargain as the sea routes. It is what makes the
+    /// salt pans still the salt pans a thousand years later, whoever holds
+    /// them.
+    pub goods: Vec<Option<trade::Good>>,
+    /// The standing trades between cities, worked out afresh every few
+    /// decades by `trade::refresh`.
+    pub routes: Vec<trade::Route>,
     /// What each cell's knowledge is worth to its harvests, cached.
     ///
     /// `cell_capacity` is called for every cell every year, and working the
@@ -1142,6 +1154,8 @@ impl World {
             persons: Vec::new(),
             known: Vec::new(),
             polity_known: Vec::new(),
+            goods: Vec::new(),
+            routes: Vec::new(),
             cell_yield: Vec::new(),
             techs: Vec::new(),
             tech_seen: Vec::new(),
@@ -1223,6 +1237,8 @@ impl World {
             persons: Vec::new(),
             known: vec![0; n],
             polity_known: Vec::new(),
+            goods: Vec::new(),
+            routes: Vec::new(),
             cell_yield: Vec::new(),
             techs: Vec::new(),
             tech_seen: Vec::new(),
@@ -1250,6 +1266,7 @@ impl World {
         // the first of them can already be working something out. A hundred
         // and twenty innovations is enough to keep a world learning for ten
         // thousand years without the tree ever running out.
+        world.goods = trade::goods_of(&world.terrain);
         world.techs = tech::grow_tree(&world.rng, tech::MAX_TECHS.min(120));
         world.tech_seen = vec![false; world.techs.len()];
         world.tech_first_year = vec![0; world.techs.len()];
@@ -2051,15 +2068,16 @@ impl World {
         phase!(11, politics::unrest(self));
         phase!(12, magic::tick(self));
         phase!(13, people::culture_drift(self));
-        phase!(14, tech::tick(self));
-        phase!(15, events::disasters(self));
-        phase!(16, events::notables(self));
-        phase!(17, events::wonders(self));
-        phase!(18, stories::tick_artifacts(self));
-        phase!(19, stories::tick_prophecies(self));
-        phase!(20, stories::tick_legends(self));
-        phase!(21, self.recompute());
-        phase!(22, events::eras(self));
+        phase!(14, trade::tick(self));
+        phase!(15, tech::tick(self));
+        phase!(16, events::disasters(self));
+        phase!(17, events::notables(self));
+        phase!(18, events::wonders(self));
+        phase!(19, stories::tick_artifacts(self));
+        phase!(20, stories::tick_prophecies(self));
+        phase!(21, stories::tick_legends(self));
+        phase!(22, self.recompute());
+        phase!(23, events::eras(self));
         self.chronicle.compact(self.tuning.chronicle_cap);
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);

@@ -451,6 +451,9 @@ pub fn form_polities(w: &mut World) {
     }
 }
 
+/// What a point of trade adds to a city's prosperity.
+const TRADE_TO_PROSPERITY: f32 = 0.035;
+
 // ---------------------------------------------------------------------------
 // Expansion
 // ---------------------------------------------------------------------------
@@ -748,6 +751,7 @@ pub fn economy(w: &mut World) {
         let art_mult = w.artifact_army_mult(p);
         let art_stab = w.artifact_stability(p);
         let tech_army = w.tech_army_mult(p);
+        let trade_income = w.realm_trade(p);
         // Coin, roads and a tax roll are the difference between owning a
         // province and being able to tax it.
         let tech_income = w.tech_income_mult(p);
@@ -794,6 +798,10 @@ pub fn economy(w: &mut World) {
                 target -= 0.15;
             }
             target += w.cities[c].wonders.len() as f32 * 0.08;
+            // What passes through. This is the whole of why a city on a
+            // strait is worth more than a city in a bog, and why a realm
+            // astride the roads is worth attacking.
+            target += (w.city_trade(c) * TRADE_TO_PROSPERITY).min(0.6);
             let city = &mut w.cities[c];
             city.prosperity += (target - city.prosperity) * tn.prosperity_adjust_rate;
             city.prosperity = city.prosperity.clamp(0.05, 2.5);
@@ -808,6 +816,7 @@ pub fn economy(w: &mut World) {
         };
         let pol = &mut w.polities[p];
         income += pol.cells as f32 * tn.cell_income_factor * (1.0 + pol.dev);
+        income += trade_income * tn.trade_toll_factor;
         income *= tech_income;
         let upkeep = pol.army * tn.army_upkeep_factor + pol.cells as f32 * tn.cell_upkeep_factor;
         pol.treasury = (pol.treasury + income - upkeep).clamp(-60.0, 600.0);

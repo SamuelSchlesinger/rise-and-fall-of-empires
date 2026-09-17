@@ -135,12 +135,13 @@ fn header_is_what_we_say_it_is() {
     // count is the length of the `sections!` table, so adding a section
     // means updating this line — which is the point of asserting it.
     let cs = chunks(&bytes);
-    assert_eq!(cs.len(), 20);
+    assert_eq!(cs.len(), 21);
     assert_eq!(cs.last().unwrap().3, bytes.len());
     assert!(cs.iter().any(|c| &c.0 == b"terr"));
     assert!(cs.iter().any(|c| &c.0 == b"chrn"));
     assert!(cs.iter().any(|c| &c.0 == b"hous"));
     assert!(cs.iter().any(|c| &c.0 == b"tech"));
+    assert!(cs.iter().any(|c| &c.0 == b"trde"));
 }
 
 #[test]

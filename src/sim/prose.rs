@@ -27,6 +27,7 @@ pub mod war;
 mod people;
 mod politics;
 mod stories;
+pub mod trade;
 
 pub use diplomacy::*;
 pub use dynasty::*;
@@ -36,6 +37,7 @@ pub use magic::*;
 pub use people::*;
 pub use politics::*;
 pub use stories::*;
+pub use trade::*;
 pub use war::*;
 
 use super::{Gender, PolityKind, World};
