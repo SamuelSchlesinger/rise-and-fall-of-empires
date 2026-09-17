@@ -10,6 +10,151 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [Unreleased]
+
+Understanding a world, and reaching into it.
+
+### Added
+
+- **Eight new map layers, in two groups.** Four say how people live on the
+  ground, from data the simulation already kept and never drew: **goods**
+  (what each cell yields — the only way to learn a stretch of country was
+  salt land was to open every city on it one at a time), **trade** (what the
+  roads carry, drawn as a network, bright where busy and dark where a war
+  has shut them), **harvest** (fertility, this century's weather and what is
+  known, multiplied — the number that decides where anybody can live) and
+  **knowledge** (the local technology multiplier, which is where a dark age
+  finally looks like one).
+
+  Four more say what is *moving*: **settling** (where people are arriving
+  and leaving), **fighting** (where the war actually is, rather than who is
+  nominally at war), **frontier** (where the map is being redrawn) and
+  **drift** (where the weather has turned since living memory). Every layer
+  of the map used to be a photograph — true of one year and silent about the
+  year before — so a steppe emptying out and a steppe that had always been
+  empty looked the same.
+
+  Fourteen layers is too many to cycle one at a time, so Tab steps between
+  families (power, peoples, land, living, motion) and `\` steps the maps
+  within one.
+
+- **A world remembers its own motion.** Four signed fields, one value per
+  cell, each a decaying running total of something that happened rather than
+  something that is. A window over the last N years would have meant N
+  snapshots of a forty-thousand-cell map to carry and to save; a running
+  total with a half-life carries one number per cell, and needs no place in
+  a save file — these fields are not derived, but they heal, so a loaded
+  world has them back within a lifetime of play.
+
+- **A Money block on every realm's page.** Where the money comes from and
+  where it goes, with the figures adding up to the line printed under them
+  and, for a realm running down, how many years of treasury it has left.
+  Stability has had an explanation since the beginning; money never did,
+  which left the two economic entries in that block as the only visible
+  economics in the game, both of them effects with no stated cause.
+
+- **A list can be asked a question.** The filter matched the text of a
+  rendered row; a term is now a word to look for *or* a comparison against a
+  named quantity — `lands>200`, `income<0`, `prosperity>=150`. Each page
+  advertises what may be asked of it.
+
+- **Two new list pages.** **Wealth** ranks realms by what they hold with
+  what the year will bring beside it, because a full treasury with a deficit
+  is a different thing from the same treasury with a surplus. **Roads** is
+  the trade network as a list that can be sorted and filtered, which is the
+  only way to find the one road a war has shut.
+
+- **The Hand of Fate reaches more than realms.** Twenty-four interventions
+  across four kinds of thing: a realm, a town, a person, or a region. A town
+  can boom, burn, be walled, raise a wonder, take a sickness off a ship or
+  find the carrying trade. A person can be made renowned or disgraced,
+  brilliant or ambitious, can be killed, or can be given a child who will be
+  remarkable. A region can be made fertile or exhausted, blighted, struck
+  with ore, quickened with ley — or emptied, which is the only way to start
+  a dark age on purpose, because knowledge belongs to the ground and ground
+  that empties of people forgets.
+
+- **`:export`** writes a world out for somebody who does not have the game:
+  the chronicle as Markdown grouped by century, the map as HTML, or any list
+  page as CSV with a column for every quantity its filter advertises.
+
+### Changed
+
+- **A treasury has no ceiling, and three drains instead.** *World-changing.*
+  Gold was pinned at six hundred, and the ceiling destroyed every fact about
+  wealth above it: eight of the ten richest realms sat at exactly the cap,
+  each drawing the identical bonus to its stability. What a cap was standing
+  in for is a drain — a treasury's only cost was upkeep, which scales with
+  the army and the land and not at all with how full the coffers are. Now a
+  **court spends what it has**, buying prestige and *decadence*; **corruption
+  skims the tax roll**, from a rotten court and from the distance taxes must
+  travel; and **gold raises soldiers**, who then cost upkeep for as long as
+  they stand. Confidence in a full treasury saturates rather than dividing
+  by a ceiling, so there is a gradient all the way up.
+
+  The effect is that the richest realms are now the ones about to have
+  trouble, which is the story this game has always been about and could not
+  previously tell.
+
+- **Trade grows with the world.** *World-changing.* A route's worth came
+  from the goods on the ground and the distance between two cities, both
+  fixed for ever, while city income compounds — so trade's share of what
+  realms earned fell from a quarter in the second century to a fortieth by
+  the twenty-eighth, purely by standing still. Added the mass half of a
+  gravity model, whose distance term was already there. Trade now holds near
+  a fifth of realm income, flat across the ages.
+
+- **A world can learn to carry goods.** *World-changing.* Twelve kinds of
+  effect a generated tree could hand out, and not one touched a road: a
+  realm could invent writing, coinage and the ocean-going ship and its
+  caravans carried what they carried in year one. There is a thirteenth now,
+  and five of the ten fields can produce it.
+
+- **A world carries only so many traditions.** *World-changing.* See below.
+
+- The prosperity a city draws from its traffic saturates rather than
+  stopping at a hard ceiling, so the difference between a good position on
+  the roads and a commanding one no longer disappears.
+
+- A city is taxed on the year's opening prosperity and its towns grow after
+  the assessment rather than before it. *World-changing*, and what makes the
+  Money block checkable against the treasury it describes.
+
+### Fixed
+
+- **Schools compounded without limit**, and a teaching with nowhere to go
+  lived for ever. Every school rolled a flat yearly chance to schism, so the
+  count grew by a fixed fraction per century — seventeen hundred living
+  schools against four hundred realms by the thirty-fourth century — and the
+  ordinary way a school ends needs a larger cousin holding ground where it
+  still stands, which one that had retreated somewhere no cousin reached met
+  never. Since every school rolls against every realm it touches, and each
+  persecution makes a martyr — a person created already dead and appended to
+  the person list for ever — the person list reached three and a half
+  million while barely a thousand people were alive, and a large map went
+  from two milliseconds a year to unbounded. Schism now answers to how
+  crowded the ground is, and a tradition that has been fading for
+  generations with nothing to be folded into is forgotten.
+
+- **The stability breakdown had drifted from the simulation.** Its treasury
+  term was a second copy of the old ratio, and went on dividing by a ceiling
+  that no longer existed — so a realm holding three thousand was told its
+  full treasury was worth a hundred and four points of stability out of a
+  hundred, printed at the top of the page as the reason for everything.
+
+- **A road forgot that a war had closed it.** Every twentieth year the
+  network was rebuilt with every road marked open as of that year, which
+  also reset the clock that stops the chronicle reporting the same two
+  cities every three years — so a rebuild silenced those reports for a
+  decade.
+
+- Sacking a city was the one way into a treasury that did not enforce the
+  ceiling the other three did.
+
+- A sentence may begin with a figure. "26% of the world's settled land now
+  lay under the Lafulannic Kingdom" is good English and the prose check
+  rejected it.
+
 ## [0.3.1] - 2026-09-17
 
 A world that ran for five thousand years slowed to a crawl, and the default
