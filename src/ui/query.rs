@@ -195,7 +195,7 @@ pub fn value_of(w: &World, r: Ref, field: &str) -> Option<f32> {
 /// What may be asked about the rows of a given list page, for the hint line.
 pub fn fields_for(tab: usize) -> &'static str {
     match tab {
-        0 | 11 => {
+        0 | 11 | 13 => {
             "lands people stability treasury income devt army cities trade wars age peak sprawl"
         }
         1 => "people prosperity walls trade roads founded age sacked wonders peak",

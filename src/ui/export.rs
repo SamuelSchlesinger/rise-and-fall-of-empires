@@ -32,6 +32,7 @@ impl Ui {
         let body = match kind {
             "chronicle" | "history" => self.chronicle_markdown(),
             "map" => self.map_html(),
+            "timeline" => self.timeline_markdown(),
             "realms" | "wealth" | "cities" | "roads" | "persons" | "wars" | "houses" => {
                 match self.table_csv(kind) {
                     Some(csv) => csv,
@@ -39,7 +40,7 @@ impl Ui {
                 }
             }
             _ => {
-                return "usage: :export chronicle|map|realms|wealth|cities|roads|persons|wars|houses [PATH]"
+                return "usage: :export chronicle|map|timeline|realms|wealth|cities|roads|persons|wars|houses [PATH]"
                     .into()
             }
         };
@@ -50,7 +51,7 @@ impl Ui {
         } else {
             let ext = match kind {
                 "map" => "html",
-                "chronicle" | "history" => "md",
+                "chronicle" | "history" | "timeline" => "md",
                 _ => "csv",
             };
             // Named for the seed and the year, because those two identify a
@@ -96,6 +97,37 @@ impl Ui {
             }
             out.push_str(&format!("- **{}** — {}\n", e.year, e.text));
         }
+        out
+    }
+
+    /// The rise and fall of every realm, as Markdown.
+    ///
+    /// Drawn from the same `list_rows` the Timeline page uses, so the file
+    /// and the screen cannot disagree about who descended from whom — and
+    /// the reader's filter applies, since it is `Ui::list_rows` that runs
+    /// the query.
+    fn timeline_markdown(&self) -> String {
+        let was = self.list_tab;
+        let tab = detail::LIST_TABS
+            .iter()
+            .position(|t| t.eq_ignore_ascii_case("timeline"))
+            .unwrap_or(was);
+        let (rows, total) = detail::list_rows(&self.world, tab);
+        let mut out = format!("# The rise and fall of {} realms\n\n", total);
+        out.push_str(&format!(
+            "As it stood in year {}, from seed {:#x}. Each bar runs from a \
+             realm's founding to its fall across the whole of history; \
+             successor states are indented under the realm they broke away \
+             from.\n\n```\n",
+            self.world.year, self.world.seed
+        ));
+        out.push_str(detail::list_header(tab).trim_end());
+        out.push('\n');
+        for (text, _) in &rows {
+            out.push_str(text.trim_end());
+            out.push('\n');
+        }
+        out.push_str("```\n");
         out
     }
 

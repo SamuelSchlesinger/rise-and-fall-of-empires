@@ -7,7 +7,7 @@ use crate::sim::{SchoolKind, Stance, World};
 use crate::term::{self, Rgb, BOLD, DIM};
 use std::cmp::Ordering;
 
-pub const LIST_TABS: [&str; 13] = [
+pub const LIST_TABS: [&str; 14] = [
     "Realms",
     "Cities",
     "Peoples",
@@ -25,6 +25,10 @@ pub const LIST_TABS: [&str; 13] = [
     // worth is a different question from sorting them by how large they are.
     "Wealth",
     "Roads",
+    // The thing the game is named for, and the one view it could not draw.
+    // Every realm has recorded its founding, its fall, its parent and the
+    // year of its greatest extent since long before this page existed.
+    "Timeline",
 ];
 
 pub struct Line {
@@ -137,6 +141,102 @@ pub fn entity_loc(w: &World, r: Ref) -> Option<usize> {
             .rev()
             .find_map(|&p| w.capital_cell(p)),
     }
+}
+
+/// How wide a lifetime is drawn on the Timeline page.
+///
+/// Fixed, because `list_rows` builds finished strings and does not know the
+/// terminal — the same bargain every other list page makes, with
+/// `text_clip` cutting the tail on a narrow window.
+const TIMELINE_WIDTH: usize = 44;
+
+/// How many generations of successor states are shown beneath a realm.
+const LINEAGE_DEPTH: usize = 2;
+
+/// And how many of each generation. A realm that shattered into fifty
+/// splinters would otherwise fill the page with its own wreckage; the rest
+/// are listed further down on their own account, which is where a reader
+/// looking for the second great power of the age expects to find it.
+const LINEAGE_FANOUT: usize = 6;
+
+/// A bar covering the years `from`..=`to` within a world `span` years old.
+///
+/// Unlike [`bar`], which fills from the left, this one is a *position*: the
+/// point of the page is that two realms which lasted equally long but three
+/// thousand years apart should not look the same.
+fn span_bar(from: i32, to: i32, span: f32, width: usize) -> String {
+    let at = |year: i32| -> usize {
+        ((year.max(0) as f32 / span.max(1.0)) * width as f32).round() as usize
+    };
+    let (start, end) = (at(from).min(width), at(to).min(width));
+    // A realm that rose and fell inside one column still gets a column: a
+    // blank row would say it never existed.
+    let end = end.max(start + 1).min(width);
+    // Drawn in the two glyphs the frame's ascii sweep already knows how to
+    // replace, so this needs no `ascii` flag of its own — `list_rows` builds
+    // finished strings and is not told which mode it is in. The same bargain
+    // `term::hline` makes.
+    let (full, empty) = ('\u{2588}', '\u{2591}');
+    (0..width)
+        .map(|i| if i >= start && i < end { full } else { empty })
+        .collect()
+}
+
+/// The chosen realms in lineage order, each with how deep it sits.
+///
+/// A realm records the realm it broke away from, so the ones that are
+/// present in `chosen` form a forest. Roots — whose parent is not on the
+/// page, because it was too small to make the cut or never existed — come
+/// in the order they were given, and each realm's children follow it.
+///
+/// Bounded by construction: every realm is emitted at most once, guarded by
+/// `seen`, so a malformed parent chain cannot loop.
+fn lineage_order(w: &World, chosen: &[usize]) -> Vec<(usize, usize)> {
+    let in_set: std::collections::BTreeSet<usize> = chosen.iter().copied().collect();
+    let mut children: std::collections::BTreeMap<usize, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for &p in chosen {
+        if let Some(parent) = w.polities[p].parent.filter(|q| in_set.contains(q)) {
+            children.entry(parent).or_default().push(p);
+        }
+    }
+    let mut out: Vec<(usize, usize)> = Vec::with_capacity(chosen.len());
+    let mut seen: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    // An explicit stack rather than recursion: a chain of successor states
+    // can be hundreds deep in a long game.
+    for &root in chosen {
+        if w.polities[root].parent.is_some_and(|q| in_set.contains(&q)) {
+            continue;
+        }
+        let mut stack = vec![(root, 0usize)];
+        while let Some((p, depth)) = stack.pop() {
+            if !seen.insert(p) {
+                continue;
+            }
+            out.push((p, depth));
+            // Only the immediate family. Without a bound the greatest realm
+            // brought its whole descent with it — hundreds of rows — and
+            // the second greatest was pages away, which is the opposite of
+            // what a page ranked by greatness is for. Anything deeper is
+            // left for the sweep below, which lists it on its own account.
+            if depth < LINEAGE_DEPTH {
+                if let Some(kids) = children.get(&p) {
+                    for &kid in kids.iter().take(LINEAGE_FANOUT).rev() {
+                        stack.push((kid, depth + 1));
+                    }
+                }
+            }
+        }
+    }
+    // Everything not reached: too deep in somebody's descent, or in a
+    // parent cycle. Listed on its own account, in the order it was given,
+    // rather than silently dropped from a page that said it would show it.
+    for &p in chosen {
+        if seen.insert(p) {
+            out.push((p, 0));
+        }
+    }
+    out
 }
 
 fn bar(v: f32, width: usize, ascii: bool) -> String {
@@ -397,6 +497,7 @@ pub fn list_header(tab: usize) -> &'static str {
         10 => "  house                               people           ruled  thrones  span",
         11 => "  realm                             treasury   a year   devt   trade  prosperity",
         12 => "  road                                            worth  carrying          since",
+        13 => "  realm                          rise and fall                                  peak",
         _ => "  prophecy                                                          seer                 by     outcome",
     }
 }
@@ -839,6 +940,35 @@ pub fn list_rows(w: &World, tab: usize) -> (Vec<(String, Ref)>, usize) {
                     r.since
                 );
                 rows.push((row, Ref::City(r.a)));
+            }
+        }
+        // Every realm as a bar from its founding to its fall, the great
+        // ones first and their successor states beneath them. A realm's
+        // `parent` is recorded when it is founded, so a kingdom that broke
+        // into four reads as a family rather than as four unrelated rows.
+        13 => {
+            let span = w.year.max(1) as f32;
+            let mut ps: Vec<usize> = (0..w.polities.len()).collect();
+            total = keep_best_by_key(&mut ps, LIST_CAP, |p| {
+                std::cmp::Reverse(w.polities[p].peak_cells)
+            });
+            for (p, depth) in lineage_order(w, &ps) {
+                let pol = &w.polities[p];
+                let fell = pol.fell.unwrap_or(w.year);
+                let indent = "  ".repeat(depth.min(4));
+                let name = format!("{}{}", indent, clip(&pol.short, 29 - depth.min(4) * 2));
+                let row = format!(
+                    "{:<31}{} {:>5} @{:<6}{}",
+                    name,
+                    span_bar(pol.founded, fell, span, TIMELINE_WIDTH),
+                    pol.peak_cells,
+                    pol.peak_year,
+                    match pol.fell {
+                        Some(y) => format!("fell {}", y),
+                        None => "standing".to_string(),
+                    }
+                );
+                rows.push((row, Ref::Polity(p)));
             }
         }
         _ => {
@@ -2400,7 +2530,7 @@ pub const HELP: &[&str] = &[
     "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
     "             :fate 3  :q  :wq  :q!",
-    "             :export chronicle|map|realms|wealth|cities|roads|persons|wars|houses [path]",
+    "             :export chronicle|map|timeline|realms|wealth|cities|roads|persons|wars|houses",
     "             (Markdown for the history, HTML for the map, CSV for a table)",
     "",
     "Browsing     e lists (realms, cities, peoples, schools, persons, wars, places, relics,",
@@ -3285,6 +3415,107 @@ fn house_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The timeline lists every realm it was given, once, with successors
+    /// under the realm they broke away from.
+    ///
+    /// This is the page the game is named for and it could not be drawn
+    /// until now, though every field it needs — `founded`, `fell`,
+    /// `parent`, `peak_cells`, `peak_year` — has been recorded since long
+    /// before. The ordering is the whole value: a kingdom that shattered
+    /// into four should read as a family, not as four unrelated rows.
+    #[test]
+    fn the_timeline_lists_every_realm_once_under_its_parent() {
+        use crate::sim::Detail;
+        let mut w = crate::sim::World::new(17, 120, 60, Detail::Medium);
+        for _ in 0..900 {
+            w.tick();
+        }
+        let chosen: Vec<usize> = (0..w.polities.len()).collect();
+        let order = lineage_order(&w, &chosen);
+
+        // Every realm, exactly once.
+        assert_eq!(
+            order.len(),
+            chosen.len(),
+            "the page lost or doubled a realm"
+        );
+        let mut seen: Vec<usize> = order.iter().map(|&(p, _)| p).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), chosen.len(), "a realm appears twice");
+
+        // Depth is bounded, and a realm shown as a successor really is one,
+        // and really does come after its parent.
+        let at: std::collections::BTreeMap<usize, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(i, &(p, _))| (p, i))
+            .collect();
+        for (i, &(p, depth)) in order.iter().enumerate() {
+            assert!(depth <= LINEAGE_DEPTH, "realm {} sits {} deep", p, depth);
+            if depth > 0 {
+                let parent = w.polities[p]
+                    .parent
+                    .expect("only a realm with a parent is indented");
+                let parent_at = *at
+                    .get(&parent)
+                    .expect("an indented realm's parent is on the page");
+                assert!(
+                    parent_at < i,
+                    "realm {} is drawn above the realm it broke away from",
+                    p
+                );
+                assert_eq!(
+                    order[parent_at].1,
+                    depth - 1,
+                    "realm {} sits {} deep under a parent {} deep",
+                    p,
+                    depth,
+                    order[parent_at].1
+                );
+            }
+        }
+
+        // A bar is drawn for every realm, including one that rose and fell
+        // inside a single column: a blank row would say it never existed.
+        let span = w.year as f32;
+        for &p in &chosen {
+            let pol = &w.polities[p];
+            let bar = span_bar(
+                pol.founded,
+                pol.fell.unwrap_or(w.year),
+                span,
+                TIMELINE_WIDTH,
+            );
+            assert_eq!(bar.chars().count(), TIMELINE_WIDTH);
+            assert!(
+                bar.contains('\u{2588}'),
+                "realm {} founded {} fell {:?} has an empty lifetime",
+                p,
+                pol.founded,
+                pol.fell
+            );
+        }
+    }
+
+    /// A parent that points at itself, or a ring of them, must not hang the
+    /// page or drop the realms caught in it.
+    #[test]
+    fn a_tangled_descent_still_lists_everybody() {
+        use crate::sim::Detail;
+        let mut w = crate::sim::World::new(19, 60, 30, Detail::Medium);
+        for _ in 0..200 {
+            w.tick();
+        }
+        let chosen: Vec<usize> = (0..w.polities.len()).collect();
+        assert!(chosen.len() >= 3, "need a few realms to tangle");
+        w.polities[chosen[0]].parent = Some(chosen[0]);
+        w.polities[chosen[1]].parent = Some(chosen[2]);
+        w.polities[chosen[2]].parent = Some(chosen[1]);
+        let order = lineage_order(&w, &chosen);
+        assert_eq!(order.len(), chosen.len(), "a cycle swallowed a realm");
+    }
 
     /// The help page has to be readable on the narrowest terminal the README
     /// claims to support, and nothing in it may be dropped on the way.

@@ -48,6 +48,16 @@ Understanding a world, and reaching into it.
   war if there is going to be one. With nothing selected, each realm's own
   standing. `:layer relations`, or `diplomacy`, `alliances`, `tension`.
 
+- **A rise-and-fall timeline**, which is the view the game is named for and
+  the one it could not draw. Every realm as a bar from its founding to its
+  fall across the whole of history, the great ones first, with successor
+  states indented under the realm they broke away from — so a kingdom that
+  shattered into four reads as a family rather than four unrelated rows.
+  `e` then Tab to **Timeline**, or `:list timeline`; `:export timeline`
+  writes it as Markdown. It needed no new state: `founded`, `fell`,
+  `parent`, `peak_cells` and `peak_year` have all been recorded since long
+  before there was anything to draw them with.
+
 - **A world remembers its own motion.** Four signed fields, one value per
   cell, each a decaying running total of something that happened rather than
   something that is. A window over the last N years would have meant N

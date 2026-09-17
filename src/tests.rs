@@ -2164,6 +2164,7 @@ fn a_world_can_be_written_out() {
     // Every shape, and each one has to produce something a reader could use.
     for (kind, must_contain) in [
         ("chronicle", "## Years"),
+        ("timeline", "# The rise and fall of"),
         ("map", "<!doctype html>"),
         ("realms", "name,lands,people"),
         ("wealth", "treasury"),
