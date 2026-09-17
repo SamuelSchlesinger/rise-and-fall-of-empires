@@ -80,12 +80,30 @@ impl Ui {
         {
             self.screen.put(sw - 1, 0, '>', accent, bg);
         }
-        let rows = self.list_rows();
+        let (rows, total) = self.list_rows();
         let header = detail::list_header(self.list_tab);
         self.screen
             .text_attr(1, 1, header, Rgb(150, 150, 160), bg, BOLD);
-        if !self.list_filter.is_empty() {
-            let f = format!(" {} rows match \"{}\" ", rows.len(), self.list_filter);
+        // What the page is not showing. A filter takes precedence, because
+        // the player just typed it; otherwise, say so when the page is a
+        // window on more history than it lists — which on a long game it
+        // always is, and `/` is how the rest is reached.
+        let note = if !self.list_filter.is_empty() {
+            Some(format!(
+                " {} rows match \"{}\" ",
+                rows.len(),
+                self.list_filter
+            ))
+        } else if total > rows.len() {
+            Some(format!(
+                " showing {} of {} — press / to search ",
+                rows.len(),
+                total
+            ))
+        } else {
+            None
+        };
+        if let Some(f) = note {
             self.screen.text_attr(
                 sw.saturating_sub(f.chars().count() + 1),
                 sh.saturating_sub(1),

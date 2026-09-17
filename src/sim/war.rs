@@ -18,6 +18,9 @@ const FAR_TENSION_FLOOR: f32 = 0.25;
 /// How often a realm's expired truces are swept up, in years. Staggered by
 /// realm id so the work is spread rather than spiking in one year.
 const TRUCE_SWEEP: usize = 16;
+/// How many of its quarrels a realm weighs for war in a year, worst first.
+const MOST_QUARRELS_WEIGHED: usize = 4;
+
 /// Most realms a realm will keep a running quarrel with. Beyond this the
 /// coldest are forgotten, which is both what a chancery would do and what
 /// keeps the phase's cost flat as the world ages.
@@ -66,6 +69,7 @@ impl World {
         cause: String,
     ) -> usize {
         let id = self.wars.len();
+        self.alive_wars.push(id);
         let name = self.war_name(attacker, defender, kind, aim);
         self.wars.push(War {
             id,
@@ -222,17 +226,35 @@ impl World {
     }
 
     /// Number a war after the ones that already carry the same name.
-    fn war_name_ordinal(&self, base: &str) -> String {
-        let n = self
-            .wars
-            .iter()
-            .filter(|w| {
-                w.name == base
-                    || w.name
-                        .ends_with(&format!(" {}", base.trim_start_matches("the ")))
-            })
-            .count();
+    ///
+    /// Takes the tally rather than reading it, because naming a war is also
+    /// what records it: the caller pushes the war afterwards.
+    fn war_name_ordinal(&mut self, base: &str) -> String {
+        let stem = prose::war_name_stem(base);
+        let n = match self.war_names.get_mut(stem) {
+            Some(n) => {
+                *n += 1;
+                *n - 1
+            }
+            None => {
+                self.war_names.insert(stem.to_string(), 1);
+                0
+            }
+        };
         prose::war_name_numbered(base, n)
+    }
+
+    /// Count up the names of the wars already fought.
+    ///
+    /// Called after a load, where the tally has to be recovered from the
+    /// names themselves, and nowhere else — in a running world it is kept up
+    /// as wars are declared.
+    pub fn recount_war_names(&mut self) {
+        self.war_names.clear();
+        for i in 0..self.wars.len() {
+            let stem = prose::war_name_stem(&self.wars[i].name).to_string();
+            *self.war_names.entry(stem).or_insert(0) += 1;
+        }
     }
 
     pub fn end_war(&mut self, wid: usize, result: &str, log: bool) {
@@ -506,9 +528,25 @@ pub fn diplomacy(w: &mut World) {
             continue;
         }
         // Hottest first, so a realm picks its worst quarrel rather than
-        // whichever id happens to sort lowest.
+        // whichever id happens to sort lowest — and only the worst few. A
+        // chancery does not draw up two dozen war plans a year, and every
+        // target examined costs several random reads into an array of
+        // realms far too large to sit in cache. With the tension map capped
+        // at two dozen this loop was the single most expensive thing in the
+        // simulation on a large map: six milliseconds a year by year five
+        // thousand, half of the whole tick.
         targets.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        targets.truncate(MOST_QUARRELS_WEIGHED);
         for (q, _tension) in targets {
+            // The die first. Only about one target in thirty is acted on,
+            // and rolling for it before the eligibility checks rather than
+            // after means the other twenty-nine cost one draw instead of a
+            // dozen scattered lookups.
+            if !rng.chance(
+                tn.war_declare_chance + traits.ambition as f64 * tn.war_declare_ambition_weight,
+            ) {
+                continue;
+            }
             if !w.polities[q].alive() || w.war_between(p, q).is_some() {
                 continue;
             }
@@ -564,11 +602,6 @@ pub fn diplomacy(w: &mut World) {
             let bold = (tn.war_boldness_base + traits.valor * 0.5)
                 * if against_hegemon { 0.7 } else { 1.0 };
             if my < their * bold * rng.range32(0.7, 1.2) {
-                continue;
-            }
-            if !rng.chance(
-                tn.war_declare_chance + traits.ambition as f64 * tn.war_declare_ambition_weight,
-            ) {
                 continue;
             }
             // Cause.
@@ -946,10 +979,25 @@ pub fn call_allies(w: &mut World, wid: usize) {
     }
 }
 
+/// Every realm's reach over water, indexed by realm.
+///
+/// Zero for the dead, which is what `sea_reach` returns for them anyway —
+/// so filling only the living is the same answer for a fraction of the
+/// work. The vector is indexed by polity id, and the polity vector holds
+/// every realm that has ever existed, so on a long game the dead outnumber
+/// the living ten to one.
+pub fn sea_reaches(w: &World) -> Vec<u16> {
+    let mut v = vec![0u16; w.polities.len()];
+    for p in &w.alive_polities {
+        v[*p] = w.sea_reach(*p);
+    }
+    v
+}
+
 pub fn resolve_wars(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
-    let active: Vec<usize> = w.wars.iter().filter(|x| x.alive()).map(|x| x.id).collect();
+    let active = w.alive_wars.clone();
     if active.is_empty() {
         return;
     }
@@ -987,7 +1035,7 @@ pub fn resolve_wars(w: &mut World) {
     // war can actually be fought — before this, a war across water had no
     // front at all, its score decayed, and peace came within two years
     // whatever either side wanted.
-    let reaches: Vec<u16> = (0..w.polities.len()).map(|p| w.sea_reach(p)).collect();
+    let reaches = sea_reaches(w);
     for c in &w.terrain.crossings {
         let (a, b) = (c.from as usize, c.to as usize);
         let (Some(p), Some(q)) = (w.cells[a].owner, w.cells[b].owner) else {
@@ -1199,6 +1247,13 @@ fn battle(
     let margin = ((s_off - s_def) / (s_off + s_def)).abs();
     let def_culture = w.cells[site].culture.unwrap_or(w.polities[def].culture);
     let place = battlefield_name(w, site, def_culture);
+    // The ground remembers being fought over, and the neighbouring ground a
+    // little: a battle is a front, not a point, and a front drawn one cell
+    // wide reads as scattered dots rather than a war.
+    w.note_fought(site, 1.0);
+    for nb in w.terrain.neighbors8(site).collect::<Vec<_>>() {
+        w.note_fought(nb, 0.35);
+    }
     w.wars[wid].battles += 1;
     let (winner_side, loser_side) = if win {
         (off_side, def_side)

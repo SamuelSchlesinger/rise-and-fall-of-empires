@@ -128,7 +128,9 @@ pub fn grow_and_migrate(w: &mut World) {
             if aff < 0.12 {
                 continue;
             }
-            let target = &w.cells[nb];
+            // Copied rather than borrowed, so that the flow can be noted
+            // without holding a reference into the cell vector.
+            let target = w.cells[nb];
             let tcap = if target.culture.is_some() {
                 w.cell_capacity(nb)
             } else {
@@ -143,6 +145,7 @@ pub fn grow_and_migrate(w: &mut World) {
                 if amount > 0.01 {
                     delta[i] -= amount;
                     delta[nb] += amount;
+                    w.note_settled(i, nb, amount);
                     if target.culture.is_none() || (target.pop < 0.05 && target.owner.is_none()) {
                         new_culture.push((nb, culture));
                     }

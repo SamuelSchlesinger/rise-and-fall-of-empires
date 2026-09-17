@@ -294,6 +294,44 @@ pub fn tick(w: &mut World) {
         refresh(w);
     }
     open_and_close(w);
+    reckon(w);
+}
+
+/// Total up what trade is worth, once, for everybody who will ask.
+///
+/// `city_trade` and `trade_between` used to walk the whole route list on
+/// every call, and `economy` asks once per realm while `diplomacy` asks once
+/// per pair of neighbours. On a large map that is a thousand routes times a
+/// thousand cities times every year — the cost of a year climbed from half a
+/// millisecond to sixteen by year eighteen hundred, and kept climbing.
+///
+/// Reckoned here instead: one pass over the routes, and every later question
+/// is a lookup.
+///
+/// Also called at load. `economy` reads these totals in an earlier phase
+/// than the one that fills them, so a world reloaded without them governs
+/// its first year on no trade at all and diverges from the one that wrote
+/// the file.
+pub fn reckon(w: &mut World) {
+    w.city_takings.clear();
+    w.city_takings.resize(w.cities.len(), 0.0);
+    w.pair_trade.clear();
+    for r in &w.routes {
+        if !r.open {
+            continue;
+        }
+        if let Some(slot) = w.city_takings.get_mut(r.a) {
+            *slot += r.value;
+        }
+        if let Some(slot) = w.city_takings.get_mut(r.b) {
+            *slot += r.value;
+        }
+        if let (Some(pa), Some(pb)) = (w.cities[r.a].polity, w.cities[r.b].polity) {
+            if pa != pb {
+                *w.pair_trade.entry((pa.min(pb), pa.max(pb))).or_insert(0.0) += r.value;
+            }
+        }
+    }
 }
 
 /// Decide which routes are running, and tell the world when a great one
@@ -336,13 +374,9 @@ fn open_and_close(w: &mut World) {
 }
 
 impl World {
-    /// What trade is worth to a city this year.
+    /// What trade is worth to a city this year. A lookup; see `reckon`.
     pub fn city_trade(&self, city: usize) -> f32 {
-        self.routes
-            .iter()
-            .filter(|r| r.open && (r.a == city || r.b == city))
-            .map(|r| r.value)
-            .sum()
+        self.city_takings.get(city).copied().unwrap_or(0.0)
     }
 
     /// What trade is worth to a realm: the tolls on every road that touches
@@ -371,15 +405,10 @@ impl World {
     /// is what makes two realms unwilling to fight, and it has to be actual
     /// trade rather than two cultures that both like the idea of it.
     pub fn trade_between(&self, p: usize, q: usize) -> f32 {
-        self.routes
-            .iter()
-            .filter(|r| r.open)
-            .filter(|r| {
-                let (pa, pb) = (self.cities[r.a].polity, self.cities[r.b].polity);
-                (pa == Some(p) && pb == Some(q)) || (pa == Some(q) && pb == Some(p))
-            })
-            .map(|r| r.value)
-            .sum()
+        self.pair_trade
+            .get(&(p.min(q), p.max(q)))
+            .copied()
+            .unwrap_or(0.0)
     }
 
     /// The goods a city's own country produces, named.

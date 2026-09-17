@@ -364,6 +364,18 @@ pub struct Tuning {
     pub school_schism_min_adherents: usize,
     /// Chance an adherent realm follows the dissenters in a schism.
     pub school_schism_share: f64,
+    /// How many living traditions the world carries comfortably, per living
+    /// realm. Past this the ground is crowded and a schism struggles to take
+    /// root at all.
+    ///
+    /// Without a term like this the schools compound: each one that lasts a
+    /// century throws off a daughter with near-certainty, each daughter does
+    /// the same, and nothing anywhere depends on how many there already are.
+    /// A large map reached seventeen hundred living schools by the
+    /// thirty-fourth century against four hundred realms — eighty-six
+    /// thousand school-and-realm pairs, each rolling for persecution every
+    /// year, which buried the world in martyrs and the simulation in work.
+    pub schools_per_realm: f64,
     /// Influence below which a school is considered to be fading.
     pub school_extinction_threshold: f32,
     /// Years a school may fade before its teachings are forgotten.
@@ -671,6 +683,7 @@ impl Default for Tuning {
             school_schism_min_age: 60,
             school_schism_min_adherents: 4,
             school_schism_share: 0.45,
+            schools_per_realm: 0.5,
             school_extinction_threshold: 0.04,
             school_fading_years: 15,
             school_absorb_threshold: 0.85,
@@ -902,6 +915,7 @@ impl Tuning {
                 self.school_schism_min_adherents = v.max(2.0) as usize;
             }
             "school_schism_share" => self.school_schism_share = v,
+            "schools_per_realm" => self.schools_per_realm = v.max(0.02),
             "school_extinction_threshold" => self.school_extinction_threshold = v as f32,
             "school_fading_years" => self.school_fading_years = v as i32,
             "school_absorb_threshold" => self.school_absorb_threshold = v as f32,

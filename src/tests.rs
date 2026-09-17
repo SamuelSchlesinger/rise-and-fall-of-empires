@@ -110,40 +110,62 @@ fn owner_index_matches_the_map() {
     }
 }
 
-/// Compaction drops the small old events, keeps the great ones, and leaves
-/// the by-ref index pointing at the right entries.
+/// Compaction keeps the chronicle near its cap, oldest and least important
+/// first, and never touches the handful of age-defining events.
 ///
-/// The guarantee is about *which* events survive, not about how few: a
-/// world that logs a great deal of trivia will keep some of it, because
-/// compaction only removes as much as it has to. So the test runs the same
-/// seed twice — once capped, once uncapped — and demands that every event
-/// worth keeping in the uncapped run is still there in the capped one.
-/// Asserting instead that no importance-0 event survives held only while
-/// trivia was too rare to fill the excess by itself.
+/// The promise used to be that nothing of importance 2 or above was ever
+/// dropped, and on a long game that made the cap a fiction: a large map at
+/// the eightieth century held four hundred thousand events against a cap of
+/// sixty thousand, because by then almost nothing left was droppable. So
+/// importance 2 is droppable now, oldest first, and only importance 3 — five
+/// places in the whole simulation, the naming of an age and the rise and
+/// dissolution of a hegemony — is kept whatever happens.
+///
+/// What the test demands is therefore two things: that the cap is real, and
+/// that the events the world is *named* after survive it.
 #[test]
-fn chronicle_compaction_keeps_the_great_events() {
+fn chronicle_compaction_keeps_the_cap_and_the_greatest_events() {
     let mut w = world(13);
     w.tuning.chronicle_cap = 400;
-    run(&mut w, 400);
+    run(&mut w, 900);
     assert!(w.chronicle.dropped > 0, "nothing was ever dropped");
-    assert!(w.chronicle.len() <= 400 + w.chronicle.dropped);
+    assert!(
+        w.chronicle.len() <= 400,
+        "{} events against a cap of 400",
+        w.chronicle.len()
+    );
 
     let mut full = world(13);
     full.tuning.chronicle_cap = 0;
-    run(&mut full, 400);
+    run(&mut full, 900);
     assert_eq!(full.chronicle.dropped, 0, "an uncapped chronicle dropped");
-    let great = |w: &World| -> Vec<(i32, u8, String)> {
+    let greatest = |w: &World| -> Vec<(i32, String)> {
         w.chronicle
             .events
             .iter()
-            .filter(|e| e.importance >= 2)
-            .map(|e| (e.year, e.importance, e.text.clone()))
+            .filter(|e| e.importance >= 3)
+            .map(|e| (e.year, e.text.clone()))
             .collect()
     };
     assert_eq!(
-        great(&w),
-        great(&full),
-        "compaction dropped an event it had to keep"
+        greatest(&w),
+        greatest(&full),
+        "compaction dropped an event the world is named after"
+    );
+    // And what it did drop, it dropped from the far end: whatever survives
+    // of the ordinary run of history is the recent part of it.
+    let oldest_ordinary = w
+        .chronicle
+        .events
+        .iter()
+        .filter(|e| e.importance < 3)
+        .map(|e| e.year)
+        .min()
+        .expect("some ordinary history survived");
+    assert!(
+        oldest_ordinary > 100,
+        "the oldest surviving footnote is from year {}, so nothing was trimmed from the front",
+        oldest_ordinary
     );
 
     let mut refs: Vec<crate::sim::chronicle::Ref> = Vec::new();
@@ -780,7 +802,7 @@ fn the_sea_is_crossed_both_ways() {
     let mut straddled = 0;
     for seed in [7u64, 1, 42, 99] {
         let mut w = World::new(seed, 160, 64, Detail::Medium);
-        run(&mut w, 900);
+        run(&mut w, 1400);
         landings += w
             .chronicle
             .events
@@ -1018,6 +1040,260 @@ fn the_weather_turns_over_centuries() {
             a.climate.at, b.climate.at,
             "the weather did not survive a save taken {} years into an epoch",
             extra
+        );
+    }
+}
+
+/// Print the cost of a year, century by century, with the counts that
+/// explain it. Not a check — a probe, for when the game feels slow.
+///
+/// `W`, `H`, `C` and `DETAIL` set the map and how far to run:
+/// `W=400 H=160 C=50 cargo test --release time_each_century -- --ignored --nocapture`
+///
+/// Living counts are printed beside the ever-lived ones on purpose. Almost
+/// every slowdown this game has had was one of two things — a loop walking
+/// the dead, or a population that was supposed to reach an equilibrium and
+/// did not — and the two are told apart at a glance by whether the left-hand
+/// number is climbing with the right.
+#[test]
+#[ignore]
+fn time_each_century() {
+    let detail = match std::env::var("DETAIL").as_deref() {
+        Ok("high") => Detail::High,
+        Ok("low") => Detail::Low,
+        _ => Detail::Medium,
+    };
+    let env = |k: &str, d: usize| -> usize {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let mut w = World::new(7, env("W", 288), env("H", 144), detail);
+    let mut worst = 0.0f64;
+    for century in 0..env("C", 80) {
+        let t = std::time::Instant::now();
+        for _ in 0..100 {
+            w.tick();
+        }
+        let ms = t.elapsed().as_secs_f64() * 1000.0 / 100.0;
+        worst = worst.max(ms);
+        if century % 5 == 0 || ms > 2.0 {
+            println!(
+                "year {:>5}: {:>7.3} ms/year | persons {:>5}/{:<8} realms {:>4}/{:<6} \
+                 schools {:>4}/{:<5} wars {:>4}/{:<6} events {:>6} cities {:>4}",
+                (century + 1) * 100,
+                ms,
+                w.alive_persons.len(),
+                w.persons.len(),
+                w.alive_polities.len(),
+                w.polities.len(),
+                w.schools.iter().filter(|s| s.alive()).count(),
+                w.schools.len(),
+                w.alive_wars.len(),
+                w.wars.len(),
+                w.chronicle.len(),
+                w.cities.len(),
+            );
+        }
+    }
+    println!("worst century: {:.3} ms/year", worst);
+}
+
+/// No living population may grow without bound.
+///
+/// Every population here is a queue: members arrive, members leave, and by
+/// Little's law the number alive at any moment is the arrival rate times the
+/// mean lifetime. The vectors behind them are append-only, so their *length*
+/// is meant to grow with the length of history — but the number alive has to
+/// settle, because what the tick does each year is proportional to that and
+/// not to the length of the log.
+///
+/// The schools were neither. Arrivals scaled with the population, because
+/// every school rolled the same yearly chance to schism — so this was not a
+/// queue at all but a birth process, and the count grew by a fixed fraction
+/// per century for ever. This is the half of that bug a short test can
+/// catch: turn the schism chance up and see whether the count still answers
+/// to the size of the world that carries it.
+///
+/// The other half — a class of member with no way *out* — accumulates far
+/// too slowly to show here, and is guarded by
+/// [`a_school_with_nowhere_to_go_is_forgotten`] below and by the census in
+/// `time_each_century`.
+#[test]
+fn living_schools_answer_to_the_size_of_the_world() {
+    let mut w = World::new(19, 200, 80, Detail::Medium);
+    w.tuning.school_schism_chance = 0.9;
+    w.tuning.school_schism_min_age = 5;
+    w.tuning.school_schism_min_adherents = 2;
+    run(&mut w, 1400);
+    let living = w.schools.iter().filter(|s| s.alive()).count();
+    let realms = w.alive_polities.len().max(1);
+    let room = (realms as f64 * w.tuning.schools_per_realm).max(1.0);
+    assert!(living > 0, "no school survived at all");
+    assert!(
+        (living as f64) < room * 3.0,
+        "{} living schools against {} realms: the schisms are compounding",
+        living,
+        realms
+    );
+    // And they must actually be retired, not merely stop being founded.
+    assert!(
+        w.schools.len() > living * 4,
+        "{} schools ever against {} alive: almost nothing is being retired",
+        w.schools.len(),
+        living
+    );
+}
+
+/// A teaching that has been fading for generations, with no larger cousin to
+/// be folded into, is forgotten rather than kept alive for ever.
+///
+/// This is the service-rate half of the schools bug, and the reason it went
+/// unnoticed for so long is that it is invisible over any short run. The
+/// ordinary way a school ends is absorption, which needs a bigger school of
+/// the same kind holding ground where the dying one still stands. A school
+/// that had retreated somewhere no cousin reached met that condition never
+/// — and it never fell below the extinction floor either, because it still
+/// held a tenth of one realm. So it failed to be absorbed every year for
+/// ever. One immortal school is nothing; they accumulate linearly, and six
+/// hundred of them had piled up by the hundredth century, each one rolling
+/// against every realm it touched.
+///
+/// Tested directly rather than by simulation, because the accumulation is
+/// slow and the mechanism is exact: a lone school of its kind has nowhere to
+/// go by construction, so it must die of its own accord.
+#[test]
+fn a_school_with_nowhere_to_go_is_forgotten() {
+    let mut w = world(5);
+    run(&mut w, 120);
+    let city = (0..w.cities.len())
+        .find(|&c| w.cities[c].destroyed.is_none() && w.cities[c].polity.is_some())
+        .expect("a world of 120 years has a city");
+    // Its own kind, and the only one of it: nothing can absorb it.
+    let s = crate::sim::magic::found_school(
+        &mut w,
+        city,
+        crate::sim::SchoolKind::Philosophical,
+        None,
+        None,
+    );
+    let alone = |w: &World| -> bool {
+        !w.schools
+            .iter()
+            .any(|x| x.id != s && x.alive() && x.kind == crate::sim::SchoolKind::Philosophical)
+    };
+    // Held in exactly the state that used to be eternal: enough of a
+    // following to stay above the extinction floor, and far too little to
+    // stand anywhere. Pinned every year because a school left alone in its
+    // own realm legitimately flourishes, and a flourishing school is not
+    // what this is about.
+    let p = w.cities[city].polity.expect("the city has a realm");
+    let bar = w.tuning.school_fading_years * 5 + 40;
+    for _ in 0..bar {
+        w.schools[s].influence.clear();
+        w.schools[s].influence.insert(p, 0.2);
+        w.tick();
+        if !w.schools[s].alive() {
+            return;
+        }
+        if !alone(&w) {
+            // A cousin appeared and could legitimately absorb it, so the
+            // test no longer proves anything. Not a failure.
+            return;
+        }
+    }
+    panic!(
+        "a school with nowhere to go was still alive after {} years, holding {:?}",
+        bar,
+        w.schools[s]
+            .influence
+            .values()
+            .fold(0.0f32, |a, &b| a.max(b))
+    );
+}
+
+#[test]
+#[ignore]
+fn time_saving_and_the_chronicle() {
+    for years in [1000i32, 3000, 5000, 8000] {
+        let mut w = World::new(7, 160, 64, Detail::Medium);
+        run(&mut w, years);
+        let t = std::time::Instant::now();
+        let bytes = crate::ser::save(&mut w);
+        let save_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let t = std::time::Instant::now();
+        let _ = crate::ser::load(&bytes).expect("loads");
+        let load_ms = t.elapsed().as_secs_f64() * 1000.0;
+        // The chronicle screen, unfiltered and filtered.
+        let t = std::time::Instant::now();
+        for _ in 0..20 {
+            std::hint::black_box(crate::ui::detail::list_rows(&w, 5));
+        }
+        let wars_ms = t.elapsed().as_secs_f64() * 1000.0 / 20.0;
+        let frame = crate::ui::time_frames(
+            {
+                let mut v = World::new(7, 160, 64, Detail::Medium);
+                run(&mut v, years);
+                v
+            },
+            160,
+            45,
+            40,
+        );
+        println!(
+            "year {:>5}: save {:>8.1} ms | load {:>8.1} ms | wars list {:>6.3} ms | frame {:>6.2} ms | {} events ({} KB)",
+            years,
+            save_ms,
+            load_ms,
+            wars_ms,
+            frame,
+            w.chronicle.len(),
+            bytes.len() / 1024
+        );
+    }
+}
+
+#[test]
+#[ignore]
+fn time_the_interface() {
+    let env = |k: &str, d: usize| -> usize {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let (wide, high) = (env("W", 288), env("H", 144));
+    for years in [1000i32, 3000, 5000, 8000] {
+        let mut w = World::new(7, wide, high, Detail::Medium);
+        run(&mut w, years);
+        let time = |f: &dyn Fn()| -> f64 {
+            let t = std::time::Instant::now();
+            for _ in 0..20 {
+                f();
+            }
+            t.elapsed().as_secs_f64() * 1000.0 / 20.0
+        };
+        let tab = |n: usize| {
+            time(&|| {
+                std::hint::black_box(crate::ui::detail::list_rows(&w, n));
+            })
+        };
+        let stories = time(&|| {
+            std::hint::black_box(crate::ui::stories(&w));
+        });
+        println!(
+            "year {:>5} ({:>7} persons {:>6} wars {:>5} realms): stories {:>7.3} \
+             | realms {:>7.3} | persons {:>7.3} | wars {:>7.3} | figures {:>7.3} ms/frame",
+            years,
+            w.persons.len(),
+            w.wars.len(),
+            w.polities.len(),
+            stories,
+            tab(0),
+            tab(4),
+            tab(5),
+            tab(9),
         );
     }
 }

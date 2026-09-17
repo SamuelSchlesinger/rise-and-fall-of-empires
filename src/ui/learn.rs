@@ -126,7 +126,7 @@ impl Step {
             Self::Resume => ("Time", "Press Space to start time. This world develops on its own; you choose when to watch or look closer."),
             Self::Pause => ("Pause", "Press Space to pause again. Pausing gives you time to explore without missing events."),
             Self::Move => ("Explore", "Move with an arrow key or h j k l. The sidebar describes the place under your cursor."),
-            Self::Layer => ("Map layers", "Press Tab to change the map layer. Read the legend under the map to see what its colours and symbols mean."),
+            Self::Layer => ("Map layers", "Press Tab to change what the map shows: who holds what, the peoples, the land, how they live, and what is moving. Press \\ to step through the maps within one. The legend under the map explains its colours."),
             Self::Zoom => ("Zoom", "Type zo to zoom out. More of the world fits on screen. Type zi when you want to look closer again."),
             Self::Browse => ("Lists", "Press e to browse the world's realms, cities, peoples and more. In a list, Tab changes category and Enter opens an item."),
             Self::Back => ("Return", "Press Esc to return to the map. On a detail page, bracketed letters follow links and Backspace retraces them."),
@@ -221,12 +221,17 @@ impl Ui {
             return true;
         }
         let cursor = self.cursor;
+        let layer = self.layer;
         self.handle_key_normal(key);
         let complete = match step {
             Step::Resume => !self.paused,
             Step::Pause => self.paused,
             Step::Move => self.cursor != cursor,
-            Step::Layer => self.layer == Layer::Terrain,
+            // That the layer changed, not that it became any particular
+            // one. Naming a destination here tied the tutorial to what Tab
+            // happened to land on, and the step stalled silently the day
+            // Tab began stepping between families instead.
+            Step::Layer => self.layer != layer,
             Step::Zoom => self.zoom > 1,
             Step::Browse => self.mode == Mode::List,
             Step::Back => self.mode == Mode::Map,
@@ -322,7 +327,9 @@ mod tests {
         assert!(ui.follow);
         assert_eq!(ui.run_until, Some(500));
         assert_eq!(ui.mode, Mode::Map);
-        assert_eq!(ui.layer, Layer::Terrain);
+        // Tab moved the layer along; which one it landed on is the layer
+        // machinery's business, not the tutorial's.
+        assert_ne!(ui.layer, Layer::Political);
         assert_eq!(ui.zoom, 2);
         assert_eq!(ui.world.year, year);
         assert!(ui.save_path.is_none());

@@ -504,7 +504,7 @@ impl Ui {
                 }
             }
             "story" | "t" | "now" => {
-                let st = self.stories();
+                let st = stories(&self.world);
                 match st.first() {
                     Some((text, r)) => {
                         let (text, r) = (text.clone(), *r);

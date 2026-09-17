@@ -1454,6 +1454,10 @@ fn schools<S: Io>(s: &mut S, w: &mut World) {
 }
 fn wars<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.wars, blank_war, war);
+    if s.reading() {
+        // Derived, like the living index beside it.
+        w.alive_wars = w.wars.iter().filter(|x| x.alive()).map(|x| x.id).collect();
+    }
 }
 fn eras<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.eras, blank_era, era);
@@ -1727,6 +1731,12 @@ pub fn load(bytes: &[u8]) -> Result<World, SaveError> {
     // the tick only works it out on an epoch boundary and a world loaded
     // between two boundaries would otherwise run on no weather at all.
     crate::sim::climate::rebuild(&mut w);
+    // Likewise the year's trade totals, which `economy` reads in an earlier
+    // phase than the one that works them out.
+    crate::sim::trade::reckon(&mut w);
+    // And the tally of war names, which is kept up as wars are declared and
+    // so has to be counted back out of the names of the wars already fought.
+    w.recount_war_names();
     w.recompute();
     Ok(w)
 }

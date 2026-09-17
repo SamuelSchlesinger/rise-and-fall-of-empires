@@ -161,13 +161,25 @@ impl Chronicle {
     }
 
     /// Keep the chronicle from growing without bound. Over `cap` events, the
-    /// oldest trivia goes first: importance 0, then importance 1. Events of
-    /// importance 2 and 3 — the ones the world remembers — are never dropped,
-    /// so a long enough run can sit above the cap for good.
+    /// oldest goes first, and the least important of the old before the rest:
+    /// footnotes, then ordinary business, then the things a realm remembers.
+    /// Only importance 3 — the handful of age-defining events, five places in
+    /// the whole simulation — is kept whatever happens.
     ///
     /// Event positions shift, so the by-ref index is rebuilt; `for_ref` and
     /// the entity pages keep working. It trims well below the cap so that it
     /// runs rarely rather than every year.
+    ///
+    /// The sweep used to stop at importance 1, which meant that on a long
+    /// game the cap was a fiction: a large map at the eightieth century held
+    /// four hundred thousand events against a cap of sixty thousand, because
+    /// almost nothing left was droppable. Worse than the memory was the
+    /// thrashing — every few thousand events it rescanned the whole vector,
+    /// failed to free anything, and rebuilt a by-ref index of a million
+    /// entries for nothing. That is why the back-off below is proportional:
+    /// a compaction that cannot reach its target waits longer before trying
+    /// again, so even a chronicle that is all age-defining events costs a
+    /// constant amount of work per event rather than a growing one.
     pub fn compact(&mut self, cap: usize) {
         if cap == 0 || self.events.len() <= cap || self.events.len() < self.next_compact {
             return;
@@ -175,7 +187,7 @@ impl Chronicle {
         let target = cap - cap / 8;
         let mut excess = self.events.len() - target;
         let mut doomed = vec![false; self.events.len()];
-        for level in 0..=1u8 {
+        for level in 0..=2u8 {
             if excess == 0 {
                 break;
             }
@@ -197,7 +209,17 @@ impl Chronicle {
             keep
         });
         self.dropped += before - self.events.len();
-        self.next_compact = self.events.len() + cap / 16 + 1;
+        // Ordinarily the next sweep is due once the cap has been earned back.
+        // When this one could not reach its target there is nothing to earn
+        // back, so wait for the chronicle to grow by an eighth of itself
+        // instead: a futile scan costs what the chronicle costs, and doing it
+        // at geometric intervals is what keeps that from compounding.
+        let step = if excess == 0 {
+            cap / 16 + 1
+        } else {
+            self.events.len() / 8 + cap / 16 + 1
+        };
+        self.next_compact = self.events.len() + step;
         self.reindex();
     }
 }

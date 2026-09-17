@@ -10,6 +10,89 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [0.3.1] - 2026-09-17
+
+A world that ran for five thousand years slowed to a crawl, and the default
+map was smaller than it needed to be. Both are fixed, and the second is only
+possible because of the first.
+
+### Changed
+
+- **The default map is now 288x144 rather than 160x64** — four times the
+  world. Two cells wide for every one tall, which is what draws square: at
+  zoom 1 a world cell is one terminal character, and a character is about
+  twice as tall as it is wide. Steady cost is about 2.5 ms a year, so the
+  fastest speed still keeps up with room to spare. *World-changing*: a seed
+  gives a different world than it did at the old size.
+
+- **The chronicle's cap is now real.** Events of importance 2 used to be
+  undroppable, which meant that on a long game the cap was a fiction — a
+  large map at the eightieth century held four hundred thousand events
+  against a cap of sixty thousand, because by then almost nothing left could
+  be dropped. Importance 2 is trimmed oldest-first when it must be; only
+  importance 3, the naming of an age and the rise and fall of a hegemony, is
+  kept whatever happens. A compaction that cannot reach its target now waits
+  proportionally longer before trying again, so a futile scan costs a
+  constant amount of work per event rather than a growing one.
+
+- **A world carries only so many traditions at once.** Every school rolled
+  the same yearly chance to schism whatever the state of the world, so the
+  count grew by a fixed fraction per century for ever: seventeen hundred
+  living schools against four hundred realms by the thirty-fourth century.
+  Schism now answers to how crowded the ground already is, through the new
+  `schools_per_realm` dial. *World-changing.*
+
+### Fixed
+
+- **The simulation no longer gets slower the longer it runs.** A large map
+  went from two milliseconds a year in its first century to twenty-three in
+  its fiftieth and grew without bound after that. It is now flat from about
+  year fifteen hundred to year ten thousand, the length of the longest game
+  anyone is likely to play. The causes were all the same shape — work
+  proportional to the length of a world's history rather than to what is
+  alive in it:
+
+  - Naming a war counted the wars that already carried the name by walking
+    every war ever fought, building a string per war to compare against.
+    Sixteen thousand of them by year three thousand, on every declaration.
+    Kept as a tally instead.
+  - The phases that age and kill notables, that remember the dead as
+    legends, that resolve wars, that work out every realm's reach over water
+    and that sweep the magical schools all walked the whole of a vector to
+    find the few thousand entries that were alive. They read the living
+    indexes now, and wars have an index of their own.
+  - **A teaching with nowhere to go lived for ever.** The ordinary way a
+    school ends is absorption into a larger school of its own kind holding
+    ground where it still stands. One that had retreated somewhere no cousin
+    reached met that condition never, and never fell below the extinction
+    floor either, so it survived holding a tenth of one realm and went on
+    rolling against every realm it touched. Six hundred of those had
+    accumulated by the hundredth century, and since each one could persecute
+    and make martyrs — people created already dead, appended to the person
+    list for ever — the person list reached three and a half million while
+    barely a thousand people were alive. A school that has been fading for
+    generations with nothing to be folded into is now forgotten.
+  - Joining a house compared the newcomer against every name the house had
+    ever carried, and closing a spent house walked the same list on every
+    death. Both are searches now.
+
+- **The interface no longer gets slower the longer it runs.** The
+  storyteller that fills the sidebar walked every person who had ever lived
+  and every war ever fought, sixty times a second. The list pages sorted the
+  whole of history and rendered all of it to text on every frame, which cost
+  the Wars page nine milliseconds a frame by the eightieth century. Both
+  read the living indexes or a bounded best-of now, and a page that is a
+  window on more than it shows says so in its footer.
+
+- **The map cursor is visible again.** It was drawn with reverse video
+  alone, which exchanges a cell's own two colours — and on a shaded map
+  those are often nearly the same. Deep water is drawn in (5, 17, 41) on
+  (4, 13, 31), eighteen apart out of seven hundred and sixty-five, and
+  better than a quarter of the map is within a fifth of that. Swapping them
+  changed nothing anyone could see, so the cursor vanished over open sea and
+  over any flat stretch of country. It is now forced to a contrasting pair
+  rather than an exchanged one.
+
 ## [0.3.0] - 2026-09-17
 
 History acquires a direction. Until now everything in the world cycled:
@@ -572,6 +655,9 @@ The first release. Everything below is the work that led to it.
 - Person traits and a school's following line up in columns; the headless
   summary says "1 school", not "1 schools".
 
+[0.3.1]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.3.1
+[0.3.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.3.0
+[0.2.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.0
 
 [0.1.2]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.2

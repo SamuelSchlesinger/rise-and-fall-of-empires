@@ -5,6 +5,7 @@ use crate::sim::chronicle::{EventKind, Ref};
 use crate::sim::{dynasty, explain};
 use crate::sim::{SchoolKind, Stance, World};
 use crate::term::{self, Rgb, BOLD, DIM};
+use std::cmp::Ordering;
 
 pub const LIST_TABS: [&str; 11] = [
     "Realms",
@@ -382,12 +383,62 @@ pub fn list_header(tab: usize) -> &'static str {
     }
 }
 
-pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
+/// How many rows a list page puts in order and renders.
+///
+/// A page is a window on a world's whole history, and history does not stop
+/// growing: by the eightieth century of a large map a hundred thousand
+/// people have lived and twenty-five thousand wars have been fought. Every
+/// one of them was sorted and rendered to a line of text on every frame,
+/// which cost the Wars page nine milliseconds a frame by itself — the
+/// interface got slower the longer a game went on, for no reason a player
+/// could see. Nobody scrolls past the first few hundred of anything; `/`
+/// is what finds the rest.
+const LIST_CAP: usize = 2000;
+
+/// And for the Figures page, which is not a catalogue but a short list of
+/// the people an age is remembered by — and which pays for every row it
+/// shows, because each one carries the deed the person is known for.
+const FIGURES_CAP: usize = 400;
+
+/// Put the best `cap` of `v` in order and return how many there were.
+///
+/// The selection is linear in the length and the sort is over the survivors,
+/// so a page costs what it shows rather than what the world remembers.
+fn keep_best(
+    v: &mut Vec<usize>,
+    cap: usize,
+    mut cmp: impl FnMut(&usize, &usize) -> Ordering,
+) -> usize {
+    let total = v.len();
+    if total > cap {
+        v.select_nth_unstable_by(cap - 1, &mut cmp);
+        v.truncate(cap);
+    }
+    v.sort_by(cmp);
+    total
+}
+
+/// The same, for a page ordered by a key rather than a comparison. The
+/// index goes on the end of every key so that the order is total: an
+/// unstable selection may reorder ties, and a list that shuffles as it is
+/// scrolled is worse than a slow one.
+fn keep_best_by_key<K: Ord>(
+    v: &mut Vec<usize>,
+    cap: usize,
+    mut key: impl FnMut(usize) -> K,
+) -> usize {
+    keep_best(v, cap, |&a, &b| (key(a), a).cmp(&(key(b), b)))
+}
+
+pub fn list_rows(w: &World, tab: usize) -> (Vec<(String, Ref)>, usize) {
     let mut rows = Vec::new();
+    // How many there were before the page was trimmed to [`LIST_CAP`], so
+    // the footer can say that there is more than is shown.
+    let total;
     match tab {
         0 => {
             let mut ps: Vec<usize> = (0..w.polities.len()).collect();
-            ps.sort_by_key(|&p| {
+            total = keep_best_by_key(&mut ps, LIST_CAP, |p| {
                 (
                     w.polities[p].fell.is_some(),
                     std::cmp::Reverse(w.polities[p].cells),
@@ -424,12 +475,13 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         1 => {
             let mut cs: Vec<usize> = (0..w.cities.len()).collect();
             // Living cities first, largest first within each group.
-            cs.sort_by(|&a, &b| {
+            total = keep_best(&mut cs, LIST_CAP, |&a, &b| {
                 let (ca, cb) = (&w.cities[a], &w.cities[b]);
                 ca.destroyed
                     .is_some()
                     .cmp(&cb.destroyed.is_some())
                     .then_with(|| cb.pop.total_cmp(&ca.pop))
+                    .then_with(|| a.cmp(&b))
             });
             for c in cs {
                 let city = &w.cities[c];
@@ -457,7 +509,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         2 => {
             let mut cs: Vec<usize> = (0..w.cultures.len()).collect();
-            cs.sort_by_key(|&c| {
+            total = keep_best_by_key(&mut cs, LIST_CAP, |c| {
                 (
                     w.cultures[c].extinct.is_some(),
                     std::cmp::Reverse(w.cultures[c].cells),
@@ -485,12 +537,13 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         3 => {
             let mut ss: Vec<usize> = (0..w.schools.len()).collect();
             // Living schools first, most influential first within each group.
-            ss.sort_by(|&a, &b| {
+            total = keep_best(&mut ss, LIST_CAP, |&a, &b| {
                 let (sa, sb) = (&w.schools[a], &w.schools[b]);
                 sa.extinct
                     .is_some()
                     .cmp(&sb.extinct.is_some())
                     .then_with(|| sb.total_influence().total_cmp(&sa.total_influence()))
+                    .then_with(|| a.cmp(&b))
             });
             for s in ss {
                 let sc = &w.schools[s];
@@ -513,15 +566,16 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         4 => {
             let mut ps: Vec<usize> = (0..w.persons.len()).collect();
             // The living first, then by renown, then youngest first.
-            ps.sort_by(|&a, &b| {
+            total = keep_best(&mut ps, LIST_CAP, |&a, &b| {
                 let (pa, pb) = (&w.persons[a], &w.persons[b]);
                 pa.died
                     .is_some()
                     .cmp(&pb.died.is_some())
                     .then_with(|| pb.renown.total_cmp(&pa.renown))
                     .then_with(|| pb.born.cmp(&pa.born))
+                    .then_with(|| a.cmp(&b))
             });
-            for p in ps.into_iter().take(400) {
+            for p in ps {
                 let per = &w.persons[p];
                 let realm = per
                     .polity
@@ -544,7 +598,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         5 => {
             let mut ws: Vec<usize> = (0..w.wars.len()).collect();
-            ws.sort_by_key(|&x| {
+            total = keep_best_by_key(&mut ws, LIST_CAP, |x| {
                 (
                     w.wars[x].ended.is_some(),
                     std::cmp::Reverse(w.wars[x].started),
@@ -573,7 +627,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         7 => {
             let mut arts: Vec<usize> = (0..w.artifacts.len()).collect();
-            arts.sort_by_key(|&a| {
+            total = keep_best_by_key(&mut arts, LIST_CAP, |a| {
                 (
                     matches!(w.artifacts[a].holder, crate::sim::Holder::Lost),
                     w.artifacts[a].made,
@@ -593,7 +647,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         8 => {
             let mut prs: Vec<usize> = (0..w.prophecies.len()).collect();
-            prs.sort_by_key(|&i| {
+            total = keep_best_by_key(&mut prs, LIST_CAP, |i| {
                 (
                     w.prophecies[i].outcome.is_some(),
                     std::cmp::Reverse(w.prophecies[i].year),
@@ -625,7 +679,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
             let mut fs: Vec<usize> = (0..w.persons.len())
                 .filter(|&i| w.persons[i].is_acclaimed() || w.persons[i].greatness >= 80.0)
                 .collect();
-            fs.sort_by(|&a, &b| {
+            total = keep_best(&mut fs, FIGURES_CAP, |&a, &b| {
                 let (pa, pb) = (&w.persons[a], &w.persons[b]);
                 pa.died
                     .is_some()
@@ -633,7 +687,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                     .then_with(|| pb.greatness.total_cmp(&pa.greatness))
                     .then_with(|| a.cmp(&b))
             });
-            for i in fs.into_iter().take(400) {
+            for i in fs {
                 let per = &w.persons[i];
                 let realm = per
                     .polity
@@ -662,7 +716,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         // and the longest-lasting at the top of each group.
         10 => {
             let mut hs: Vec<usize> = (0..w.houses.len()).collect();
-            hs.sort_by(|&a, &b| {
+            total = keep_best(&mut hs, LIST_CAP, |&a, &b| {
                 let (ha, hb) = (&w.houses[a], &w.houses[b]);
                 ha.ended
                     .is_some()
@@ -694,7 +748,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         _ => {
             let mut fs: Vec<usize> = (0..w.terrain.features.len()).collect();
-            fs.sort_by_key(|&f| {
+            total = keep_best_by_key(&mut fs, LIST_CAP, |f| {
                 (
                     w.terrain.features[f].name.is_none(),
                     std::cmp::Reverse(w.terrain.features[f].cells.len()),
@@ -707,7 +761,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
             }
         }
     }
-    rows
+    (rows, total)
 }
 
 fn clip(s: &str, n: usize) -> String {

@@ -355,6 +355,67 @@ pub fn legend_parts(layer: Layer, ascii: bool) -> Vec<String> {
             "the sea is left bare".into(),
             "@ # cities".into(),
         ],
+        // Every good, so the key is a complete index of the layer. `fit`
+        // drops the tail on a narrow terminal, so the ones a reader is most
+        // likely to be hunting for come first.
+        Layer::Goods => {
+            use crate::sim::trade::GOODS;
+            let mut v: Vec<String> = vec!["what the ground yields".into()];
+            v.extend(GOODS.iter().map(|&g| {
+                let (_, glyph) = crate::ui::good_style(g, ascii);
+                format!("{} {}", glyph, g.name())
+            }));
+            v.push("dim ground yields nothing worth carrying".into());
+            v
+        }
+        Layer::Trade => vec![
+            format!("{} a road, brighter the more it carries", field),
+            format!("{} a road closed by war", ruins),
+            "gold ground is a developed realm".into(),
+            "@ # cities".into(),
+        ],
+        Layer::Harvest => vec![
+            "dark to green to pale as the land feeds more".into(),
+            "fertility, this century's weather and what is known, together".into(),
+            "@ # cities".into(),
+        ],
+        Layer::Knowledge => vec![
+            "dark to blue to white as the ground remembers more".into(),
+            "knowledge outlives the realm that built it".into(),
+            "ground that empties of people forgets".into(),
+        ],
+        // The motion layers say what has been happening, so their keys have
+        // to name a direction rather than a quantity.
+        Layer::Settling => vec![
+            format!("{} people arriving", if ascii { '+' } else { '▲' }),
+            format!("{} people leaving", if ascii { '-' } else { '▼' }),
+            "green fills, red empties".into(),
+            "measured against what the land can feed".into(),
+            "fades over a lifetime".into(),
+        ],
+        Layer::Fighting => vec![
+            format!("{} fought over lately", if ascii { 'X' } else { '✕' }),
+            "brighter red, more of it".into(),
+            "quiet ground is left dark".into(),
+            "fades over a lifetime".into(),
+        ],
+        Layer::Frontier => vec![
+            "blue is long held, orange changed hands lately".into(),
+            format!(
+                "{} changed hands more than once",
+                if ascii { '!' } else { '◆' }
+            ),
+            "the map being redrawn".into(),
+        ],
+        Layer::Drift => vec![
+            format!(
+                "{} the weather has turned wetter",
+                if ascii { '~' } else { '≈' }
+            ),
+            format!("{} and drier", if ascii { ':' } else { '∴' }),
+            "against the same ground a century ago".into(),
+            "this is what empties a steppe".into(),
+        ],
     }
 }
 

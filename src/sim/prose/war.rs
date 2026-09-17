@@ -82,12 +82,32 @@ pub fn war_name_numbered(base: &str, previous: usize) -> String {
     if previous == 0 {
         return base.to_string();
     }
-    let stem = base.strip_prefix("the ").unwrap_or(base);
+    let stem = war_name_stem(base);
     match previous {
         n if n < 10 => format!("the {} {}", cap(&ordinal_word(n as i64 + 1)), stem),
         _ => format!("the Latest {}", stem),
     }
 }
+
+/// The part of a war's name that its successors will share: the article and
+/// any ordinal stripped back off.
+///
+/// This is the inverse of [`war_name_numbered`], and it is what the tally of
+/// used names is keyed on — both when a name is coined and when the tally is
+/// rebuilt from the wars in a loaded save. The two have to agree, so they
+/// are written next to each other.
+pub fn war_name_stem(name: &str) -> &str {
+    let s = name.strip_prefix("the ").unwrap_or(name);
+    match s.split_once(' ') {
+        Some((first, rest)) if ORDINALS_USED.contains(&first) => rest,
+        _ => s,
+    }
+}
+
+/// The words [`war_name_numbered`] can put in front of a stem.
+const ORDINALS_USED: [&str; 10] = [
+    "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "Tenth", "Latest",
+];
 
 // ---------------------------------------------------------------------------
 // Declaring a war
