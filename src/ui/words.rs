@@ -3,8 +3,48 @@
 //! function so it can be tested and reused by the sidebar, the lists and
 //! the detail pages alike.
 
-use super::Layer;
+use super::{Layer, Mode};
 use crate::sim::{PolityKind, SchoolKind, World};
+
+/// Short, complete keyboard prompts. Keep the entry points to the richer
+/// screens ahead of movement controls so they remain visible on small windows.
+pub(super) fn navigation(mode: Mode, paused: bool) -> [&'static str; 2] {
+    match mode {
+        Mode::Map => [
+            "Enter inspect  e browse  r recap  c history  t story  x intervene",
+            if paused {
+                "Space resume  +/- speed  Arrows move  Tab layers  / search  f follow"
+            } else {
+                "Space pause  +/- speed  Arrows move  Tab layers  / search  f follow"
+            },
+        ],
+        Mode::List => [
+            "Enter inspect  Tab category  / filter  x intervene",
+            "Arrows choose  m map  Space pause/resume",
+        ],
+        Mode::Detail => [
+            "[letters] open links  Backspace previous  m map",
+            "Arrows scroll  PgUp/PgDn page  ]/[ realms  Space pause/resume",
+        ],
+        Mode::Chronicle => [
+            "/ filter  f importance  Click event to visit",
+            "Arrows scroll  PgUp/PgDn page  Space pause/resume",
+        ],
+        Mode::Recap => [
+            ":recap N change years  Arrows scroll",
+            "PgUp/PgDn page  Space pause/resume",
+        ],
+        Mode::Help => [
+            "p player guide  t tutorial",
+            "Arrows scroll  PgUp/PgDn page",
+        ],
+        Mode::Guide => [
+            "? key reference  t tutorial",
+            "Arrows scroll  PgUp/PgDn page",
+        ],
+        Mode::Fate => ["1-6 choose an intervention", "Esc cancel"],
+    }
+}
 
 /// steady · restless · troubled · on the brink
 pub fn stability(v: f32) -> &'static str {

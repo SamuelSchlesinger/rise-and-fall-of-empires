@@ -291,6 +291,7 @@ mod tests {
     fn tutorial_uses_real_controls_and_restores_time_settings() {
         let mut ui = ui();
         ui.paused = false;
+        ui.follow = true;
         ui.run_until = Some(500);
         let year = ui.world.year;
         ui.start_tutorial();

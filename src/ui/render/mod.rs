@@ -105,143 +105,133 @@ impl Ui {
     fn render_status(&mut self) {
         let sw = self.screen.w;
         let y = self.screen.h - 1;
-        let bg = Rgb(40, 40, 52);
-        let fg = Rgb(220, 220, 225);
+        let bg = Rgb(30, 32, 43);
+        let fg = Rgb(215, 218, 228);
         let key = Rgb(255, 220, 120);
-        self.screen
-            .fill(Rect::new(0, y, sw, 1), ' ', Style::new(fg, bg));
-        if matches!(self.mode, Mode::Help | Mode::Guide) {
-            let hint = if self.mode == Mode::Guide {
-                "Esc back | j/k scroll | ? keys | t tutorial"
-            } else {
-                "Esc back | j/k scroll | p guide | t tutorial"
-            };
-            self.screen
-                .text_clip(1, y, hint, sw.saturating_sub(2), Style::new(key, bg));
-            return;
+        let top = self.content_height();
+        self.screen.fill(
+            Rect::new(0, top, sw, self.screen.h - top),
+            ' ',
+            Style::new(fg, bg),
+        );
+        for (i, row) in self.navigation_lines().iter().enumerate() {
+            let mut x = 1;
+            for action in row.split("  ") {
+                let (shortcut, label) = action.split_once(' ').unwrap_or((action, ""));
+                x = self.screen.text_attr(x, top + i, shortcut, key, bg, BOLD);
+                x = self
+                    .screen
+                    .text(x, top + i, &format!(" {}  ", label), fg, bg);
+            }
         }
-        if self.tutorial.is_some() {
-            let state = if self.paused {
-                "paused"
-            } else {
-                "time running"
-            };
-            self.screen.text_clip(
-                1,
-                y,
-                &format!("Ctrl-g skip | {}", state),
-                sw.saturating_sub(2),
-                Style::new(key, bg),
-            );
-            return;
-        }
-        // A prompt takes over the whole line, as in vim.
+        let exit = if self.tutorial.is_some() {
+            "Ctrl-g skip"
+        } else if self.prompt != Prompt::None {
+            "Enter apply  Esc cancel"
+        } else if self.mode == Mode::Fate {
+            "Esc cancel"
+        } else if self.mode == Mode::Map {
+            "? help  :q quit"
+        } else {
+            "Esc back  ? help"
+        };
+        let exit = if exit.len() + 2 > sw {
+            "Esc back"
+        } else {
+            exit
+        };
+        let hx = sw.saturating_sub(exit.len() + 1);
+        let room = hx.saturating_sub(2);
         if self.prompt != Prompt::None {
             let lead = if self.prompt == Prompt::Command {
                 ":"
             } else {
                 "/"
             };
-            let x = self.screen.text_attr(
-                1,
-                y,
-                &format!("{}{}", lead, self.prompt_text),
-                Rgb(255, 255, 255),
-                bg,
-                BOLD,
-            );
-            self.screen.put_attr(x, y, ' ', fg, bg, REVERSE);
-            let hint = match (self.prompt, self.mode) {
-                (Prompt::Search, Mode::List) | (Prompt::Search, Mode::Chronicle) => "filtering as you type · Enter keep · Esc clear".to_string(),
-                (Prompt::Search, _) => {
-                    let hits = self.search(&self.prompt_text);
-                    match hits.first() {
-                        Some(r) => format!("{} matches · Enter jumps to {}", hits.len(), detail::entity_name(&self.world, *r)),
-                        None if self.prompt_text.is_empty() => "type a name; Enter jumps to the best match".to_string(),
-                        None => "no match".to_string(),
-                    }
-                }
-                (Prompt::Command, _) => "w e speed layer detail find until step new theme set map zoom mute story fate q".to_string(),
-                _ => String::new(),
-            };
-            let hx = sw.saturating_sub(hint.chars().count() + 1);
-            if hx > x + 2 {
-                self.screen.text(hx, y, &hint, Rgb(150, 150, 165), bg);
+            // Keep the end of long commands visible while typing.
+            let prompt = format!("{}{}", lead, self.prompt_text);
+            let chars: Vec<_> = prompt.chars().collect();
+            let start = chars.len().saturating_sub(room.saturating_sub(1));
+            let visible: String = chars[start..].iter().collect();
+            let x = self
+                .screen
+                .text_clip(1, y, &visible, room, Style::new(key, bg));
+            if x < hx {
+                self.screen.put_attr(x, y, ' ', fg, bg, REVERSE);
             }
-            return;
-        }
-        let state = if self.paused {
-            "paused".to_string()
         } else {
-            format!("{} years/sec", SPEEDS[self.speed_idx])
-        };
-        let left = format!(" year {} · {} ", self.world.year, state);
-        let mut x = self.screen.text_attr(0, y, &left, key, bg, BOLD);
-        let rest = format!(
-            "· {} map · detail {} · seed {} · {:.1}ms/y {}fps",
-            self.layer.name(),
-            self.world.detail.name(),
-            self.world.seed,
-            self.world.ticks_ms,
-            self.fps
-        );
-        x = self.screen.text(x, y, &rest, Rgb(170, 170, 185), bg);
-        if Instant::now() < self.msg_until {
-            x = self
-                .screen
-                .text(x + 2, y, &self.msg, Rgb(160, 255, 160), bg);
-        }
-        // showcmd: pending count and prefix, like vim.
-        let mut showcmd = String::new();
-        if let Some(c) = self.count {
-            showcmd.push_str(&c.to_string());
-        }
-        if let Some(p) = self.pending {
-            showcmd.push(p);
-        }
-        if !self.list_filter.is_empty() && self.mode == Mode::List {
-            showcmd = format!("/{}", self.list_filter);
-        }
-        if !self.chron_filter.is_empty() && self.mode == Mode::Chronicle {
-            showcmd = format!("/{}", self.chron_filter);
-        }
-        if !showcmd.is_empty() {
-            x = self
-                .screen
-                .text_attr(x + 2, y, &showcmd, Rgb(255, 255, 255), bg, BOLD);
-        }
-        let hints = match self.mode {
-            Mode::Map => "Space pause  +/- speed  Tab layer  Enter open  ] [ realms  / search  : cmd  e lists  c chronicle  x fate  ? help",
-            Mode::List => "Tab tabs  j/k  Enter open  m map  / filter  x fate  Esc back",
-            Mode::Detail => "j/k scroll  letters follow links  m map  Backspace back  ] [ realms  Esc back",
-            Mode::Chronicle => "j/k scroll  f importance  / filter  click a line to jump  Esc back",
-            Mode::Help => "j/k scroll  p guide  t tutorial  Esc back",
-            Mode::Guide => "j/k scroll  ? keys  t tutorial  Esc back",
-            Mode::Fate => "1-6 choose  Esc cancel",
-            Mode::Recap => "j/k scroll  :recap N for a longer look  Esc back",
-        };
-        // Progressively shorter hints, because a terminal with no room for
-        // the full set is exactly the one whose reader most needs to be told
-        // how to get out. The last is two words long and always drawn.
-        let mut hints = hints;
-        let mut hx = sw.saturating_sub(hints.chars().count() + 1);
-        for shorter in ["? help  :q quit", "? :q"] {
-            if hx > x + 2 {
-                break;
+            let state = if self.paused {
+                "paused".to_string()
+            } else {
+                format!("{} years/sec", SPEEDS[self.speed_idx])
+            };
+            let status = format!(
+                "Year {} | {} | Follow {}",
+                self.world.year,
+                state,
+                if self.follow { "on" } else { "off" }
+            );
+            self.screen
+                .text_clip(1, y, &status, room, Style::attr(key, bg, BOLD));
+            let x = status.chars().count() + 3;
+            if x < hx {
+                let info = format!("{} map | seed {}", self.layer.name(), self.world.seed);
+                self.screen
+                    .text_clip(x, y, &info, hx.saturating_sub(x + 1), Style::new(fg, bg));
             }
-            hints = shorter;
-            hx = sw.saturating_sub(hints.chars().count() + 1);
         }
-        // Still no room beside what is already there: give the hints the end
-        // of the line anyway and let the seed and the frame rate go instead.
-        // Painting over the tail of a truncated line beats leaving the reader
-        // with no way out on screen at all.
-        if hx <= x + 2 {
-            hx = sw.saturating_sub(hints.chars().count().min(sw));
+        self.screen.text(hx, y, exit, key, bg);
+
+        // Feedback uses a navigation row temporarily, leaving the world's
+        // speed/follow state and the primary screen shortcuts in place.
+        let feedback = if self.count.is_some() || self.pending.is_some() {
+            Some(format!(
+                "Keys: {}{}",
+                self.count.map(|n| n.to_string()).unwrap_or_default(),
+                self.pending.map(|c| c.to_string()).unwrap_or_default()
+            ))
+        } else if self.prompt == Prompt::Search {
+            Some(match self.mode {
+                Mode::List | Mode::Chronicle => {
+                    "Type to filter | Enter keep | Esc clear".to_string()
+                }
+                _ => {
+                    let hits = self.search(&self.prompt_text);
+                    hits.first()
+                        .map(|r| {
+                            format!(
+                                "{} matches | Enter visits {}",
+                                hits.len(),
+                                detail::entity_name(&self.world, *r)
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            if self.prompt_text.is_empty() {
+                                "Type a name to find a realm, city or person".to_string()
+                            } else {
+                                "No matches: try another name".to_string()
+                            }
+                        })
+                }
+            })
+        } else if self.prompt == Prompt::Command {
+            Some(":w save | :guide | :tutorial | :speed N | :follow off".to_string())
+        } else if Instant::now() < self.msg_until {
+            Some(self.msg.clone())
+        } else {
+            None
+        };
+        if let Some(message) = feedback {
+            if top == y && self.prompt != Prompt::None {
+                return;
+            }
+            let row = if y > top { y - 1 } else { y };
+            let width = if row == y { room } else { sw.saturating_sub(2) };
+            self.screen
+                .fill(Rect::new(0, row, width + 1, 1), ' ', Style::new(fg, bg));
+            self.screen
+                .text_clip(1, row, &message, width, Style::new(Rgb(160, 255, 180), bg));
         }
-        self.screen
-            .fill(Rect::new(hx, y, sw - hx, 1), ' ', Style::new(fg, bg));
-        self.screen.text(hx, y, hints, Rgb(170, 170, 180), bg);
     }
 
     /// Remember what the viewer missed while they were off the map, and

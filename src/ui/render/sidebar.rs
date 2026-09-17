@@ -298,7 +298,8 @@ impl Ui {
             let stop = y + share.story;
             self.screen.hline(x0 + 1, y, width - 1, Rgb(60, 60, 70), bg);
             y += 1;
-            self.screen.text_attr(x, y, "Now", accent, bg, BOLD);
+            self.screen
+                .text_attr(x, y, "Now | t visit | click a story", accent, bg, BOLD);
             y += 1;
             let room = tx.saturating_sub(2);
             for (text, r, color) in story_items.iter() {
@@ -328,7 +329,8 @@ impl Ui {
             let stop = y + share.here;
             self.screen.hline(x0 + 1, y, width - 1, Rgb(60, 60, 70), bg);
             y += 1;
-            self.screen.text_attr(x, y, "Here", accent, bg, BOLD);
+            self.screen
+                .text_attr(x, y, "Here | Enter inspect", accent, bg, BOLD);
             y += 1;
             for (l, c) in block_rows(&here_items, tx, stop - y, ascii) {
                 self.screen.text_clip(x, y, &l, tx, Style::new(c, bg));
@@ -342,7 +344,8 @@ impl Ui {
             let stop = y + share.selected;
             self.screen.hline(x0 + 1, y, width - 1, Rgb(60, 60, 70), bg);
             y += 1;
-            self.screen.text_attr(x, y, "Selected", accent, bg, BOLD);
+            self.screen
+                .text_attr(x, y, "Selected | r recap", accent, bg, BOLD);
             y += 1;
             for (l, c) in block_rows(&sel_items, tx, stop - y, ascii) {
                 self.screen.text_clip(x, y, &l, tx, Style::new(c, bg));

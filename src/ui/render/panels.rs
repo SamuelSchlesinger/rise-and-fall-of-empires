@@ -7,9 +7,8 @@ impl Ui {
     pub(super) fn render_log(&mut self) {
         let (_, _, _, mh) = self.map_rect();
         let sw = self.screen.w;
-        let sh = self.screen.h;
         let y0 = mh;
-        let h = sh.saturating_sub(mh + 1);
+        let h = self.content_height().saturating_sub(mh);
         self.log_rows.clear();
         if h == 0 {
             return;
@@ -24,7 +23,7 @@ impl Ui {
         // What the feed is showing, in words as well as in the number `v`
         // and `:log` set: "importance ≥2" says nothing on its own.
         let title = format!(
-            " Chronicle: {} (importance ≥{}, v changes it) ",
+            " Chronicle | c history | r recap | v {} (≥{}) ",
             words::log_level(self.log_min),
             self.log_min
         );
@@ -53,22 +52,33 @@ impl Ui {
 
     pub(super) fn render_list(&mut self) {
         let sw = self.screen.w;
-        let sh = self.screen.h.saturating_sub(1);
+        let sh = self.content_height();
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
         let accent = Rgb(230, 200, 120);
         self.screen
             .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         // Tabs.
-        let mut x = 1;
-        for (i, t) in detail::LIST_TABS.iter().enumerate() {
+        let tabs = self.list_tab_layout();
+        for &(i, x) in &tabs {
+            let t = detail::LIST_TABS[i];
             let sel = i == self.list_tab;
             let (f, b, a) = if sel {
                 (Rgb(10, 10, 10), accent, BOLD)
             } else {
                 (fg, Rgb(30, 30, 40), 0)
             };
-            x = self.screen.text_attr(x, 0, &format!(" {} ", t), f, b, a) + 1;
+            self.screen.text_attr(x, 0, &format!(" {} ", t), f, b, a);
+        }
+        if tabs.first().map(|(i, _)| *i > 0).unwrap_or(false) {
+            self.screen.put(0, 0, '<', accent, bg);
+        }
+        if tabs
+            .last()
+            .map(|(i, _)| *i + 1 < detail::LIST_TABS.len())
+            .unwrap_or(false)
+        {
+            self.screen.put(sw - 1, 0, '>', accent, bg);
         }
         let rows = self.list_rows();
         let header = detail::list_header(self.list_tab);
@@ -78,7 +88,7 @@ impl Ui {
             let f = format!(" {} rows match \"{}\" ", rows.len(), self.list_filter);
             self.screen.text_attr(
                 sw.saturating_sub(f.chars().count() + 1),
-                0,
+                sh.saturating_sub(1),
                 &f,
                 Rgb(255, 255, 255),
                 Rgb(60, 60, 80),
@@ -133,7 +143,7 @@ impl Ui {
             None => return,
         };
         let sw = self.screen.w;
-        let sh = self.screen.h.saturating_sub(1);
+        let sh = self.content_height();
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
         self.screen
@@ -166,7 +176,7 @@ impl Ui {
 
     pub(super) fn render_chronicle(&mut self) {
         let sw = self.screen.w;
-        let sh = self.screen.h.saturating_sub(1);
+        let sh = self.content_height();
         let bg = Rgb(12, 12, 16);
         let fg = Rgb(200, 200, 205);
         self.screen
@@ -219,7 +229,7 @@ impl Ui {
 
     pub(super) fn render_help(&mut self) {
         let sw = self.screen.w;
-        let sh = self.screen.h.saturating_sub(1);
+        let sh = self.content_height();
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
         self.screen
@@ -319,7 +329,7 @@ impl Ui {
     /// The digest page: what has happened lately, in plain sentences.
     pub(super) fn render_recap(&mut self) {
         let sw = self.screen.w;
-        let sh = self.screen.h.saturating_sub(1);
+        let sh = self.content_height();
         let bg = Rgb(14, 14, 20);
         let fg = Rgb(200, 200, 205);
         self.screen

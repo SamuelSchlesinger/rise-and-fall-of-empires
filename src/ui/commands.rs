@@ -260,9 +260,9 @@ impl Ui {
                     _ => !self.follow,
                 };
                 self.say(if self.follow {
-                    "following major events"
+                    "Follow on: map jumps to major events (f turns it off)"
                 } else {
-                    "cursor is free"
+                    "Follow off: explore freely"
                 });
             }
             _ => return Cmd::Unknown,

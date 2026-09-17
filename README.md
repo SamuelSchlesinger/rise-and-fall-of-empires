@@ -26,8 +26,8 @@ for your machine:
 For example, on an Apple Silicon Mac:
 
 ```sh
-tar xzf empires-v0.1.1-aarch64-apple-darwin.tar.gz
-./empires-v0.1.1-aarch64-apple-darwin/empires
+tar xzf empires-v0.1.2-aarch64-apple-darwin.tar.gz
+./empires-v0.1.2-aarch64-apple-darwin/empires
 ```
 
 Or install from a checkout with Rust 1.70 or newer:
@@ -53,7 +53,9 @@ empires --seed 42 --headless 800  # print 800 years of history without the UI
 On first launch, press **t** for a short, optional tutorial or **p** for the
 player guide. Reopen them any time with `:tutorial` or `:guide`.
 
-Time runs on its own. Press **Space** to pause and **?** for help.
+Time starts at **2 years per second**, with event following off so the map
+stays where you put it. Press **Space** to pause and **?** for help.
+The bottom rows always show the current screen’s main controls.
 The map legend explains its symbols; the sidebar describes the selected
 place and the world's current stories.
 

@@ -6,7 +6,8 @@ and a quick introduction. In the game, press `?` for the full key list.
 
 ## Getting started
 
-The world runs on its own. Press **Space** to pause, then move with the arrow
+The world starts at **2 years per second**, with event following **off**.
+Press **Space** to pause, then move with the arrow
 keys or `h j k l`. Each colour on the political map is a realm, borders mark
 its territory, `@` marks a capital and `#` a city. The legend under the map
 explains the current layer; the sidebar describes the place under your cursor.
@@ -15,6 +16,24 @@ Press **Enter** to inspect a place, **Tab** to change the map layer, and **r**
 for a recap of the last fifty years. Use `e` to browse lists of realms, cities,
 people and more. **Esc** takes you back. To keep this world, type `:w` and
 press Enter; later, `:e NAME` loads a save. Quit with `q` twice on the map.
+
+The bottom rows show the keys for the current screen, with shortcuts in
+yellow. Time and follow status stay on the last line. Press `-` to slow down
+further, or `f` on the map to enable automatic jumps to major events.
+
+### Explore the world
+
+| Screen | How to open it | What to look for |
+|---|---|---|
+| Entity details | `e`, choose an item, Enter | Realm stability and its causes, rulers, families, doctrines and histories; bracketed letters open related pages |
+| Recap | `r` on the map | The last fifty years, for the selected realm or city, or the whole world if nothing is selected |
+| Chronicle | `c` on the map | Search history with `/`, change importance with `f`, or click an event to visit its location |
+| Current stories | `t` on the map, or click a story under Now | The realm, person or place behind a current headline |
+| Hand of Fate | Select a realm with `s`, then `x` | Six interventions; press 1–6 to choose, or Esc to cancel |
+
+In lists, Tab changes category; the selected category stays visible even in
+a narrow window. On detail pages, Backspace retraces links and Esc returns
+to the previous screen. `?` opens all controls; `:guide` reopens this guide.
 
 ### Learn in the app
 
@@ -127,7 +146,7 @@ on adding a field.
 
 ```
 # detail = medium        # low | medium | high
-# speed = 5              # years per second at start; snapped to the nearest of
+# speed = 2              # years per second at start; snapped to the nearest of
 #                        # 0.5 1 2 5 10 25 50 100
 # theme = default        # default | phosphor | amber | paper | dusk
 # mouse = on
@@ -137,7 +156,7 @@ on adding a field.
 # height = 64            # 20-300
 # log = 2                # least importance shown in the event log: 1 everything,
 #                        # 2 the notable (the default), 3 only the great
-# follow = on            # jump the cursor to major events
+# follow = off           # jump the cursor to major events when enabled
 # zoom = 1               # 1-4, how many world cells per character
 
 # tune.decadence_growth = 0.0045   # override any field of sim::tuning::Tuning

@@ -207,6 +207,9 @@ pub const TOUR: &[&str] = &[
     "t  Start a short, skippable interface tutorial",
     "p  Read the player guide",
     "Space pauses time. Arrows move. Enter inspects. ? opens help.",
+    "e browses realms and people; r recaps history; c opens the chronicle.",
+    "The bottom rows show the keys for each screen. Esc takes you back.",
+    "Time starts at 2 years/sec. The map stays put unless you enable f.",
     "",
     "Any other key: watch the world.",
 ];
@@ -413,7 +416,7 @@ impl Ui {
             layer: Layer::Political,
             cursor: (0, 0),
             view: (0, 0),
-            speed_idx: 3,
+            speed_idx: 2,
             paused: false,
             acc: 0.0,
             last: Instant::now(),
@@ -428,13 +431,13 @@ impl Ui {
             tutorial: None,
             chron_min: 1,
             // Level 2, the notable: about a line a year, which is a feed a
-            // reader can follow at five years a second. Level 1 is roughly
+            // reader can follow at two years a second. Level 1 is roughly
             // seven lines a year, which at that speed is a blur.
             log_min: 2,
             ascii,
             msg: String::new(),
             msg_until: Instant::now(),
-            follow: true,
+            follow: false,
             back: Vec::new(),
             fps_last: Instant::now(),
             frames: 0,
@@ -606,6 +609,64 @@ impl Ui {
 
     // -- the view: which part of the world is on screen -----------------------
 
+    /// Wrap whole key/action pairs; never strand a key on the previous line.
+    fn navigation_lines(&self) -> Vec<String> {
+        if self.screen.h < 16 || self.tutorial.is_some() {
+            return Vec::new();
+        }
+        let width = self.screen.w.saturating_sub(2);
+        let mut lines = Vec::new();
+        for group in words::navigation(self.mode, self.paused) {
+            let mut row = String::new();
+            for action in group.split("  ") {
+                if !row.is_empty() && row.chars().count() + 2 + action.chars().count() > width {
+                    lines.push(std::mem::take(&mut row));
+                }
+                if !row.is_empty() {
+                    row.push_str("  ");
+                }
+                row.push_str(action);
+            }
+            if !row.is_empty() {
+                lines.push(row);
+            }
+        }
+        lines.truncate(self.screen.h.saturating_sub(8).min(5));
+        lines
+    }
+
+    /// Keep the active category visible; the mouse uses these same positions.
+    fn list_tab_layout(&self) -> Vec<(usize, usize)> {
+        let width = self.screen.w.saturating_sub(2);
+        let mut start = self.list_tab;
+        let mut used = detail::LIST_TABS[start].chars().count() + 2;
+        while start > 0 {
+            let prev = detail::LIST_TABS[start - 1].chars().count() + 3;
+            if used + prev > width {
+                break;
+            }
+            start -= 1;
+            used += prev;
+        }
+        let mut x = 1;
+        let mut tabs = Vec::new();
+        for (i, name) in detail::LIST_TABS.iter().enumerate().skip(start) {
+            let len = name.chars().count() + 2;
+            if x + len > self.screen.w.saturating_sub(1) {
+                break;
+            }
+            tabs.push((i, x));
+            x += len + 1;
+        }
+        tabs
+    }
+
+    fn content_height(&self) -> usize {
+        self.screen
+            .h
+            .saturating_sub(self.navigation_lines().len() + 1)
+    }
+
     fn map_rect(&self) -> (usize, usize, usize, usize) {
         let sw = self.screen.w;
         let sh = self.screen.h;
@@ -618,7 +679,7 @@ impl Ui {
             3
         };
         let mw = sw.saturating_sub(sidebar);
-        let mh = sh.saturating_sub(log_h + 1);
+        let mh = self.content_height().saturating_sub(log_h);
         (0, 0, mw.max(1), mh.max(1))
     }
 
@@ -1310,6 +1371,7 @@ mod tests {
                     x: padx + dx,
                     y: pady + dy,
                 }));
+                assert_eq!(ui.view, (ox, oy), "clicking must not pan the map");
                 assert_eq!(
                     ui.cursor,
                     (ox + dx * zoom + zoom / 2, oy + dy * zoom + zoom / 2),
@@ -1339,6 +1401,77 @@ mod tests {
                     rows,
                     last.trim_end()
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn navigation_survives_narrow_windows_and_feedback() {
+        for (cols, rows) in [(160, 45), (120, 30), (80, 24), (60, 20), (40, 20)] {
+            let mut ui = frame(false, Mode::Map, cols, rows);
+            ui.say("Saved the world successfully");
+            ui.compose();
+            let out = text(&ui);
+            for hint in [
+                "Enter inspect",
+                "e browse",
+                "r recap",
+                "c history",
+                "t story",
+                "x intervene",
+            ] {
+                assert!(out.contains(hint), "{}x{} lost {}", cols, rows, hint);
+            }
+            let top = ui.content_height();
+            assert!(ui.log_rows.iter().all(|(y, _)| *y < top));
+        }
+        for mode in [Mode::List, Mode::Detail, Mode::Chronicle, Mode::Recap] {
+            let ui = frame(false, mode, 80, 24);
+            let out = text(&ui);
+            assert!(out.contains("Esc back"));
+            assert!(out.contains("Arrows"));
+        }
+    }
+
+    #[test]
+    fn prompts_remain_visible_on_short_terminals() {
+        for prompt in [Prompt::Command, Prompt::Search] {
+            let mut ui = frame(false, Mode::Map, 40, 10);
+            ui.prompt = prompt;
+            ui.prompt_text = "test".into();
+            ui.say("An earlier notification");
+            ui.compose();
+            let out = text(&ui);
+            assert!(out.contains("test"));
+            assert!(out.contains("Esc cancel"));
+        }
+    }
+
+    #[test]
+    fn every_category_stays_visible_and_clickable() {
+        use crate::term::{Mouse, MouseKind};
+        for cols in [20, 40, 60, 80, 120] {
+            let mut ui = frame(false, Mode::List, cols, 24);
+            for tab in 0..detail::LIST_TABS.len() {
+                ui.list_tab = tab;
+                ui.list_filter = "a".into();
+                ui.compose();
+                let title: String = (0..cols).map(|x| ui.screen.cell(x, 0).ch).collect();
+                assert!(
+                    title.contains(detail::LIST_TABS[tab]),
+                    "{}: {}",
+                    cols,
+                    title
+                );
+                let tabs = ui.list_tab_layout();
+                let (target, x) = tabs[0];
+                ui.handle_key(Key::Mouse(Mouse {
+                    kind: MouseKind::Press(0),
+                    x,
+                    y: 0,
+                }));
+                assert_eq!(ui.list_tab, target);
+                assert!(ui.list_filter.is_empty());
             }
         }
     }

@@ -10,6 +10,32 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [0.1.2] - 2026-09-16
+
+### Added
+
+- Persistent navigation rows with highlighted keys for inspecting, browsing,
+  recaps, history, stories and interventions. Each screen shows its own controls;
+  narrow windows wrap complete key/action pairs instead of hiding them behind
+  diagnostics. Very short terminals retain a compact help/back/quit prompt.
+- Visible speed and event-follow status, contextual sidebar and chronicle
+  prompts, and an expanded welcome card and guide to the richer screens.
+
+### Changed
+
+- Start at 2 years per second instead of 5, with event following off by default.
+  Existing explicit configuration values still apply; `+`/`-` change speed and
+  `f` toggles event following on the map.
+- Reserve space for navigation so page content and mouse hit targets stay above
+  it. Show command feedback separately from the main screen shortcuts.
+- Simulation rules and save-file format are unchanged.
+
+### Fixed
+
+- Clicking a visible map tile no longer pans the map near the viewport edge.
+- List categories stay visible and clickable as you move through them in a
+  narrow terminal; filter counts no longer cover the category tabs.
+
 ## [0.1.1] - 2026-09-16
 
 ### Added
@@ -289,3 +315,6 @@ The first release. Everything below is the work that led to it.
   summary says "1 school", not "1 schools".
 
 [0.1.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.0
+
+[0.1.2]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.2
+[0.1.1]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.1

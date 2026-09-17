@@ -298,9 +298,9 @@ impl Ui {
             Key::Char('f') | Key::Char('F') => {
                 self.follow = !self.follow;
                 let m = if self.follow {
-                    "following major events"
+                    "Follow on: map jumps to major events (f turns it off)"
                 } else {
-                    "cursor is free"
+                    "Follow off: explore freely"
                 };
                 self.say(m);
             }
@@ -352,7 +352,7 @@ impl Ui {
         let n = self.count.unwrap_or(1).max(1);
         let rows = self.list_rows();
         let len = rows.len();
-        let page = self.screen.h.saturating_sub(4).max(1);
+        let page = self.content_height().saturating_sub(3).max(1);
         match k {
             Key::Esc | Key::Char('q') => {
                 if !self.list_filter.is_empty() {
@@ -431,7 +431,7 @@ impl Ui {
             }
             _ => {}
         }
-        let page = self.screen.h.saturating_sub(2).max(1);
+        let page = self.content_height().saturating_sub(1).max(1);
         let scroll = if self.mode == Mode::Guide {
             &mut self.guide_scroll
         } else {
@@ -464,7 +464,7 @@ impl Ui {
                 return;
             }
         };
-        let page = self.screen.h.saturating_sub(2).max(1);
+        let page = self.content_height().saturating_sub(1).max(1);
         match k {
             Key::Esc | Key::Char('q') => {
                 self.mode = self.prev_mode;
@@ -516,7 +516,7 @@ impl Ui {
 
     fn key_chronicle(&mut self, k: &Key) {
         let n = self.count.unwrap_or(1).max(1);
-        let page = self.screen.h.saturating_sub(2).max(1);
+        let page = self.content_height().saturating_sub(1).max(1);
         match k {
             Key::Esc | Key::Char('q') => {
                 if !self.chron_filter.is_empty() {
@@ -543,7 +543,7 @@ impl Ui {
 
     fn key_recap(&mut self, k: &Key) {
         let n = self.count.unwrap_or(1).max(1);
-        let page = self.screen.h.saturating_sub(2).max(1);
+        let page = self.content_height().saturating_sub(1).max(1);
         match k {
             Key::Esc | Key::Char('q') | Key::Backspace => self.mode = self.prev_mode,
             Key::Up | Key::Char('k') => self.recap_scroll = self.recap_scroll.saturating_sub(n),
@@ -698,6 +698,9 @@ impl Ui {
     // -- mouse ---------------------------------------------------------------
 
     fn handle_mouse(&mut self, m: Mouse) {
+        if m.y >= self.content_height() {
+            return;
+        }
         let double = matches!(self.last_click, Some((x, y, t)) if x == m.x && y == m.y && t.elapsed() < Duration::from_millis(500));
         if let MouseKind::Press(_) = m.kind {
             self.last_click = Some((m.x, m.y, Instant::now()));
@@ -754,7 +757,7 @@ impl Ui {
                             if cx < self.world.terrain.w && cy < self.world.terrain.h {
                                 let same = self.cursor == (cx, cy);
                                 self.cursor = (cx, cy);
-                                self.clamp_view();
+                                // A click selects a visible tile without moving it.
                                 if button == 2 || (same && double) {
                                     if let Some(r) = self.entity_at_cursor() {
                                         self.open_detail(r);
@@ -797,17 +800,15 @@ impl Ui {
                 MouseKind::Press(button) => {
                     if m.y == 0 {
                         // Tab bar: pick the tab whose label spans this column.
-                        let mut x = 1;
-                        for (i, t) in detail::LIST_TABS.iter().enumerate() {
-                            let w = t.chars().count() + 2;
+                        for (i, x) in self.list_tab_layout() {
+                            let w = detail::LIST_TABS[i].chars().count() + 2;
                             if m.x >= x && m.x < x + w {
                                 self.list_tab = i;
                                 self.list_idx = 0;
                                 self.list_filter.clear();
                             }
-                            x += w + 1;
                         }
-                    } else if m.y >= self.list_y0 {
+                    } else if m.y >= self.list_y0 && m.y < self.content_height().saturating_sub(1) {
                         let row = m.y - self.list_y0 + self.list_scroll;
                         let rows = self.list_rows();
                         if row < rows.len() {
