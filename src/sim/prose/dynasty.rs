@@ -417,3 +417,57 @@ pub fn child_died(w: &World, child: usize, p: usize) -> String {
 pub fn united_by_marriage(w: &World, p: usize, _q: usize) -> String {
     format!("inherited by the crown of {}", realm(w, p))
 }
+
+// ---------------------------------------------------------------------------
+// Blood
+// ---------------------------------------------------------------------------
+
+/// A strain that had been carried unseen shows itself in a child.
+///
+/// Short, because the interest is the fact and not the telling, and varied
+/// by the year and the child so that two of them in one century do not read
+/// as the same sentence twice.
+pub fn strain_surfaced(
+    w: &World,
+    child: usize,
+    trait_index: usize,
+    value: f32,
+    house: Option<usize>,
+) -> String {
+    let c = &w.persons[child];
+    let high = value > 0.5;
+    let what = match (trait_index, high) {
+        (0, true) => "an ambition that frightened the household",
+        (0, false) => "no wants at all, which in a ruling house is its own difficulty",
+        (1, true) => "a fearlessness nobody could account for",
+        (1, false) => "a timidity no drilling would cure",
+        (2, true) => "an understanding far beyond the schooling given them",
+        (2, false) => "a slowness the tutors despaired of",
+        (3, true) => "a devotion that unsettled even the priests",
+        (3, false) => "no feeling for the gods whatever",
+        (4, true) => "a cruelty that showed before they could walk",
+        (4, false) => "a gentleness that would cost them later",
+        (_, true) => "a presence that turned every head in the room",
+        (_, false) => "a coldness that emptied rooms",
+    };
+    let line = match house {
+        Some(h) => w.houses[h].name.trim_start_matches("the ").to_string(),
+        None => "the family".to_string(),
+    };
+    match Pick::stable(w.year, child).index(3) {
+        0 => format!(
+            "{} was born with {} — {} had shown nothing of the kind in living memory.",
+            c.name,
+            what,
+            cap(&line)
+        ),
+        1 => format!(
+            "{} of {} was born with {}. Somewhere far back the blood had carried it, unshown.",
+            c.name, line, what
+        ),
+        _ => format!(
+            "The child {} showed {}, out of a line that had never run to it.",
+            c.name, what
+        ),
+    }
+}

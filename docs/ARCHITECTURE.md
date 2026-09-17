@@ -32,6 +32,12 @@ sim/
   politics.rs    tribes, expansion, cities, economy, rulers, unrest, collapse
   dynasty.rs     houses, marriage, heirs, mortality, greatness and acclaim,
                  inheritance customs, crowns given by a faith
+  blood.rs       two alleles a trait, recessives, kinship and inbreeding
+  circles.rs     rivalry and patronage between people who hold no throne
+  tech.rs        a tree of innovations grown per world; discovery, diffusion
+                 and forgetting. Knowledge is held by cells, not realms
+  trade.rs       goods from terrain, routes between cities, what closes them
+  climate.rs     bands of wet and dry drifting over centuries
   war.rs         tension, stances, alliances, tribute, war aims, declarations,
                  coalition battles, sieges, peace
   magic.rs       schools of thought: founding, spread, adoption, schism
@@ -93,13 +99,63 @@ living costs the whole history of the world every year.
 - **`alive_persons`** — people still living, ascending. Appended by
   `new_person`, pruned by `World::forget_the_dead`. `dynasty::mortality` and
   the yearly scoring of standing walk it.
+- **`cell_yield`** — what each cell's knowledge is worth to its harvests.
+  `cell_capacity` is called for every cell every year, and working the
+  multiplier out from the knowledge bitset meant walking the whole tree each
+  time. Refreshed where knowledge changes, which is rare.
 - **The chronicle index** — for each `Ref`, the events that mention it, which
   is what lets any detail page show its own history without a scan.
+
+Three more are derived and rebuilt rather than kept: `Terrain::crossings`
+(where the sea can be crossed), `World::goods` (what the ground yields) and
+`World::climate` (the drifting weather). All three are pure functions of
+things that do not change — the terrain, and for the weather the seed and the
+epoch — so a section for them in the save could only ever disagree with what
+it described. `ser::load` rebuilds them before `recompute`.
 
 `Terrain` (in `geo.rs`) is the immutable half of a cell: elevation,
 temperature, rainfall, river, biome, mana, minerals, features. `CellState` (in
 `sim`) is the mutable half: population, culture, owner, development. They are
 parallel arrays indexed by `y * w + x`.
+
+## The ratchet
+
+Everything else in the simulation cycles: realms rise and break, faiths
+spread and fade, and a map at year fifteen hundred is arranged differently
+from one at year three hundred without being different *in kind*. Nothing
+accumulated — `Polity::dev` was the only thing that went up, it belonged to
+the realm rather than to the ground, and it died with it.
+
+`World::known` is a `u128` per cell: a bitset over that world's own tree of
+innovations. **Knowledge is held by the land.** A realm that falls leaves its
+irrigation, its roads and its writing behind for whoever takes the ground,
+and that is the only thing in the world which survives the state that built
+it.
+
+The tree itself is **grown from the seed**, the way languages and peoples
+are, because a fixed table means every world learns the same things in the
+same order — and twenty-four hand-written entries were known everywhere by
+year eight hundred, after which the ratchet was inert again. What stays
+universal is `tech::Effect`, the vocabulary of *consequences*, because the
+simulation has to read a tree it did not write.
+
+Three things gate discovery, and the third is the one that matters for
+pacing: the ground must suit it, the prerequisites must be known, and a city
+must be able to support it. What gates invention is not time but surplus.
+Above that sits a drag that rises with what the *world* already knows —
+global, because discovery is rolled at every city and it is the world's rate
+that has to be held down.
+
+Culture decides what a people can learn at all. `Culture::learning` gives a
+bent per field with real strengths and real blind spots, gating both
+discovery and adoption, which is why a technique can stall for ever at a
+cultural border that a trade good crosses in a season — and why the world
+does not converge on one body of knowledge.
+
+Knowledge is also the thing most likely to unbalance the world, because
+every brake on the size of a realm is *relative* and knowledge raises all
+their ceilings at once. See `tuning.hegemony_weight`, which is absolute, and
+the note on `admin_reach_base`.
 
 ## The sea
 
@@ -140,6 +196,35 @@ every landmass worth settling can be reached from the largest one by a chain
 of crossings, so a realm that masters the sea can in principle reach the whole
 world.
 
+## Goods and roads
+
+`World::goods` is what each cell yields, read off the terrain and rebuilt on
+load. Cities trade when each has something the other's hinterland lacks, by
+land within a fortnight's cart or by sea within a month's sail.
+
+The point is that **wealth becomes positional**: the busiest city takes about
+four times the median, because it sits between places that want what each
+other has. That makes a realm astride the roads worth attacking, and makes
+cutting a road an act with consequences — a war closes the roads between the
+realms fighting it and the wealth drains out of cities that never saw a
+soldier, which is what lets a collapse propagate instead of staying local.
+
+Routes also carry knowledge, in `tech::carried_by_trade`. The far end of a
+route is as near as the near end, so a technique crosses a sea years before
+it crosses the mountain range behind the port.
+
+## The weather
+
+`World::climate` is a band of wet and dry drifting over the map on a scale of
+centuries, a pure function of the seed and the *epoch* — which is what lets
+it be rebuilt at load rather than stored, including partway through an epoch.
+
+It does exactly one thing: it moves the carrying capacity of land. Everything
+else follows on its own, because the simulation already knows what to do when
+land stops feeding people. A wet century pushes farming into the margins; a
+dry one pushes the margins back onto the farmers, and the people who live
+where the grass fails are the ones with horses.
+
 ## The tick pipeline
 
 `World::tick` advances exactly one year and is the only thing that changes the
@@ -163,14 +248,18 @@ prints.
 | 11 | `politics::unrest` | revolts, civil wars, secession, shattering |
 | 12 | `magic::tick` | schools founded, spread, adopted, persecuted, split |
 | 13 | `people::culture_drift` | assimilation and drift into new peoples |
-| 14 | `events::disasters` | plagues, famines, eruptions, storms |
-| 15 | `events::notables` | notable lives |
-| 16 | `events::wonders` | wonders begun and finished |
-| 17 | `stories::tick_artifacts` | relics forged, taken, lost, found |
-| 18 | `stories::tick_prophecies` | prophecies fulfilled or failed at their deadline |
-| 19 | `stories::tick_legends` | tyrants, heroes, legends |
-| 20 | `World::recompute` | rebuild aggregates: sizes, populations, neighbours, sprawl, cultures within, foreign share |
-| 21 | `events::eras` | name the age if it has turned |
+| 14 | `climate::tick` | the drifting field of wet and dry, every eighth year |
+| 15 | `trade::tick` | routes reckoned afresh every twenty years; roads opened and closed |
+| 16 | `tech::tick` | what is worked out, what spreads, what is forgotten |
+| 17 | `events::disasters` | plagues, famines, eruptions, storms |
+| 18 | `events::notables` | notable lives |
+| 19 | `circles::tick` | rivalries and patronage, and what comes of them |
+| 20 | `events::wonders` | wonders begun and finished |
+| 21 | `stories::tick_artifacts` | relics forged, taken, lost, found |
+| 22 | `stories::tick_prophecies` | prophecies fulfilled or failed at their deadline |
+| 23 | `stories::tick_legends` | tyrants, heroes, legends |
+| 24 | `World::recompute` | rebuild aggregates: sizes, populations, neighbours, sprawl, what each realm knows |
+| 25 | `events::eras` | name the age if it has turned |
 
 Then the chronicle is compacted to `tuning.chronicle_cap`, and every tenth year
 the population is pushed onto a history for the sidebar graph.
@@ -251,8 +340,9 @@ deliberately capped:
 - **The chronicle**, capped at `tuning.chronicle_cap` (60,000 events): the
   oldest trivia goes first, with importance 2 and 3 kept whatever happens.
 
-`--bench` prints ms/year and the per-phase breakdown. At high detail over 1500
-years a year costs roughly 0.40 ms at 160x64 and 3.4 ms at 400x160. The larger
+`--bench` prints ms/year and the per-phase breakdown. At high detail a year
+costs roughly 0.6 ms at 160x64 over 2000 years — ten thousand years of a
+default world runs in about seven seconds. The larger
 map is 6.25 times the cells but supports about six times as many *living*
 realms, and `diplomacy` is priced per realm-pair rather than per cell, so it
 dominates a crowded map and the cost grows faster than the area. That is the

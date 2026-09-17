@@ -831,3 +831,193 @@ fn the_sea_is_crossed_both_ways() {
         "no island in four worlds was ever peopled across water"
     );
 }
+
+/// Blood behaves like blood: variation survives the generations, a strain
+/// can hide and resurface, and marrying close costs a line its vigour.
+///
+/// The model it replaced blended a single parent's value toward the middle,
+/// so four generations after a remarkable ruler the line was unremarkable
+/// and nothing could ever skip a generation.
+#[test]
+fn a_line_keeps_its_blood() {
+    use crate::sim::blood;
+    let mut w = world(19);
+    run(&mut w, 900);
+
+    // Variation has not collapsed toward the middle.
+    let born_here: Vec<usize> = (0..w.persons.len())
+        .filter(|&i| w.persons[i].parent.is_some())
+        .collect();
+    assert!(born_here.len() > 40, "too few children to judge");
+    let spread = born_here
+        .iter()
+        .filter(|&&i| {
+            let t = w.persons[i].traits;
+            t.ambition > 0.75 || t.ambition < 0.25 || t.cruelty > 0.75 || t.wisdom > 0.75
+        })
+        .count();
+    assert!(
+        spread * 8 >= born_here.len(),
+        "only {} of {} children were remarkable in any trait: the line has flattened",
+        spread,
+        born_here.len()
+    );
+
+    // Somebody carries something they do not show.
+    let carriers = (0..w.persons.len())
+        .filter(|&i| !blood::carried(&w.persons[i].genes).is_empty())
+        .count();
+    assert!(carriers > 0, "no unexpressed strain exists anywhere");
+
+    // Crossing two carriers of the same rare allele can double it.
+    let rng = crate::rng::Rng::new(5);
+    let mut a = [128u8; blood::GENES];
+    let mut b = [128u8; blood::GENES];
+    a[0] = 250;
+    b[0] = 250;
+    let mut doubled = 0;
+    for _ in 0..200 {
+        if blood::surfaced(&blood::cross(&a, &b, &rng)) == Some(0) {
+            doubled += 1;
+        }
+    }
+    assert!(
+        doubled > 20,
+        "two carriers produced a doubled recessive only {} times in 200",
+        doubled
+    );
+
+    // And a child of close kin is the weaker for it.
+    let close: Vec<usize> = (0..w.persons.len())
+        .filter(|&i| w.persons[i].inbred > 0.3)
+        .collect();
+    for &i in close.iter().take(20) {
+        assert!(
+            w.persons[i].vigour < 1.0,
+            "a child of close kin paid nothing for it"
+        );
+    }
+}
+
+/// Trade does what trade is for: goods sit where the ground puts them,
+/// routes join places that want what each other has, position on the map is
+/// worth money, and closing a road is felt at both ends.
+#[test]
+fn trade_makes_position_worth_something() {
+    let mut w = world(31);
+    run(&mut w, 700);
+
+    // The ground produces, and produces different things in different places.
+    let kinds: std::collections::BTreeSet<&str> =
+        w.goods.iter().flatten().map(|g| g.name()).collect();
+    assert!(
+        kinds.len() >= 6,
+        "only {} kinds of good exist in the whole world",
+        kinds.len()
+    );
+
+    // Routes exist, and some go by sea.
+    assert!(!w.routes.is_empty(), "no city trades with any other");
+    assert!(
+        w.routes.iter().any(|r| r.by_sea),
+        "nothing is carried by water"
+    );
+
+    // A route joins cities whose hinterlands differ: that is the whole
+    // reason for one to exist.
+    for r in w.routes.iter().take(30) {
+        let a: std::collections::BTreeSet<&str> =
+            w.city_goods(r.a).iter().map(|g| g.name()).collect();
+        let b: std::collections::BTreeSet<&str> =
+            w.city_goods(r.b).iter().map(|g| g.name()).collect();
+        assert!(
+            a.difference(&b).next().is_some() && b.difference(&a).next().is_some(),
+            "{} and {} trade but want nothing from each other",
+            w.cities[r.a].name,
+            w.cities[r.b].name
+        );
+    }
+
+    // Wealth is positional: some cities take far more than the median.
+    //
+    // Measured across several worlds, because how lopsided any one world's
+    // geography is depends on that world's geography — a single seed that
+    // happens to lay its goods out evenly proves nothing either way.
+    let mut ratios: Vec<f32> = Vec::new();
+    for seed in [31u64, 7, 42] {
+        let mut v = world(seed);
+        run(&mut v, 700);
+        let mut takings: Vec<f32> = v
+            .cities
+            .iter()
+            .filter(|c| c.destroyed.is_none())
+            .map(|c| v.city_trade(c.id))
+            .collect();
+        takings.sort_by(f32::total_cmp);
+        let median = takings[takings.len() / 2].max(0.1);
+        ratios.push(takings.last().copied().unwrap_or(0.0) / median);
+    }
+    assert!(
+        ratios.iter().all(|&r| r > 1.5) && ratios.iter().any(|&r| r > 2.0),
+        "the busiest city barely beats the median anywhere ({:?}): position is worth nothing",
+        ratios
+    );
+
+    // A war between two realms closes the roads between them.
+    let warring = w
+        .wars
+        .iter()
+        .find(|x| x.alive())
+        .map(|x| (x.attacker, x.defender));
+    if let Some((a, b)) = warring {
+        assert_eq!(
+            w.trade_between(a, b),
+            0.0,
+            "two realms at war are still trading with each other"
+        );
+    }
+}
+
+/// The weather moves, and it moves the land's capacity with it.
+///
+/// Terrain is immutable, which is right for elevation and wrong for
+/// rainfall: without this the steppe is as dry in year nine thousand as in
+/// year one and no region ever has a bad century.
+#[test]
+fn the_weather_turns_over_centuries() {
+    let mut w = world(23);
+    run(&mut w, 40);
+    let early: Vec<f32> = w.climate.at.clone();
+    assert!(!early.is_empty(), "the world has no weather at all");
+    assert!(
+        early.iter().any(|&v| v.abs() > 0.15),
+        "the weather is flat everywhere"
+    );
+    run(&mut w, 900);
+    let late = &w.climate.at;
+    // Somewhere has genuinely changed.
+    let moved = early
+        .iter()
+        .zip(late.iter())
+        .filter(|(a, b)| (*a - *b).abs() > 0.3)
+        .count();
+    assert!(
+        moved > early.len() / 50,
+        "only {} cells of {} saw their weather change in nine centuries",
+        moved,
+        early.len()
+    );
+    // And it is the same weather a reloaded world gets back, including
+    // partway through an epoch.
+    for extra in [0usize, 3, 5] {
+        let mut a = world(23);
+        run(&mut a, 200 + extra as i32);
+        let bytes = crate::ser::save(&mut a);
+        let b = crate::ser::load(&bytes).expect("loads");
+        assert_eq!(
+            a.climate.at, b.climate.at,
+            "the weather did not survive a save taken {} years into an epoch",
+            extra
+        );
+    }
+}

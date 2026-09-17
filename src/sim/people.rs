@@ -36,6 +36,10 @@ impl World {
             * self.tuning.cell_capacity_factor
             * (0.15 + aff)
             * (1.0 + dev * self.tuning.cell_capacity_dev_weight);
+        cap *= self.cell_yield.get(i).copied().unwrap_or(1.0);
+        // What the weather has been doing lately. The one thing climate
+        // touches; famine and migration follow from it by themselves.
+        cap *= self.climate_mult(i);
         if cs.city.is_some() {
             cap *= 1.5;
         }

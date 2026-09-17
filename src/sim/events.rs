@@ -20,8 +20,21 @@ pub fn disasters(w: &mut World) {
             sick.extend_from_slice(w.cells_of_ref(p));
         }
         sick.sort_unstable();
+        // A realm that has worked out clean water, quarantine and a boiled
+        // dressing buries fewer of its people. This is the one thing
+        // knowledge does that the people themselves would have noticed.
+        let mut spared: std::collections::BTreeMap<usize, f32> = Default::default();
+        for &p in &polities {
+            spared.insert(p, 1.0 - w.tech_health(p));
+        }
+        let toll = |w: &World, cell: usize| -> f32 {
+            w.cells[cell]
+                .owner
+                .and_then(|p| spared.get(&p).copied())
+                .unwrap_or(1.0)
+        };
         for &c in &sick {
-            let d = w.cells[c].pop * tn.plague_cell_deaths;
+            let d = w.cells[c].pop * tn.plague_cell_deaths * toll(w, c);
             w.cells[c].pop -= d;
             deaths += d as f64;
             w.cells[c].plague = 2;
@@ -33,7 +46,11 @@ pub fn disasters(w: &mut World) {
                     .map(|p| polities.contains(&p))
                     .unwrap_or(false)
             {
-                let d = w.cities[c].pop * tn.plague_city_deaths;
+                let ease = w.cities[c]
+                    .polity
+                    .and_then(|p| spared.get(&p).copied())
+                    .unwrap_or(1.0);
+                let d = w.cities[c].pop * tn.plague_city_deaths * ease;
                 w.cities[c].pop -= d;
                 deaths += d as f64;
             }
@@ -589,9 +606,30 @@ pub fn eras(w: &mut World) {
     // those instead, and it takes a good many schools to speak for a
     // hundred years on its own.
     let hegemon = biggest.filter(|&p| share > 0.35 && w.polities[p].kind == PolityKind::Empire);
+    // The weightiest thing the world worked out this century, if it worked
+    // out anything that mattered. An age named for a hegemon or a war is an
+    // age named for an arrangement of the same pieces; an age named for iron
+    // or for writing is the century in which the pieces changed. So this is
+    // tried first, and only the heaviest innovations qualify.
+    let landmark = (0..w.techs.len())
+        .filter(|&t| {
+            let first = w.tech_first_year[t];
+            w.tech_seen[t] && first > w.year - 100 && first <= w.year && w.techs[t].is_landmark()
+        })
+        .max_by(|&a, &b| {
+            w.techs[a]
+                .effect
+                .size()
+                .total_cmp(&w.techs[b].effect.size())
+        });
     let pick = Pick::rolled(&rng);
     let flavour = Pick::stable(w.year, (wars + schools + born) as usize);
-    let (names, desc) = if let Some(p) = hegemon {
+    let (names, desc) = if let Some(t) = landmark {
+        (
+            prose::era_names_tech(w, t),
+            prose::era_of_tech(w, t, wars, &flavour),
+        )
+    } else if let Some(p) = hegemon {
         (
             prose::era_names_empire(w, p),
             prose::era_of_empire(w, p, &flavour),

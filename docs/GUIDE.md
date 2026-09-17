@@ -181,6 +181,12 @@ on adding a field.
 #   tune.diadochi_min_generals = 2        # generals a dead conqueror needs to be
 #                                         # carved up between them
 #   tune.migration_sea_chance = 0.35      # how readily a crowded coast takes to boats
+#   tune.tech_discover_chance = 0.0045    # how readily a city works something out
+#   tune.tech_frontier_drag = 0.5         # how much dearer each thing already known makes the next
+#   tune.climate_amplitude = 0.28         # how far a good or bad century moves harvests
+#   tune.trade_toll_factor = 0.05         # what the crown takes from trade passing through
+#   tune.hegemony_weight = 1.35           # what ruling too much of the world costs in stability
+#   tune.rivalry_chance = 0.12            # how often two notables become rivals
 
 # map w k                # examples: map <S-Up> K, map <C-p> :, map ; :
 ```
@@ -283,6 +289,51 @@ are sacked or spared; peace comes with exhaustion.
 where mana is high or a people is mystical. They spread along trade and
 conquest, are adopted as state doctrine or persecuted, split in schisms, and
 an arcane order that reaches too far can unmake the city that raised it.
+
+**What the world works out.** Every world grows its own tree of inventions,
+named in its own idiom: no two worlds learn the same things in the same
+order. An innovation appears where it makes sense — irrigation on watered
+land, smelting where there is ore — needs whatever came before it, and needs
+a city rich and large enough to support it, which is what spreads a tree
+across ten thousand years rather than four hundred.
+
+Knowledge belongs to the **ground**, not to the realm. A kingdom that falls
+leaves its roads and its writing behind for whoever takes its land, and that
+is the only thing in the world that outlives the state which built it.
+Ground that empties of people forgets what it knew, which is how a dark age
+happens and how something comes to be worked out a second time.
+
+What a people can learn depends on who they are. Each has a bent — two fields
+they take to and two that never interested them — drawn from what they value
+and inherited by their daughters, so a region keeps a recognisable character
+across the rise and fall of its realms. It is why a technique can stall for
+ever at a border that a trade good crosses in a season.
+
+**Goods and roads.** The land yields ore, spice, salt, horses and the rest
+where the terrain puts them. Cities trade when each has something the other's
+country lacks. Wealth becomes positional: a city between places that want
+what each other has grows rich on what passes through rather than on what
+grows around it. A war closes the roads between the realms fighting it, and
+the markets feel it at both ends — including in cities that never saw a
+soldier.
+
+**The weather.** Bands of wet and dry drift across the map over centuries. A
+good stretch pushes farming out into the margins; a dry one pushes the
+margins back onto the farmers, and the people who live where the grass fails
+are the ones with horses.
+
+**Blood.** Everyone carries two copies of each trait, one from each parent. A
+rare strain can be carried unseen for generations and surface in a child
+whose parents showed nothing of the kind. A house that marries its own to
+keep a claim concentrates what it carries and loses vigour — its children are
+frailer, die younger and breed less readily; one that marries out gets it
+back.
+
+**Rivalries and patronage.** People who hold no throne have ties to each
+other. Two of comparable standing in the same trade — in one realm or across
+a border they share — find themselves measured against one another, and every
+later achievement by either is an event about both. Somebody of standing
+takes up somebody young, who rises faster for it and sometimes outgrows them.
 
 **The sea.** Where the water can be crossed is a property of the map, fixed
 when the world is made. A crowded people on a coast will take a narrow strait

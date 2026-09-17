@@ -10,6 +10,115 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [0.3.0] - 2026-09-17
+
+History acquires a direction. Until now everything in the world cycled:
+realms rose and broke, faiths spread and faded, and a map at year fifteen
+hundred was arranged differently from one at year three hundred without being
+different in kind. Nothing accumulated. This release gives the world five
+things that do.
+
+### Added
+
+- **A tree of knowledge, grown per world.** Every world works out its own
+  hundred and twenty innovations, named in its own idiom, arranged in tiers,
+  each needing what came before it. No two worlds learn the same things in
+  the same order. What stays universal is the vocabulary of *consequences*,
+  because the simulation has to read a tree it did not write — so every world
+  eventually works out something that makes walls stop mattering, and none of
+  them call it the same thing.
+
+  **Knowledge belongs to the ground, not the realm.** A kingdom that falls
+  leaves its irrigation, its roads and its writing behind for whoever takes
+  its land. It is the only thing in the world that outlives the state which
+  built it. Ground that empties of people forgets, which is how a dark age
+  happens and how something comes to be worked out a second time.
+
+  Three things gate discovery: the ground must suit it, the prerequisites
+  must be known, and a city must be able to support it. The third is what
+  paces a tree across ten thousand years rather than four hundred — what
+  gates invention is not time but people fed well enough that some of them
+  can do something other than farm.
+
+- **Culture decides what a people can learn.** Each has a bent per field with
+  real strengths and real blind spots, drawn from what it values and
+  inherited with drift by its daughters. It gates discovery and adoption
+  both, which is why a technique can stall for ever at a cultural border that
+  a trade good crosses in a season — and why a region keeps a recognisable
+  character across the rise and fall of its realms. Without it the world
+  converged on one body of knowledge by year two thousand; with it, realms
+  still hold 21, 111 and 115 innovations at year ninety-seven hundred.
+
+- **Goods, and roads between them.** Twelve goods sit where the terrain puts
+  them — ore in the ore country, spice in the hot jungle, salt where the sea
+  meets dry land. Cities trade when each has something the other's hinterland
+  lacks, by land or by sea. Wealth becomes **positional**: the busiest city
+  takes four times the median because it sits between places that want what
+  each other has. A war closes the roads between the realms fighting it and
+  the wealth drains out of cities that never saw a soldier, which is what
+  lets a collapse propagate instead of staying local. Routes carry ideas as
+  well as cargo, so a technique crosses a sea years before it crosses the
+  mountain range behind the port.
+
+- **Blood.** Two alleles a trait, one from each parent, kept whole rather
+  than averaged. A rare strain can be carried unseen for generations and
+  surface in a child whose parents showed nothing of the kind. A house that
+  marries its own to keep a claim concentrates what it carries and loses
+  vigour — frailer children, shorter lives, fewer of them; one that marries
+  out gets it back. The person page shows what somebody carries without
+  showing it.
+
+- **Rivalry and patronage.** People who hold no throne now have ties to each
+  other. Two of comparable standing in the same trade, in one realm or across
+  a border they share, find themselves measured against one another — and
+  every later achievement by either is an event about both, up to and
+  including the one who is losing deciding that the shorter road past a rival
+  runs through them. Somebody of standing takes up somebody young, who begins
+  with a quarter of their patron's renown and sometimes outgrows them.
+
+- **Weather that lasts longer than a lifetime.** Bands of wet and dry drift
+  across the map over centuries. It does one thing — moves the carrying
+  capacity of land — and everything else follows, because the simulation
+  already knows what to do when land stops feeding people. A wet century
+  pushes farming into the margins; a dry one pushes the margins back onto the
+  farmers, and the people who live where the grass fails are the ones with
+  horses.
+
+- Ages name themselves after the innovation that turned them, where one did.
+
+### Changed
+
+- *World-changing.* Every seed produces a different history.
+- **The brakes on the size of a realm were all relative, and knowledge raised
+  every ceiling at once**, so a realm far enough ahead escaped administrative
+  capacity, distance and foreign subjects together and took the world by year
+  two thousand. Three fixes: diminishing returns on every accumulated
+  advantage; governing reach separated from expansion reach, since sprawl was
+  measured against a generous reach that scales with development and a
+  developed realm therefore always scored below the threshold; and an
+  absolute cost for sheer size, because ruling half of everything is hard
+  because it is half of everything. Four seeds now hold between 9% and 28% of
+  the world across six thousand years.
+- Tension relief from trade fires on goods actually moving between two
+  realms, rather than on two cultures both merely valuing commerce.
+- Plagues spare a realm that knows how to keep water clean.
+
+### Fixed
+
+- The prose well-formedness test ran a hundred years of a small world, which
+  reached none of the events this release adds. It runs five hundred now,
+  which is how a lost line continuation printing ten spaces mid-sentence came
+  to light.
+- A realm founded in year two, when five cells in all were settled, held every
+  one of them and recorded a peak share of 100% for ever after.
+
+### Performance
+
+- A year costs about 0.6 ms at 160x64; ten thousand years of a default world
+  runs in seven seconds.
+- The per-cell yield multiplier is cached, since working it out from the
+  knowledge bitset meant walking the whole tree for every cell every year.
+
 ## [0.2.0] - 2026-09-17
 
 The world now has people in it, and a sea. Rulers marry, have children the

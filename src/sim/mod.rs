@@ -1,7 +1,10 @@
 //! The world simulation: entities, per-year tick, aggregates and the
 //! helpers every subsystem uses to name things and write history.
 
+pub mod blood;
 pub mod chronicle;
+pub mod circles;
+pub mod climate;
 pub mod dynasty;
 pub mod events;
 pub mod explain;
@@ -11,6 +14,8 @@ pub mod people;
 pub mod politics;
 pub mod prose;
 pub mod stories;
+pub mod tech;
+pub mod trade;
 pub mod tuning;
 pub mod war;
 
@@ -122,12 +127,43 @@ pub struct Culture {
     pub parent: Option<usize>,
     pub founded: i32,
     pub values: Values,
+    /// What this people is good at, one number per [`tech::Field`], in
+    /// `[0, 1]`.
+    ///
+    /// A world in which every culture learns everything equally well is a
+    /// world that homogenises: knowledge diffuses until the median thing is
+    /// known nearly everywhere and no region is distinctive. A people's bent
+    /// is drawn from what it *values* — a martial people works out warcraft,
+    /// a mystical one ley-craft, a trading one accounts and ships — so what
+    /// a place knows tells you who lives there.
+    ///
+    /// It gates discovery and adoption both, which is why a technique can
+    /// stall for ever at a cultural border that a trade good crosses freely.
+    pub learning: [f32; tech::FIELDS.len()],
     pub home: usize,
     pub color: Rgb,
     pub extinct: Option<i32>,
     pub cells: usize,
     pub pop: f64,
     pub last_seen: i32,
+}
+
+impl Culture {
+    /// How readily this people takes to a field of knowledge.
+    pub fn bent(&self, f: tech::Field) -> f32 {
+        self.learning[f as usize]
+    }
+    /// The field this people is best at, and how good it is.
+    pub fn best_field(&self) -> (tech::Field, f32) {
+        let mut best = (tech::FIELDS[0], self.learning[0]);
+        for f in tech::FIELDS {
+            let v = self.learning[f as usize];
+            if v > best.1 {
+                best = (f, v);
+            }
+        }
+        best
+    }
 }
 
 /// A city: a cell, a population and a prosperity, with walls if anyone has
@@ -438,6 +474,12 @@ pub struct Polity {
     /// two months' ride from the capital makes the next one harder, not
     /// easier, and an empire breaks along its far edge first.
     pub sprawl: f32,
+    /// What this realm's knowledge adds to what it can govern.
+    ///
+    /// Kept on the realm because [`Polity::admin_capacity`] has no view of
+    /// the world; filled by `recompute` from `polity_known`, and rebuilt on
+    /// load because `ser::load` ends by calling `recompute`.
+    pub tech_admin: f32,
 }
 
 impl Polity {
@@ -455,6 +497,7 @@ impl Polity {
             + self.kind.admin_bonus()
             + self.dev * t.admin_capacity_dev_weight
             + self.cities.len() as f32 * t.admin_capacity_city_weight
+            + self.tech_admin
     }
     /// Land held over [`Polity::admin_capacity`]: 1.0 is exactly at the limit.
     pub fn overextension(&self, t: &Tuning) -> f32 {
@@ -526,18 +569,6 @@ impl Traits {
             piety: rng.trait_value(0.45, 0.22),
             cruelty: rng.trait_value(0.35, 0.22),
             charisma: rng.trait_value(0.5, 0.22),
-        }
-    }
-    /// A child's traits: the parent's, pulled back towards the middle.
-    pub fn inherit(&self, rng: &Rng) -> Traits {
-        let mix = |v: f32| rng.trait_value(v as f64 * 0.6 + 0.2, 0.2);
-        Traits {
-            ambition: mix(self.ambition),
-            valor: mix(self.valor),
-            wisdom: mix(self.wisdom),
-            piety: mix(self.piety),
-            cruelty: mix(self.cruelty),
-            charisma: mix(self.charisma),
         }
     }
     /// The two or three traits that stand out, in words.
@@ -645,6 +676,17 @@ pub struct Person {
     pub rival: Option<usize>,
     /// The ruler they rose under, which is how a general becomes a successor.
     pub served: Option<usize>,
+    // --- blood ---
+    /// Two alleles for each of the six traits. What [`Person::traits`]
+    /// shows is read out of this, so a strain can lie hidden in a line for
+    /// generations and surface when it meets another copy of itself.
+    pub genes: blood::Genome,
+    /// What their parents' closeness cost them, or their distance gave
+    /// them: below 1.0 for a child of close kin. Scales how long they live
+    /// and how readily they have children of their own.
+    pub vigour: f32,
+    /// How closely their parents were related.
+    pub inbred: f32,
 }
 
 impl Person {
@@ -938,12 +980,17 @@ pub struct Stats {
 /// from the capital as the map says.
 const SEA_BINDS_FACTOR: f32 = 0.5;
 
+/// How much settled land there must be before a realm's share of it means
+/// anything. Below this the world is still being peopled and holding all of
+/// it says nothing.
+const MEANINGFUL_WORLD: usize = 300;
+
 /// The water a realm can cross the moment it first builds sea-going hulls,
 /// before its people's seafaring and its own development are counted.
 const SEA_REACH_BASE: f32 = 3.0;
 
 /// The phases of a tick, in the order `World::tick` runs them.
-pub const PHASES: [&str; 22] = [
+pub const PHASES: [&str; 26] = [
     "grow_and_migrate",
     "form_polities",
     "expand",
@@ -958,8 +1005,12 @@ pub const PHASES: [&str; 22] = [
     "unrest",
     "magic",
     "culture_drift",
+    "climate",
+    "trade",
+    "tech",
     "disasters",
     "notables",
+    "circles",
     "wonders",
     "artifacts",
     "prophecies",
@@ -1031,6 +1082,48 @@ pub struct World {
     /// Appended to by `politics::found_polity` and pruned by
     /// `politics::fall` and `recompute`.
     pub alive_polities: Vec<usize>,
+    /// What the ground itself knows: a bitset over this world's own
+    /// [`tech::Innovation`] tree, one `u128` per cell.
+    ///
+    /// Held by the land rather than by the realm on it, which is the whole
+    /// point: a realm that falls takes its treasury and its army with it
+    /// and leaves its irrigation, its roads and its writing behind for
+    /// whoever comes next. This is the only thing in the world that
+    /// accumulates across the fall of the state that built it.
+    pub known: Vec<u128>,
+    /// What each realm knows anywhere in its lands, gathered by `recompute`
+    /// so that `knows` is a bit test rather than a walk over its territory.
+    pub polity_known: Vec<u128>,
+    /// How kind the weather has been lately, cell by cell. Drifts over
+    /// centuries; see [`climate`].
+    pub climate: climate::Climate,
+    /// What each cell of the world produces, if anything.
+    ///
+    /// A pure reading of the terrain, so it is rebuilt on load rather than
+    /// stored — the same bargain as the sea routes. It is what makes the
+    /// salt pans still the salt pans a thousand years later, whoever holds
+    /// them.
+    pub goods: Vec<Option<trade::Good>>,
+    /// The standing trades between cities, worked out afresh every few
+    /// decades by `trade::refresh`.
+    pub routes: Vec<trade::Route>,
+    /// What each cell's knowledge is worth to its harvests, cached.
+    ///
+    /// `cell_capacity` is called for every cell every year, and working the
+    /// multiplier out from the bitset means walking the whole tree each
+    /// time — ten thousand cells times a hundred and twenty innovations,
+    /// every year, which was six times the cost of the phase it sat in.
+    /// Knowledge changes rarely, so it is recomputed where it changes
+    /// instead: see `World::refresh_yield`.
+    pub cell_yield: Vec<f32>,
+    /// This world's own tree of innovations, grown from its seed. No two
+    /// worlds have the same one.
+    pub techs: Vec<tech::Innovation>,
+    /// Whether each innovation has been worked out anywhere yet, so that
+    /// the first time is told as news and the hundredth is not.
+    pub tech_seen: Vec<bool>,
+    /// The year each was first worked out, for the naming of ages.
+    pub tech_first_year: Vec<i32>,
     /// Everyone still living, ascending by id.
     ///
     /// Kept beside `persons` for the same reason `owner_cells` is kept
@@ -1066,6 +1159,15 @@ impl World {
             polities: Vec::new(),
             houses: Vec::new(),
             persons: Vec::new(),
+            known: Vec::new(),
+            polity_known: Vec::new(),
+            climate: climate::Climate::default(),
+            goods: Vec::new(),
+            routes: Vec::new(),
+            cell_yield: Vec::new(),
+            techs: Vec::new(),
+            tech_seen: Vec::new(),
+            tech_first_year: Vec::new(),
             alive_persons: Vec::new(),
             alive_polities: Vec::new(),
             schools: Vec::new(),
@@ -1141,6 +1243,15 @@ impl World {
             polities: Vec::new(),
             houses: Vec::new(),
             persons: Vec::new(),
+            known: vec![0; n],
+            polity_known: Vec::new(),
+            climate: climate::Climate::default(),
+            goods: Vec::new(),
+            routes: Vec::new(),
+            cell_yield: Vec::new(),
+            techs: Vec::new(),
+            tech_seen: Vec::new(),
+            tech_first_year: Vec::new(),
             alive_persons: Vec::new(),
             alive_polities: Vec::new(),
             schools: Vec::new(),
@@ -1160,6 +1271,14 @@ impl World {
             owner_cells: Vec::new(),
             prof: Prof::default(),
         };
+        // The world's own tree of ideas, grown before its peoples so that
+        // the first of them can already be working something out. A hundred
+        // and twenty innovations is enough to keep a world learning for ten
+        // thousand years without the tree ever running out.
+        world.goods = trade::goods_of(&world.terrain);
+        world.techs = tech::grow_tree(&world.rng, tech::MAX_TECHS.min(120));
+        world.tech_seen = vec![false; world.techs.len()];
+        world.tech_first_year = vec![0; world.techs.len()];
         genesis::populate(&mut world);
         world.recompute();
         world
@@ -1292,7 +1411,11 @@ impl World {
             PolityKind::Horde => -2.0,
             _ => 0.0,
         };
-        let reach = SEA_REACH_BASE + race.seafaring * 8.0 + pol.dev * 2.5 + kind_bonus;
+        let reach = SEA_REACH_BASE
+            + race.seafaring * 8.0
+            + pol.dev * 2.5
+            + kind_bonus
+            + self.tech_sea_bonus(p);
         reach.clamp(1.0, crate::geo::MAX_CROSSING as f32) as u16
     }
 
@@ -1545,6 +1668,9 @@ impl World {
             acclaimed: None,
             rival: None,
             served: None,
+            genes: blood::fresh(&self.rng),
+            vigour: 1.0,
+            inbred: 0.0,
         });
         // Ids only ever increase, so appending keeps the list sorted.
         self.alive_persons.push(id);
@@ -1692,6 +1818,16 @@ impl World {
     pub fn recompute(&mut self) {
         self.forget_the_fallen();
         self.forget_the_dead();
+        // Knowledge is parallel to the cells; a world assembled from an
+        // older file may not have brought one for every cell.
+        if self.known.len() != self.cells.len() {
+            self.known.resize(self.cells.len(), 0);
+        }
+        if self.cell_yield.len() != self.cells.len() {
+            self.cell_yield = (0..self.cells.len())
+                .map(|i| self.tech_capacity_mult(i))
+                .collect();
+        }
         for p in self.polities.iter_mut() {
             p.cells = 0;
             p.pop = 0.0;
@@ -1707,6 +1843,10 @@ impl World {
             c.pop = 0.0;
         }
         let mut foreign: Vec<u32> = vec![0; self.polities.len()];
+        // What each realm knows, gathered in the sweep that is already
+        // walking every cell, so that `knows` is a bit test afterwards
+        // rather than a walk over the realm's own land.
+        let mut known_by: Vec<u128> = vec![0; self.polities.len()];
         let mut fert: Vec<f32> = vec![0.0; self.polities.len()];
         // Every border crossing, collected flat and counted afterwards: a
         // sort beats a map lookup per cell.
@@ -1728,6 +1868,7 @@ impl World {
             }
             if let Some(p) = cs.owner {
                 owned += 1;
+                known_by[p] |= self.known[i];
                 self.owner_cells[p].push(i);
                 let pol = &mut self.polities[p];
                 pol.cells += 1;
@@ -1784,6 +1925,10 @@ impl World {
                 continue;
             }
             borders.push((p.min(q), p.max(q)));
+        }
+        self.polity_known = known_by;
+        for p in 0..self.polities.len() {
+            self.polities[p].tech_admin = self.tech_admin_bonus(p);
         }
         borders.sort_unstable();
         let mut at = 0;
@@ -1845,8 +1990,8 @@ impl World {
                 None => 0.0,
             });
         }
-        let reach_base = self.tuning.expand_reach_base;
-        let reach_dev = self.tuning.expand_reach_dev_weight;
+        let reach_base = self.tuning.admin_reach_base;
+        let reach_dev = self.tuning.admin_reach_dev_weight;
         for p in self.polities.iter_mut() {
             if p.cells > 0 {
                 p.foreign_share = foreign[p.id] as f32 / p.cells as f32;
@@ -1865,7 +2010,11 @@ impl World {
             if p.cities.len() > p.peak_cities {
                 p.peak_cities = p.cities.len();
             }
-            if owned > 0 {
+            // Only once there is a world to hold a share of. A realm founded
+            // in year two, when five cells in all are settled, holds every
+            // one of them — and recorded a peak of 100% for ever after,
+            // which is a sentence about an empty map rather than an empire.
+            if owned >= MEANINGFUL_WORLD {
                 let share = p.cells as f32 / owned as f32;
                 if share > p.peak_share {
                     p.peak_share = share;
@@ -1928,14 +2077,18 @@ impl World {
         phase!(11, politics::unrest(self));
         phase!(12, magic::tick(self));
         phase!(13, people::culture_drift(self));
-        phase!(14, events::disasters(self));
-        phase!(15, events::notables(self));
-        phase!(16, events::wonders(self));
-        phase!(17, stories::tick_artifacts(self));
-        phase!(18, stories::tick_prophecies(self));
-        phase!(19, stories::tick_legends(self));
-        phase!(20, self.recompute());
-        phase!(21, events::eras(self));
+        phase!(14, climate::tick(self));
+        phase!(15, trade::tick(self));
+        phase!(16, tech::tick(self));
+        phase!(17, events::disasters(self));
+        phase!(18, events::notables(self));
+        phase!(19, circles::tick(self));
+        phase!(20, events::wonders(self));
+        phase!(21, stories::tick_artifacts(self));
+        phase!(22, stories::tick_prophecies(self));
+        phase!(23, stories::tick_legends(self));
+        phase!(24, self.recompute());
+        phase!(25, events::eras(self));
         self.chronicle.compact(self.tuning.chronicle_cap);
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);

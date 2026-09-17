@@ -426,7 +426,13 @@ fn tick_schools(w: &mut World) {
             let vals = w.cultures[pol.culture].values;
             let is_state = pol.school == Some(s);
             let rival_state = pol.school.is_some() && !is_state;
-            let mut d = tn.school_influence_growth * (0.5 + vals.mysticism) * (0.5 + vals.openness);
+            // What a school can carry depends on what the realm knows: a
+            // doctrine that can be written down and copied travels further
+            // than one that must be taught face to face.
+            let mut d = tn.school_influence_growth
+                * (0.5 + vals.mysticism)
+                * (0.5 + vals.openness)
+                * (1.0 + w.tech_doctrine_bonus(p));
             if is_state {
                 d += tn.school_state_bonus;
             }
