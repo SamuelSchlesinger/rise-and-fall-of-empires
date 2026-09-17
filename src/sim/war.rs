@@ -1269,7 +1269,13 @@ fn battle(
             if let Some(city) = w.cells[c].city {
                 // Siege.
                 let walls = w.cities[city].walls;
-                let ratio = s_off.max(s_def) / strength(w, holder, &[]).max(0.05);
+                // What the walls are worth depends on what both sides know.
+                // For as long as nobody has siege engines a walled city is
+                // very nearly untakeable; the century they appear is the one
+                // in which every realm that trusted its walls finds out it
+                // was wrong.
+                let siege = w.siege_advantage(winner, holder);
+                let ratio = s_off.max(s_def) * siege / strength(w, holder, &[]).max(0.05);
                 if ratio > 1.0 + walls * 0.6 && rng.chance(tn.siege_capture_chance) {
                     let s = capture_city(w, city, winner, holder, wid);
                     text.push_str(&s);

@@ -99,6 +99,17 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         ),
     );
 
+    // Sheer size. Mirrors the hegemony term in `politics::economy`.
+    let share = crate::sim::dynasty::world_share(w, p);
+    push(
+        &mut out,
+        -(share - tn.hegemony_free_share).max(0.0) * tn.hegemony_weight,
+        format!(
+            "it rules {:.0}% of the settled world, which is more than any crown governs easily",
+            share * 100.0
+        ),
+    );
+
     // Distance. Mirrors the sprawl term in `politics::economy`; the two are
     // written to be read side by side and must change together.
     push(

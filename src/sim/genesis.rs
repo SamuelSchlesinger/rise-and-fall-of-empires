@@ -3,9 +3,10 @@
 
 use super::chronicle::{EventKind, Ref};
 use super::prose::{self, genesis::FEATURE, genesis::STATURE};
-use super::{Culture, Era, Race, Values, World, GROUP_COUNT};
+use super::{tech, Culture, Era, Race, Values, World, GROUP_COUNT};
 use crate::geo::FeatureKind;
 use crate::lang::Language;
+use crate::rng::Rng;
 use crate::term::Rgb;
 
 pub fn culture_color(id: usize) -> Rgb {
@@ -239,6 +240,11 @@ pub fn found_culture(
         tradition: jitter(base.tradition),
         openness: jitter(base.openness),
     };
+    // What this people takes to. Drawn from what it values, so a martial
+    // people is good at warcraft and a trading one at accounts and ships,
+    // and inherited with drift by its daughters — which is how a region
+    // keeps a recognisable bent across the rise and fall of its realms.
+    let learning = learning_from(w, parent, &values, r, &rng);
     w.cultures.push(Culture {
         id,
         name: name.clone(),
@@ -249,6 +255,7 @@ pub fn found_culture(
         parent,
         founded: w.year,
         values,
+        learning,
         home,
         color: culture_color(id),
         extinct: None,
@@ -280,4 +287,73 @@ pub fn found_culture(
         }
     }
     id
+}
+
+/// What a people takes to, by field.
+///
+/// A daughter culture inherits its parent's bent with drift, so a region
+/// stays recognisable across centuries even as its realms come and go. A
+/// fresh people draws from its race and its values: this is the whole of the
+/// link between what a people *believes* and what it *knows how to do*.
+fn learning_from(
+    w: &World,
+    parent: Option<usize>,
+    values: &Values,
+    race: &Race,
+    rng: &Rng,
+) -> [f32; tech::FIELDS.len()] {
+    use tech::Field;
+    let mut out = [0.0f32; tech::FIELDS.len()];
+    for f in tech::FIELDS {
+        let base = match parent {
+            // Inherited, and drifting: a daughter people is recognisably of
+            // its mother for a long time, and not for ever.
+            Some(p) => w.cultures[p].learning[f as usize],
+            None => {
+                // A first people's bent comes from what it is and what it
+                // holds dear.
+                let v = match f {
+                    Field::Warcraft => values.militarism,
+                    Field::Leycraft => values.mysticism * 0.7 + race.mystic * 0.3,
+                    Field::Statecraft => values.mercantilism * 0.6 + values.tradition * 0.2,
+                    Field::Seafaring => race.seafaring * 0.7 + race.coast_love * 0.3,
+                    Field::Metalcraft => values.militarism * 0.4 + 0.3,
+                    Field::Husbandry => 0.45 + race.fecund * 0.25,
+                    Field::Building => values.tradition * 0.4 + 0.3,
+                    Field::Letters => values.openness * 0.5 + 0.2,
+                    Field::Reckoning => values.openness * 0.35 + values.mysticism * 0.25 + 0.15,
+                    Field::Physic => 0.35 + values.openness * 0.2,
+                };
+                v.clamp(0.05, 0.95)
+            }
+        };
+        out[f as usize] = rng.trait_value(base as f64, 0.12).clamp(0.05, 0.98);
+    }
+    // A people is not equally interested in everything. Left as a gentle
+    // spread around the middle, every culture ends up above the threshold in
+    // every field, adopts whatever reaches it, and the world converges on
+    // one body of knowledge — which is the homogenising this exists to
+    // prevent. So each people is given real strengths and real blind spots:
+    // two fields it takes to, and two it never much cared for.
+    //
+    // A daughter culture keeps its mother's shape, drifting, so a region's
+    // character outlasts the realms that ruled it.
+    if parent.is_none() {
+        let mut order: Vec<usize> = (0..tech::FIELDS.len()).collect();
+        // Shuffled by a draw per position, so the choice is deterministic
+        // and the stream advances the same way every time.
+        for k in (1..order.len()).rev() {
+            order.swap(k, rng.below(k + 1));
+        }
+        for (rank, &f) in order.iter().enumerate() {
+            match rank {
+                0 | 1 => out[f] = (out[f] + 0.35).min(0.97),
+                2 => out[f] = (out[f] + 0.15).min(0.97),
+                7 => out[f] = (out[f] - 0.22).max(0.03),
+                8 | 9 => out[f] = (out[f] - 0.34).max(0.02),
+                _ => {}
+            }
+        }
+    }
+    out
 }

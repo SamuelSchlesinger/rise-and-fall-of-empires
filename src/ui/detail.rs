@@ -370,7 +370,7 @@ pub fn list_header(tab: usize) -> &'static str {
     match tab {
         0 => "  name                              kind          lands    people  stability          ruler",
         1 => "  name                    realm                            people   size              founded",
-        2 => "  people                  race          lands   people   language",
+        2 => "  people                  race          lands    people   known for    language",
         3 => "  school                              kind         realms reach                         home",
         4 => "  name                          role         realm                  born   died",
         5 => "  war                                       attacker vs defender          years",
@@ -469,12 +469,14 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                     Some(y) => format!("gone {}", y),
                     None => format!("{:>5}", cu.cells),
                 };
+                let (field, _) = cu.best_field();
                 let row = format!(
-                    "{:<24}{:<14}{:>6}  {:>7.0}k  {}",
+                    "{:<24}{:<14}{:>6}  {:>7.0}k  {:<13}{}",
                     clip(&cu.plural, 23),
                     clip(&w.races[cu.race].name, 13),
                     status,
                     cu.pop,
+                    field.name(),
                     cu.lang.name
                 );
                 rows.push((row, Ref::Culture(c)));
@@ -1101,6 +1103,24 @@ fn realm_page(
                 ));
             }
         }
+        // What this realm knows. The count alone is the headline; the most
+        // recent few say what kind of realm it is becoming.
+        let known = w.tech_count(p);
+        if known > 0 {
+            let mut held = w.tech_list(p);
+            held.sort_by_key(|&t| std::cmp::Reverse(w.tech_first_year[t]));
+            let recent: Vec<String> = held
+                .iter()
+                .take(3)
+                .map(|&t| format!("{} ({})", w.techs[t].name, w.techs[t].effect.label()))
+                .collect();
+            out.push(line(
+                format!("    Knows     {} of {} arts", known, w.techs.len()),
+                FG,
+                0,
+            ));
+            labelled(out, "    Lately", &recent.join(", "), w2, DIMC);
+        }
         // How the throne passes is the single most consequential thing
         // about a realm that cannot be seen on the map: it decides whether
         // a conqueror's work survives them.
@@ -1373,6 +1393,27 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
 }
 
 /// The page for a people.
+/// A people's bent, as a sentence: what they take to and what passes them by.
+fn bent_line(w: &World, cu: usize) -> String {
+    use crate::sim::tech::FIELDS;
+    let mut fields: Vec<(crate::sim::tech::Field, f32)> = FIELDS
+        .into_iter()
+        .map(|f| (f, w.cultures[cu].bent(f)))
+        .collect();
+    fields.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let strong: Vec<&str> = fields.iter().take(2).map(|&(f, _)| f.name()).collect();
+    let weak: Vec<&str> = fields
+        .iter()
+        .rev()
+        .take(2)
+        .map(|&(f, _)| f.name())
+        .collect();
+    format!(
+        "take to {} and {}; {} and {} have never much interested them",
+        strong[0], strong[1], weak[0], weak[1]
+    )
+}
+
 fn people_page(w: &World, cu: usize, r: Ref, width: usize, w2: usize, out: &mut Vec<Line>) {
     let c = &w.cultures[cu];
     out.push(line(
@@ -1398,6 +1439,12 @@ fn people_page(w: &World, cu: usize, r: Ref, width: usize, w2: usize, out: &mut 
         w2,
     ) {
         out.push(line(l, DIMC, 0));
+    }
+    // What this people takes to. It decides what they will ever work out
+    // and what they will refuse to copy from a neighbour, so it is as much
+    // a fact about them as their language.
+    for l in term::wrap(&format!("They {}.", bent_line(w, cu)), w2) {
+        out.push(line(l, ACCENT, 0));
     }
     out.push(line("", FG, 0));
     out.push(line(format!("[a] Race      the {}", race.plural), LINK, 0));

@@ -543,3 +543,177 @@ pub fn era_names_empire(w: &World, p: usize) -> Vec<String> {
         format!("the Age of the {} Crown", adj),
     ]
 }
+
+// ---------------------------------------------------------------------------
+// What the world works out
+// ---------------------------------------------------------------------------
+
+/// Something is worked out for the first time anywhere. One draw.
+///
+/// The innovation's name is its world's own, so the sentence has to carry
+/// what it *does* as well as what it is called — a reader has no way of
+/// knowing what "the counterweighted engine" is worth until told. The
+/// consequence clause comes from the effect, which is universal, so a
+/// generated tree still reads like a history.
+pub fn tech_discovered(w: &World, p: usize, city: usize, t: usize, pick: &Pick) -> String {
+    let inn = &w.techs[t];
+    let place = &w.cities[city].name;
+    let folk = &w.cultures[w.polities[p].culture].plural;
+    let what = &inn.name;
+    let consequence = tech_consequence(inn.effect, pick);
+    match pick.index(3) {
+        0 => format!(
+            "In {}, the {} worked out {}. {}",
+            place, folk, what, consequence
+        ),
+        1 => format!(
+            "{} was first practised at {}, among the {}. {}",
+            cap(what),
+            place,
+            folk,
+            consequence
+        ),
+        // Phrased to dodge verb agreement: several field names look plural
+        // ("letters", "physic"), and "their letters was not the same" is
+        // the sort of thing a generated sentence gets wrong.
+        _ => format!(
+            "The {} of {} learned {}, and nothing in their {} was quite the same afterwards. {}",
+            folk,
+            place,
+            what,
+            inn.field.name(),
+            consequence
+        ),
+    }
+}
+
+/// What an innovation will mean, in a clause a reader can act on.
+///
+/// Keyed to the effect rather than the name, and graded by size, so the
+/// first small advance in a field and the one that changes everything do
+/// not get the same sentence.
+fn tech_consequence(e: crate::sim::tech::Effect, pick: &Pick) -> String {
+    use crate::sim::tech::Effect;
+    let big = e.size() >= 0.16;
+    match e {
+        Effect::Yield(_) if big => "The same fields fed half again as many mouths.".into(),
+        Effect::Yield(_) => "The harvests came in a little heavier.".into(),
+        Effect::Arms(_) if big => {
+            "Their line held where it had broken before, and broke what had held.".into()
+        }
+        Effect::Arms(_) => "Their soldiers were the better armed for it.".into(),
+        Effect::Siegecraft(_) if big => {
+            "Walls had been the last argument of frightened cities. They were not any more.".into()
+        }
+        Effect::Siegecraft(_) => "A siege grew shorter by a season.".into(),
+        Effect::Ramparts(_) if big => {
+            "A city that kept its gates shut could now keep them shut for years.".into()
+        }
+        Effect::Ramparts(_) => "The walls stood a little longer under the ram.".into(),
+        Effect::Administration(_) if big => {
+            "The crown learned what it owned, which is the beginning of ruling it.".into()
+        }
+        Effect::Administration(_) => "The clerks kept up with the provinces, for a while.".into(),
+        Effect::Revenue(_) if big => {
+            "What the provinces produced began, for the first time, to reach the treasury.".into()
+        }
+        Effect::Revenue(_) => "Rather more of the tax arrived than used to.".into(),
+        Effect::Roadcraft(_) if big => {
+            "An order could reach a frontier before the trouble it answered had spread.".into()
+        }
+        Effect::Roadcraft(_) => "The roads were easier on a cart than they had been.".into(),
+        Effect::Seacraft(_) if big => "The open water stopped being the edge of the world.".into(),
+        Effect::Seacraft(_) => "Their ships kept the sea a few weeks longer each year.".into(),
+        Effect::Prosperity(_) if big => {
+            "The cities grew rich in a way the countryside could not account for.".into()
+        }
+        Effect::Prosperity(_) => "The markets were the busier for it.".into(),
+        Effect::Doctrine(_) if big => {
+            "What the schools taught could now be carried a thousand miles without spoiling.".into()
+        }
+        Effect::Doctrine(_) => "The adepts had one more thing they could do.".into(),
+        Effect::Order(_) if big => {
+            "Men obeyed the office rather than the man in it, which is a rarer thing.".into()
+        }
+        Effect::Order(_) => "The realm sat a little easier under its crown.".into(),
+        Effect::Health(_) if big => {
+            "The plagues that had emptied cities began to spare them.".into()
+        }
+        Effect::Health(_) => {
+            let _ = pick;
+            "Fewer died of what had always killed them.".into()
+        }
+    }
+}
+
+/// Something already known elsewhere reaches a new realm.
+pub fn tech_reached(w: &World, p: usize, city: usize, t: usize) -> String {
+    format!(
+        "{} came to {}, and the {} set about it as though they had always known it.",
+        cap(&w.techs[t].name),
+        w.cities[city].name,
+        w.cultures[w.polities[p].culture].plural
+    )
+}
+
+/// What an age that turned on an innovation is called.
+///
+/// Built from the innovation's own name and field, because the thing the
+/// century is remembered for is this world's, not every world's.
+pub fn era_names_tech(w: &World, t: usize) -> Vec<String> {
+    use crate::sim::tech::Effect;
+    let inn = &w.techs[t];
+    // A name for the thing itself, stripped of its article, so "the
+    // counterweighted engine" becomes "the Age of the Counterweighted
+    // Engine" and not "the Age of the the ...".
+    let bare = inn.name.trim_start_matches("the ");
+    let subject = title_words(bare);
+    let field = title_words(inn.field.name());
+    let flavour = match inn.effect {
+        Effect::Siegecraft(_) => "the Age of Broken Walls",
+        Effect::Administration(_) => "the Age of the Written Realm",
+        Effect::Seacraft(_) => "the Age of the Open Sea",
+        _ => "the Age of New Things",
+    };
+    vec![
+        format!("the Age of {}", subject),
+        format!("the Century of {}", subject),
+        flavour.to_string(),
+        format!("the Great Age of {}", field),
+    ]
+}
+
+/// Capitalise each word of a phrase, for a title.
+fn title_words(s: &str) -> String {
+    s.split(' ')
+        .map(|w| match w.chars().next() {
+            Some(c) if c.is_lowercase() && w.len() > 2 => {
+                c.to_uppercase().collect::<String>() + &w[c.len_utf8()..]
+            }
+            _ => w.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// What the chroniclers say about such a century. One draw.
+pub fn era_of_tech(w: &World, t: usize, wars: u32, pick: &Pick) -> String {
+    let what = &w.techs[t].name;
+    match pick.index(3) {
+        0 => format!(
+            "The century is remembered for one thing: {} came into the world, and every \
+             calculation anybody had made was made again.",
+            what
+        ),
+        1 => format!(
+            "{} was worked out in this century. The {} wars it also saw are a footnote beside it.",
+            cap(what),
+            wars
+        ),
+        _ => format!(
+            "Chroniclers date the age from {}. Those who lived before it and those who lived \
+             after did not inhabit quite the same world.",
+            what
+        ),
+    }
+}

@@ -310,6 +310,7 @@ pub fn found_polity(
         hegemon_since: None,
         heirs: Vec::new(),
         sprawl: 0.0,
+        tech_admin: 0.0,
     });
     // A realm founded as a kingdom is founded with a house. Building the
     // dynasty name here but not the house left the realm with a family in
@@ -603,6 +604,7 @@ fn score_cell(
     let pop = cs.pop * 0.25;
     let reach = w.tuning.expand_reach_base
         + pol.dev * w.tuning.expand_reach_dev_weight
+        + w.tech_reach_bonus(p)
         + if pol.seafaring { 5.0 } else { 0.0 }
         + match pol.kind {
             PolityKind::Empire => 12.0,
@@ -745,6 +747,13 @@ pub fn economy(w: &mut World) {
         let (army_mult, stab_bonus, dev_bonus, prosp_bonus) = w.school_effects(p);
         let art_mult = w.artifact_army_mult(p);
         let art_stab = w.artifact_stability(p);
+        let tech_army = w.tech_army_mult(p);
+        // Coin, roads and a tax roll are the difference between owning a
+        // province and being able to tax it.
+        let tech_income = w.tech_income_mult(p);
+        let tech_prosp = w.tech_prosperity_bonus(p);
+        let tech_order = w.tech_order_bonus(p);
+        let world_share = super::dynasty::world_share(w, p);
         let culture = w.polities[p].culture;
         let vals = w.cultures[culture].values;
         let at_war = w.polities[p].at_war();
@@ -776,7 +785,8 @@ pub fn economy(w: &mut World) {
                     + minerals * 0.25
                     + dev * 0.3
                     + (peace_neighbors * 0.04).min(0.2)
-                    + prosp_bonus;
+                    + prosp_bonus
+                    + tech_prosp;
             if is_capital == Some(c) {
                 target += 0.1;
             }
@@ -798,6 +808,7 @@ pub fn economy(w: &mut World) {
         };
         let pol = &mut w.polities[p];
         income += pol.cells as f32 * tn.cell_income_factor * (1.0 + pol.dev);
+        income *= tech_income;
         let upkeep = pol.army * tn.army_upkeep_factor + pol.cells as f32 * tn.cell_upkeep_factor;
         pol.treasury = (pol.treasury + income - upkeep).clamp(-60.0, 600.0);
         // Army.
@@ -814,7 +825,8 @@ pub fn economy(w: &mut World) {
             * kind_mult
             * (1.0 + pol.dev * 0.5)
             * army_mult
-            * art_mult;
+            * art_mult
+            * tech_army;
         let rate = if at_war {
             tn.army_build_rate_war
         } else {
@@ -873,10 +885,12 @@ pub fn economy(w: &mut World) {
             + kind_stab
             - (over - 1.0).max(0.0) * tn.stability_overextension_weight
             - (pol.sprawl - 1.0).max(0.0) * tn.stability_sprawl_weight
+            - (world_share - tn.hegemony_free_share).max(0.0) * tn.hegemony_weight
             - pol.foreign_share * tn.stability_foreign_weight
             - pol.exhaustion * tn.stability_exhaustion_weight
             - pol.decadence * tn.stability_decadence_weight
             + art_stab
+            + tech_order
             + (avg_prosp - 0.4) * 0.15
             + vals.tradition * 0.05
             + (pol.treasury / 600.0).max(-0.2) * 0.2;

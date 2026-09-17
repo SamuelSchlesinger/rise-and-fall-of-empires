@@ -165,6 +165,29 @@ pub struct Tuning {
     pub stability_charisma_weight: f32,
     /// How much being stretched past administrative capacity costs.
     pub stability_overextension_weight: f32,
+    /// Share of the settled world past which a realm begins to pay for its
+    /// own size in stability, whatever it knows and however good its roads.
+    pub hegemony_free_share: f32,
+    /// How steeply it pays beyond that.
+    ///
+    /// The other brakes on size are all *relative* — capacity, distance,
+    /// foreign subjects — and knowledge raises every one of their ceilings,
+    /// so a realm far enough ahead eventually escaped all of them together
+    /// and took the world. This one is absolute: ruling half of everything
+    /// is hard because it is half of everything.
+    pub hegemony_weight: f32,
+    /// How far a realm can govern from its seat before development, in
+    /// cells. The denominator of [`crate::sim::Polity::sprawl`].
+    ///
+    /// Deliberately *not* the expansion reach. Expansion reach is generous
+    /// and scales hard with development, so measuring sprawl against it
+    /// meant a developed realm always scored below 1.0 and the distance
+    /// brake contributed nothing at all — which is exactly what happened
+    /// once knowledge began pushing development to its ceiling. Governing
+    /// from far away has to stay hard even for an advanced realm.
+    pub admin_reach_base: f32,
+    /// How much further each point of development lets a realm govern.
+    pub admin_reach_dev_weight: f32,
     /// How heavily distance counts against stability: the penalty per unit
     /// of [`crate::sim::Polity::sprawl`] over 1.0.
     ///
@@ -441,6 +464,26 @@ pub struct Tuning {
     /// How much a hegemon's share adds to everyone else's tension with it.
     pub containment_tension: f32,
 
+    // -- what the world learns ---------------------------------------------
+    /// Yearly chance a city of ordinary size and prosperity works something
+    /// out, before its people, its faith and its wealth are counted.
+    pub tech_discover_chance: f64,
+    /// How much dearer each innovation the *world* already knows makes the
+    /// next one. This is what paces a tree across millennia instead of
+    /// centuries: the frontier recedes as it is approached. Global rather
+    /// than per-realm, because discovery is rolled at every city and it is
+    /// the world's rate that has to be held down, not one realm's.
+    pub tech_frontier_drag: f64,
+    /// How much a city must be able to support, per point of an
+    /// innovation's difficulty, before it can work that innovation out.
+    pub tech_effort: f32,
+    /// Chance per year that a cell takes up something a neighbour knows,
+    /// before the innovation's own readiness to travel is counted.
+    pub tech_spread_chance: f64,
+    /// Chance that emptied ground forgets what it knew, which is what makes
+    /// a dark age possible and a rediscovery worth reading.
+    pub tech_forget_chance: f64,
+
     // -- housekeeping ------------------------------------------------------
     /// How many events the chronicle keeps before the oldest small ones are
     /// dropped. Great events (importance 2 and 3) are always kept, so the
@@ -518,6 +561,10 @@ impl Default for Tuning {
             stability_wisdom_weight: 0.2,
             stability_charisma_weight: 0.1,
             stability_overextension_weight: 0.25,
+            hegemony_free_share: 0.22,
+            hegemony_weight: 1.35,
+            admin_reach_base: 7.0,
+            admin_reach_dev_weight: 4.5,
             stability_sprawl_weight: 0.28,
             stability_foreign_weight: 0.2,
             stability_exhaustion_weight: 0.3,
@@ -644,6 +691,11 @@ impl Default for Tuning {
             tributary_revolt_chance: 0.02,
             hegemon_share: 0.2,
             containment_tension: 0.05,
+            tech_discover_chance: 0.0045,
+            tech_frontier_drag: 0.5,
+            tech_effort: 14.0,
+            tech_spread_chance: 0.02,
+            tech_forget_chance: 0.03,
             chronicle_cap: 60_000,
         }
     }
@@ -726,6 +778,10 @@ impl Tuning {
             "stability_wisdom_weight" => self.stability_wisdom_weight = v as f32,
             "stability_charisma_weight" => self.stability_charisma_weight = v as f32,
             "stability_overextension_weight" => self.stability_overextension_weight = v as f32,
+            "hegemony_free_share" => self.hegemony_free_share = v as f32,
+            "hegemony_weight" => self.hegemony_weight = v as f32,
+            "admin_reach_base" => self.admin_reach_base = v as f32,
+            "admin_reach_dev_weight" => self.admin_reach_dev_weight = v as f32,
             "stability_sprawl_weight" => self.stability_sprawl_weight = v as f32,
             "stability_foreign_weight" => self.stability_foreign_weight = v as f32,
             "stability_exhaustion_weight" => self.stability_exhaustion_weight = v as f32,
@@ -858,6 +914,11 @@ impl Tuning {
             "tributary_revolt_chance" => self.tributary_revolt_chance = v,
             "hegemon_share" => self.hegemon_share = v as f32,
             "containment_tension" => self.containment_tension = v as f32,
+            "tech_discover_chance" => self.tech_discover_chance = v,
+            "tech_frontier_drag" => self.tech_frontier_drag = v,
+            "tech_effort" => self.tech_effort = v as f32,
+            "tech_spread_chance" => self.tech_spread_chance = v,
+            "tech_forget_chance" => self.tech_forget_chance = v,
             "chronicle_cap" => self.chronicle_cap = v.max(0.0) as usize,
             _ => return Err(UnknownField(name.to_string())),
         }

@@ -8,10 +8,11 @@ pub fn run(world: &mut World, years: i32) {
         "{:>5} {:>6} {:>5} {:>4} {:>5} {:>4} {:>6} {:>5} {:>5} {:>5} {:>5}",
         "year", "pop_k", "realm", "emp", "wars", "sch", "cities", "cult", "relic", "proph", "top%"
     );
+    println!("      (top realm: stab / sprawl / over / foreign / tributaries; then what the world knows)");
     // The largest realm's own numbers, printed beside the world's, because
     // every balance question about this simulation is really a question
     // about whether the biggest realm is being held in check and by what.
-    println!("      (top realm: stab / sprawl / over / foreign / tributaries)");
+
     let mut wars_at_last = 0usize;
     for _ in 0..years {
         world.tick();
@@ -80,6 +81,54 @@ pub fn run(world: &mut World, years: i32) {
                     .map(|x| format!("{:+.2} {}", x.weight, short_reason(&x.text)))
                     .collect();
                 println!("      target {:.2} = {}", target, parts.join("  "));
+            }
+            // What the world knows, and how widely. The question the ratchet
+            // exists to answer is whether year 1500 differs in kind from year
+            // 300 — so: how many innovations exist at all, how many the
+            // leading realm has, and what share of settled land knows the
+            // median one.
+            {
+                let seen = world.tech_seen.iter().filter(|&&b| b).count();
+                let best = world
+                    .living_polities()
+                    .iter()
+                    .map(|&p| world.tech_count(p))
+                    .max()
+                    .unwrap_or(0);
+                let owned = world.stats.owned_cells.max(1);
+                let mut spread: Vec<f32> = (0..world.techs.len())
+                    .filter(|&t| world.tech_seen[t])
+                    .map(|t| {
+                        let n = (0..world.cells.len())
+                            .filter(|&i| world.cells[i].owner.is_some() && world.cell_knows(i, t))
+                            .count();
+                        n as f32 / owned as f32
+                    })
+                    .collect();
+                spread.sort_by(f32::total_cmp);
+                let median = spread.get(spread.len() / 2).copied().unwrap_or(0.0);
+                // How far apart the realms are: the gap between the best
+                // and the median realm is what "local differentiation"
+                // means in a number. A world where everyone knows the same
+                // things has a gap of nothing.
+                let mut counts: Vec<u32> = world
+                    .living_polities()
+                    .iter()
+                    .map(|&p| world.tech_count(p))
+                    .collect();
+                counts.sort_unstable();
+                let mid = counts.get(counts.len() / 2).copied().unwrap_or(0);
+                let low = counts.first().copied().unwrap_or(0);
+                println!(
+                    "      known: {} of {} exist | realms hold {}/{}/{} (least/median/best) | \
+                     median innovation reaches {:.0}% of settled land",
+                    seen,
+                    world.techs.len(),
+                    low,
+                    mid,
+                    best,
+                    median * 100.0
+                );
             }
         }
     }

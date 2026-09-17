@@ -305,6 +305,22 @@ fn vec_u16<S: Io>(s: &mut S, v: &mut Vec<u16>) {
 fn vec_u32<S: Io>(s: &mut S, v: &mut Vec<u32>) {
     seq(s, v, || 0, Io::u32);
 }
+/// A run of 128-bit words, as pairs of `u64`: the wire format has no u128
+/// and does not need one.
+fn vec_u128<S: Io>(s: &mut S, v: &mut Vec<u128>) {
+    let mut halves: Vec<u64> = Vec::with_capacity(v.len() * 2);
+    for &x in v.iter() {
+        halves.push(x as u64);
+        halves.push((x >> 64) as u64);
+    }
+    seq(s, &mut halves, || 0, Io::u64);
+    if s.reading() {
+        *v = halves
+            .chunks_exact(2)
+            .map(|c| u128::from(c[0]) | (u128::from(c[1]) << 64))
+            .collect();
+    }
+}
 fn vec_bool<S: Io>(s: &mut S, v: &mut Vec<bool>) {
     let mut b: Vec<u8> = v.iter().map(|&x| x as u8).collect();
     s.bytes(&mut b);
@@ -400,6 +416,8 @@ const ROLES: [Role; 10] = [
     Role::Noble,
 ];
 const GENDERS: [Gender; 3] = [Gender::F, Gender::M, Gender::N];
+const FIELDS: [crate::sim::tech::Field; 10] = crate::sim::tech::FIELDS;
+const GROUNDS: [crate::sim::tech::Ground; 9] = crate::sim::tech::GROUNDS;
 const STANCES: [Stance; 4] = [
     Stance::Neutral,
     Stance::Rival,
@@ -675,6 +693,14 @@ fn culture<S: Io>(s: &mut S, c: &mut Culture) {
     s.usize(&mut c.cells);
     s.f64(&mut c.pop);
     s.i32(&mut c.last_seen);
+    if s.ver() >= 2 {
+        // What this people takes to, by field. Drawn once when the culture
+        // is founded and drifting into its daughters, so it cannot be
+        // recomputed and has to be carried.
+        for v in c.learning.iter_mut() {
+            s.f32(v);
+        }
+    }
 }
 
 fn blank_culture() -> Culture {
@@ -688,6 +714,7 @@ fn blank_culture() -> Culture {
         parent: None,
         founded: 0,
         values: blank_values(),
+        learning: [0.5; crate::sim::tech::FIELDS.len()],
         home: 0,
         color: crate::term::Rgb(0, 0, 0),
         extinct: None,
@@ -874,6 +901,7 @@ fn blank_polity() -> Polity {
         hegemon_since: None,
         heirs: Vec::new(),
         sprawl: 0.0,
+        tech_admin: 0.0,
     }
 }
 
@@ -949,6 +977,56 @@ fn blank_house() -> House {
 
 fn houses<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.houses, blank_house, house);
+}
+
+fn innovation<S: Io>(s: &mut S, inn: &mut crate::sim::tech::Innovation) {
+    s.usize(&mut inn.id);
+    s.string(&mut inn.name);
+    enum8(s, &mut inn.field, &FIELDS);
+    s.u8(&mut inn.tier);
+    vec_usize(s, &mut inn.needs);
+    enum8(s, &mut inn.ground, &GROUNDS);
+    // The effect is a tag and a magnitude; the tag table is fixed even
+    // though which innovation carries which is not.
+    let mut code = crate::sim::tech::effect_code(inn.effect);
+    let mut size = inn.effect.size();
+    s.u8(&mut code);
+    s.f32(&mut size);
+    if s.reading() {
+        inn.effect = crate::sim::tech::effect_of(code, size);
+    }
+    s.f32(&mut inn.difficulty);
+    s.f32(&mut inn.spread);
+}
+
+fn blank_innovation() -> crate::sim::tech::Innovation {
+    crate::sim::tech::Innovation {
+        id: 0,
+        name: String::new(),
+        field: crate::sim::tech::Field::Husbandry,
+        tier: 0,
+        needs: Vec::new(),
+        ground: crate::sim::tech::Ground::Anywhere,
+        effect: crate::sim::tech::Effect::Yield(0.0),
+        difficulty: 1.0,
+        spread: 1.0,
+    }
+}
+
+fn techs<S: Io>(s: &mut S, w: &mut World) {
+    seq(s, &mut w.techs, blank_innovation, innovation);
+    let mut seen: Vec<u8> = w.tech_seen.iter().map(|&b| u8::from(b)).collect();
+    vec_u8(s, &mut seen);
+    let mut first: Vec<u32> = w.tech_first_year.iter().map(|&y| y as u32).collect();
+    vec_u32(s, &mut first);
+    if s.reading() {
+        w.tech_seen = (0..w.techs.len())
+            .map(|i| seen.get(i).copied().unwrap_or(0) != 0)
+            .collect();
+        w.tech_first_year = (0..w.techs.len())
+            .map(|i| first.get(i).copied().unwrap_or(0) as i32)
+            .collect();
+    }
 }
 
 fn blank_person() -> Person {
@@ -1277,6 +1355,20 @@ fn terrain_sec<S: Io>(s: &mut S, w: &mut World) {
 }
 fn cells<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.cells, CellState::default, cell);
+    if s.ver() >= 2 {
+        // What the ground knows. Real state, not derived: it is the one
+        // thing in the world that outlives the realms that learned it, so
+        // losing it on a save would undo the whole ratchet.
+        vec_u128(s, &mut w.known);
+    }
+    if s.reading() {
+        // A file from before knowledge existed, or one whose cell chunk was
+        // skipped, leaves the world knowing nothing — which is right, and
+        // has to be the right *length* as well.
+        w.known.resize(w.cells.len(), 0);
+        // Derived from `known`; `recompute` at the end of a load fills it.
+        w.cell_yield.clear();
+    }
 }
 fn races<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.races, blank_race, race);
@@ -1411,13 +1503,14 @@ macro_rules! sections {
 sections! {
     T_HEAD = b"head", 1, head;
     T_TERR = b"terr", 1, terrain_sec;
-    T_CELL = b"cell", 1, cells;
+    T_CELL = b"cell", 2, cells;
     T_RACE = b"race", 1, races;
-    T_CULT = b"cult", 1, cultures;
+    T_CULT = b"cult", 2, cultures;
     T_CITY = b"city", 1, cities;
     T_POLY = b"poly", 3, polities;
     T_PERS = b"pers", 2, persons;
     T_HOUS = b"hous", 1, houses;
+    T_TECH = b"tech", 1, techs;
     T_SCHL = b"schl", 1, schools;
     T_WARS = b"wars", 2, wars;
     T_ERAS = b"eras", 1, eras;
