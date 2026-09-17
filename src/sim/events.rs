@@ -467,12 +467,17 @@ pub fn notables(w: &mut World) {
                     }
                     let culture = w.polities[p].culture;
                     let dyn_name = format!("House {}", w.persons[i].name);
+                    let old_house = w.polities[p].house;
                     politics::install_ruler(w, p, i);
                     w.polities[p].generals.retain(|&g| g != i);
                     if w.polities[p].kind.has_dynasty() {
-                        w.polities[p].dynasty = dyn_name;
+                        let house = w.new_house(dyn_name, culture, Some(i));
+                        w.seat_house(p, house);
+                        w.house_accession(i);
+                        if let Some(oh) = old_house {
+                            w.close_house_if_spent(oh);
+                        }
                     }
-                    let _ = culture;
                     let capital = prose::capital_name(w, p);
                     let text = prose::general_usurps(w, p, i, &capital);
                     let mut refs = vec![Ref::Person(i), Ref::Polity(p)];

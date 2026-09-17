@@ -19,8 +19,9 @@ noise.rs         2D gradient noise and fBm: terrain, climate, mana
 rng.rs           xoshiro256** with interior mutability; clones share a stream
 lang.rs          per-culture phonology; every name in the world is coined here,
                  daughter tongues by sound shift
-geo.rs           elevation -> climate -> rivers -> biomes -> mana -> features.
-                 Generated once, mostly read afterwards
+geo.rs           elevation -> climate -> rivers -> biomes -> mana -> features,
+                 and the sea routes between landmasses. Generated once,
+                 read afterwards
 
 sim/
   mod.rs         the World: entities, World::tick, recompute, the owner index,
@@ -29,7 +30,10 @@ sim/
   genesis.rs     races, first peoples, the opening lines
   people.rs      growth, migration, assimilation, cultural drift
   politics.rs    tribes, expansion, cities, economy, rulers, unrest, collapse
-  war.rs         tension, declarations, battles, sieges, peace
+  dynasty.rs     houses, marriage, heirs, mortality, greatness and acclaim,
+                 inheritance customs, crowns given by a faith
+  war.rs         tension, stances, alliances, tribute, war aims, declarations,
+                 coalition battles, sieges, peace
   magic.rs       schools of thought: founding, spread, adoption, schism
   events.rs      disasters, notable people, wonders, the naming of ages
   stories.rs     prophecies, relics, tyrants, legends
@@ -62,9 +66,9 @@ Hand of Fate). `ser` is the one module that sees the whole `World` at once.
 ## The data model
 
 `World` holds a `Vec` per kind of entity — `cells`, `races`, `cultures`,
-`cities`, `polities`, `persons`, `schools`, `wars`, `eras`, `plagues`,
-`artifacts`, `prophecies` — and entities refer to one another by index into
-those vectors. A ruler is a `usize` into `persons`; a war names two `usize`
+`cities`, `polities`, `persons`, `houses`, `schools`, `wars`, `eras`,
+`plagues`, `artifacts`, `prophecies` — and entities refer to one another by
+index into those vectors. A ruler is a `usize` into `persons`; a war names two `usize`
 polities; a chronicle line carries `Ref::Polity(7)`.
 
 **Those vectors are append-only.** Nothing is ever removed or reordered,
@@ -74,12 +78,21 @@ where it is. This is the single most important invariant in the tree: an
 `Vec::remove`, a `retain`, or a sort in the wrong place silently rewrites
 centuries of history and every save ever written.
 
-Two derived structures are maintained rather than recomputed:
+Four derived structures are maintained rather than recomputed. All three of
+the index vectors exist for the same reason: the entity vectors hold
+everything that has *ever* existed, so a phase that filters one for the
+living costs the whole history of the world every year.
 
 - **`owner_cells`** — each polity's own cells, ascending, kept exact by
   `claim` and `fall` and rebuilt by `recompute`. `cells_of_ref` reads it.
   It exists so that no phase has to walk the whole map once per realm; see
   *Cost* below.
+- **`alive_polities`** — realms still standing, ascending. Appended by
+  `politics::found_polity`, pruned by `politics::fall` and `recompute`.
+  `living_polities` clones it, and several phases call that every year.
+- **`alive_persons`** — people still living, ascending. Appended by
+  `new_person`, pruned by `World::forget_the_dead`. `dynasty::mortality` and
+  the yearly scoring of standing walk it.
 - **The chronicle index** — for each `Ref`, the events that mention it, which
   is what lets any detail page show its own history without a scan.
 
@@ -87,6 +100,45 @@ Two derived structures are maintained rather than recomputed:
 temperature, rainfall, river, biome, mana, minerals, features. `CellState` (in
 `sim`) is the mutable half: population, culture, owner, development. They are
 parallel arrays indexed by `y * w + x`.
+
+## The sea
+
+Because the terrain never changes, **where the sea can be crossed is a fixed
+property of the map**. `geo::sea_routes` works it out once — every pair of
+coastal cells on *different* landmasses within `MAX_CROSSING` of each other,
+joined by a line whose interior is all water — and stores it as
+`Terrain::crossings`, sorted so `crossings_from` is a binary search. It is
+derived, so `ser` rebuilds it on load rather than storing it.
+
+That one static graph is what makes every question about the sea a lookup:
+
+- `World::sea_reach` is how wide a crossing a realm can manage, from its
+  people's seafaring, its own development and what kind of thing it is. A
+  realm that has just learned to build sea-going hulls can cross a strait;
+  only an old, developed, seafaring power reaches the far isles.
+- `politics::expand` walks the realm's own sorties rather than scanning a box
+  around every coastal cell, so reach is a capability rather than a constant.
+- `recompute` adds a **sea neighbour** for any crossing whose two shores are
+  held by different realms and which somebody's reach can make. Without it
+  the sea was not a distance but a wall: realms on opposite shores were not
+  neighbours, so no tension built, so no war was ever declared.
+- `war::resolve_wars` puts both shores of such a crossing on the front, so
+  the war can be fought. `battle` notices when the ground could not have been
+  walked to and charges `LANDING_PENALTY` for the assault.
+- `people::grow_and_migrate` lets a crowded coastal community take a crossing
+  within its *people's* own reach — narrow water only, since a people has no
+  shipwrights of its own. Islands get peopled, which is what gives a state
+  something to colonise or conquer later.
+- `recompute` also discounts the distance to land across water by
+  `SEA_BINDS_FACTOR × reach`, because for most of history the sea was the
+  fast road. Without that the sea could be opened and would then be punished:
+  every overseas holding would drive up `sprawl` and fray the realm that took
+  it.
+
+`the_sea_joins_the_world` asserts the property all of this exists for — that
+every landmass worth settling can be reached from the largest one by a chain
+of crossings, so a realm that masters the sea can in principle reach the whole
+world.
 
 ## The tick pipeline
 
@@ -102,28 +154,32 @@ prints.
 | 2 | `politics::expand` | claim cells, priced by terrain and distance from the capital |
 | 3 | `politics::found_cities` | new cities on rivers and coasts |
 | 4 | `politics::economy` | treasury, development, and stability drifting toward its target |
-| 5 | `war::diplomacy` | border tension rising and cooling; declarations |
-| 6 | `war::resolve_wars` | battles, sieges, sackings, peace |
-| 7 | `politics::rulers` | deaths, successions, dynasties, claimants |
-| 8 | `politics::unrest` | revolts, civil wars, secession, shattering |
-| 9 | `magic::tick` | schools founded, spread, adopted, persecuted, split |
-| 10 | `people::culture_drift` | assimilation and drift into new peoples |
-| 11 | `events::disasters` | plagues, famines, eruptions, storms |
-| 12 | `events::notables` | notable lives |
-| 13 | `events::wonders` | wonders begun and finished |
-| 14 | `stories::tick_artifacts` | relics forged, taken, lost, found |
-| 15 | `stories::tick_prophecies` | prophecies fulfilled or failed at their deadline |
-| 16 | `stories::tick_legends` | tyrants, heroes, legends |
-| 17 | `World::recompute` | rebuild aggregates: sizes, populations, neighbours, cultures within, foreign share |
-| 18 | `events::eras` | name the age if it has turned |
+| 5 | `war::diplomacy` | border tension rising and cooling; fear of the hegemon; declarations, each with an aim |
+| 6 | `war::alliances` | oaths sworn against a common enemy, and lapsed |
+| 7 | `war::tribute` | tributaries pay, and test their overlord's grip |
+| 8 | `war::resolve_wars` | coalition battles, sieges, sackings, peace that settles the aim |
+| 9 | `dynasty::tick` | reigns, mortality, marriages, births, standing, acclaim, coronations |
+| 10 | `politics::rulers` | deaths, successions, dynasties, claimants |
+| 11 | `politics::unrest` | revolts, civil wars, secession, shattering |
+| 12 | `magic::tick` | schools founded, spread, adopted, persecuted, split |
+| 13 | `people::culture_drift` | assimilation and drift into new peoples |
+| 14 | `events::disasters` | plagues, famines, eruptions, storms |
+| 15 | `events::notables` | notable lives |
+| 16 | `events::wonders` | wonders begun and finished |
+| 17 | `stories::tick_artifacts` | relics forged, taken, lost, found |
+| 18 | `stories::tick_prophecies` | prophecies fulfilled or failed at their deadline |
+| 19 | `stories::tick_legends` | tyrants, heroes, legends |
+| 20 | `World::recompute` | rebuild aggregates: sizes, populations, neighbours, sprawl, cultures within, foreign share |
+| 21 | `events::eras` | name the age if it has turned |
 
 Then the chronicle is compacted to `tuning.chronicle_cap`, and every tenth year
 the population is pushed onto a history for the sidebar graph.
 
 The ordering matters and is not arbitrary: people exist before states claim
 them, states expand before they fight, wars resolve before rulers die of them,
-and everything is aggregated by `recompute` before the era logic reads the
-aggregates.
+houses settle their marriages and their heirs before a succession has to draw
+on them, and everything is aggregated by `recompute` before the era logic reads
+the aggregates.
 
 `Detail` (low / medium / high) sets a minimum importance below which `log`
 drops an event, and also gates the finer-grained simulation itself: extra
@@ -174,15 +230,33 @@ clones, for callers that go on to mutate). `recompute` is the one full sweep,
 and it is a single pass that collects border crossings flat and counts them
 afterwards rather than doing a map lookup per cell.
 
-`--bench` prints ms/year and the per-phase breakdown. At high detail over 1500
-years a year costs roughly 0.44 ms at 160x64 and 2.1 ms at 400x160 — a map 6.25
-times larger for about 4.8 times the cost, which is the shape to keep. A
-profile where one phase grows with the *number of realms that have ever lived*
-is the regression to look for.
+The same rule applies to the entity vectors, which hold everything that has
+ever existed: **no phase may filter `polities` or `persons` for the living**.
+`alive_polities` and `alive_persons` are there for that, and a phase that
+walks the raw vector costs the age of the world every year. This is the
+regression to look for in a profile — a phase whose cost grows with how long
+the world has been running rather than with how much is in it now.
 
-The chronicle is the other unbounded thing, and is capped: past
-`tuning.chronicle_cap` (60,000 events) the oldest small entries are dropped,
-trivia first, with importance 2 and 3 kept whatever happens.
+Three things in the simulation would otherwise grow without bound, and each is
+deliberately capped:
+
+- **A realm's `tension` map.** Fear of the hegemon reaches beyond a realm's own
+  borders, so without a bound a realm ends up weighing every power that ever
+  frightened it. Non-neighbours must clear a higher floor to stay on the books
+  (`FAR_TENSION_FLOOR`) and the map is capped at `TENSION_CAP` entries, coldest
+  forgotten first. Fear itself only reaches the hegemon's neighbours and theirs.
+- **A realm's `truce` map**, swept on a rolling schedule (`TRUCE_SWEEP`) rather
+  than annually, because a stale entry is harmless and rebuilding the map every
+  year for every realm costs more than the entries do.
+- **The chronicle**, capped at `tuning.chronicle_cap` (60,000 events): the
+  oldest trivia goes first, with importance 2 and 3 kept whatever happens.
+
+`--bench` prints ms/year and the per-phase breakdown. At high detail over 1500
+years a year costs roughly 0.40 ms at 160x64 and 3.4 ms at 400x160. The larger
+map is 6.25 times the cells but supports about six times as many *living*
+realms, and `diplomacy` is priced per realm-pair rather than per cell, so it
+dominates a crowded map and the cost grows faster than the area. That is the
+shape to expect; what it must not do is grow with the years.
 
 ## The save format
 
@@ -194,9 +268,17 @@ body: chunk* where chunk = tag u32 | record version u32 | length u64 | payload
 ```
 
 One chunk per top-level section of the world — `head`, `terr`, `cell`, `race`,
-`cult`, `city`, `poly`, `pers`, `schl`, `wars`, `eras`, `plag`, `arti`, `prop`,
-`chrn`, `stat`, `ctrs`, `bfnm` — listed in a `sections!` macro that generates
-both the writer and the reader from one table.
+`cult`, `city`, `poly`, `pers`, `hous`, `schl`, `wars`, `eras`, `plag`, `arti`,
+`prop`, `chrn`, `stat`, `ctrs`, `bfnm` — listed in a `sections!` macro that
+generates both the writer and the reader from one table.
+
+Derived indexes are **not** sections. `alive_polities` and `alive_persons` are
+rebuilt as their entity sections are read, because a stored index could
+disagree with the entities it indexes. A field that is derived but read a tick
+*before* it is next rebuilt has to be stored all the same — `Polity::sprawl` is
+computed by `recompute` at the end of a tick and read by `economy` at the start
+of the next, so a world reloaded without it governs its first year on a zero
+and diverges from the world that wrote the file.
 
 Three ideas carry the design:
 
@@ -270,7 +352,8 @@ pronouns, lists — in one tested place is the point; so is the naming rule, tha
 a realm is introduced by its full name ("the Kingdom of Velen") the first time
 it appears in an event and referred to by its short name afterwards. The
 submodules mirror the simulation's: `prose/politics.rs` says what
-`sim/politics.rs` did.
+`sim/politics.rs` did, `prose/dynasty.rs` what `sim/dynasty.rs` did, and
+`prose/diplomacy.rs` carries the war aims and the peaces that settle them.
 
 Events are rendered eagerly, at the moment they happen, because the world that
 explains them is gone by the time anyone reads the line: the realm has fallen,
@@ -284,8 +367,12 @@ and in words; who is winning a war and why, and what a peace signed this year
 would look like; where a person stands. Every function is a pure reading of
 `&World`.
 
-Its weights deliberately mirror `politics::economy` and `war::strength`. That
-duplication is the cost of having explanations at all — the simulation cannot
+Its weights deliberately mirror `politics::economy` and `war::strength` — the
+sprawl and regalia terms in particular are written to be read side by side
+with the simulation's. `dynasty::standing` avoids the problem a different way:
+the scoring and the wording both come from one `for_each_deed`, so the points
+and the sentence explaining them cannot disagree. That duplication is the cost
+of having explanations at all — the simulation cannot
 afford to build a justification for every number it computes every year for
 every realm — and it comes with an obligation: **change the two together.** An
 explanation that disagrees with the simulation is worse than no explanation.

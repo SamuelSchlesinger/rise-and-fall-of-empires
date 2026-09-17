@@ -52,6 +52,9 @@ pub struct Tuning {
     pub migration_share: f32,
     /// Migrants only move somewhere emptier than this share of their pressure.
     pub migration_fill_ratio: f32,
+    /// Yearly chance that a crowded coastal community takes to the water
+    /// instead of staying put, when a crossing is within its people's reach.
+    pub migration_sea_chance: f64,
     /// Base yearly growth rate of a city.
     pub city_growth_rate: f32,
     /// Local fertility multiplier for a city's carrying capacity.
@@ -162,6 +165,16 @@ pub struct Tuning {
     pub stability_charisma_weight: f32,
     /// How much being stretched past administrative capacity costs.
     pub stability_overextension_weight: f32,
+    /// How heavily distance counts against stability: the penalty per unit
+    /// of [`crate::sim::Polity::sprawl`] over 1.0.
+    ///
+    /// This is the brake on size that administrative capacity could not be.
+    /// Capacity rises with the cities a realm holds, and a conqueror takes
+    /// cities, so conquest paid for its own administration and a realm that
+    /// got ahead could not be stopped. Distance does not work that way: a
+    /// province two months' ride from the capital makes the next one harder
+    /// to hold, not easier, and an empire breaks along its far edge first.
+    pub stability_sprawl_weight: f32,
     /// How much ruling foreign subjects costs.
     pub stability_foreign_weight: f32,
     /// How much war-weariness costs.
@@ -396,6 +409,38 @@ pub struct Tuning {
     /// Yearly chance a long-reigning cruel ruler is named a tyrant.
     pub tyrant_chance: f64,
 
+    // -- houses and figures ------------------------------------------------
+    /// Yearly chance an unwed ruler finds a match.
+    pub marriage_chance: f64,
+    /// Yearly chance a married ruler of childbearing age has a child.
+    pub birth_chance: f64,
+    /// Smallest realm a faith will crown an emperor of.
+    pub coronation_min_cells: usize,
+    /// Yearly chance a qualifying ruler is crowned by their faith.
+    pub coronation_chance: f64,
+    /// Yearly chance a ruler's child dies before reaching majority.
+    pub child_death_chance: f64,
+    /// How many generals a dead conqueror needs before they divide the
+    /// realm between themselves rather than let it pass to an heir.
+    pub diadochi_min_generals: usize,
+    /// Smallest realm whose generals are worth dividing it over.
+    pub diadochi_min_cells: usize,
+
+    // -- alliances, tribute and coalitions ---------------------------------
+    /// Yearly chance two realms with a quiet border and a common enemy ally.
+    pub alliance_chance: f64,
+    /// Yearly chance an ally answers a call to arms.
+    pub ally_joins_chance: f64,
+    /// Share of a tributary's income that goes to its overlord.
+    pub tribute_share: f32,
+    /// Yearly chance a tributary tests its overlord's grip.
+    pub tributary_revolt_chance: f64,
+    /// Share of the settled world above which a realm is a hegemon, and its
+    /// neighbours start to combine against it rather than each other.
+    pub hegemon_share: f32,
+    /// How much a hegemon's share adds to everyone else's tension with it.
+    pub containment_tension: f32,
+
     // -- housekeeping ------------------------------------------------------
     /// How many events the chronicle keeps before the oldest small ones are
     /// dropped. Great events (importance 2 and 3) are always kept, so the
@@ -417,6 +462,7 @@ impl Default for Tuning {
             migration_pressure: 0.55,
             migration_min_pop: 0.25,
             migration_share: 0.08,
+            migration_sea_chance: 0.35,
             migration_fill_ratio: 0.7,
             city_growth_rate: 0.03,
             city_capacity_factor: 1.6,
@@ -472,6 +518,7 @@ impl Default for Tuning {
             stability_wisdom_weight: 0.2,
             stability_charisma_weight: 0.1,
             stability_overextension_weight: 0.25,
+            stability_sprawl_weight: 0.28,
             stability_foreign_weight: 0.2,
             stability_exhaustion_weight: 0.3,
             stability_decadence_weight: 0.44,
@@ -584,6 +631,19 @@ impl Default for Tuning {
             artifact_capture_lost_chance: 0.25,
             artifact_fall_pass_chance: 0.7,
             tyrant_chance: 0.06,
+            marriage_chance: 0.22,
+            birth_chance: 0.16,
+            coronation_min_cells: 60,
+            coronation_chance: 0.05,
+            child_death_chance: 0.012,
+            diadochi_min_generals: 2,
+            diadochi_min_cells: 90,
+            alliance_chance: 0.035,
+            ally_joins_chance: 0.55,
+            tribute_share: 0.2,
+            tributary_revolt_chance: 0.02,
+            hegemon_share: 0.2,
+            containment_tension: 0.05,
             chronicle_cap: 60_000,
         }
     }
@@ -611,6 +671,7 @@ impl Tuning {
             "migration_min_pop" => self.migration_min_pop = v as f32,
             "migration_share" => self.migration_share = v as f32,
             "migration_fill_ratio" => self.migration_fill_ratio = v as f32,
+            "migration_sea_chance" => self.migration_sea_chance = v,
             "city_growth_rate" => self.city_growth_rate = v as f32,
             "city_capacity_factor" => self.city_capacity_factor = v as f32,
             "city_capacity_dev_weight" => self.city_capacity_dev_weight = v as f32,
@@ -665,6 +726,7 @@ impl Tuning {
             "stability_wisdom_weight" => self.stability_wisdom_weight = v as f32,
             "stability_charisma_weight" => self.stability_charisma_weight = v as f32,
             "stability_overextension_weight" => self.stability_overextension_weight = v as f32,
+            "stability_sprawl_weight" => self.stability_sprawl_weight = v as f32,
             "stability_foreign_weight" => self.stability_foreign_weight = v as f32,
             "stability_exhaustion_weight" => self.stability_exhaustion_weight = v as f32,
             "stability_decadence_weight" => self.stability_decadence_weight = v as f32,
@@ -783,6 +845,19 @@ impl Tuning {
             "artifact_capture_lost_chance" => self.artifact_capture_lost_chance = v,
             "artifact_fall_pass_chance" => self.artifact_fall_pass_chance = v,
             "tyrant_chance" => self.tyrant_chance = v,
+            "marriage_chance" => self.marriage_chance = v,
+            "birth_chance" => self.birth_chance = v,
+            "coronation_min_cells" => self.coronation_min_cells = v.max(0.0) as usize,
+            "coronation_chance" => self.coronation_chance = v,
+            "child_death_chance" => self.child_death_chance = v,
+            "diadochi_min_generals" => self.diadochi_min_generals = v.max(0.0) as usize,
+            "diadochi_min_cells" => self.diadochi_min_cells = v.max(0.0) as usize,
+            "alliance_chance" => self.alliance_chance = v,
+            "ally_joins_chance" => self.ally_joins_chance = v,
+            "tribute_share" => self.tribute_share = v as f32,
+            "tributary_revolt_chance" => self.tributary_revolt_chance = v,
+            "hegemon_share" => self.hegemon_share = v as f32,
+            "containment_tension" => self.containment_tension = v as f32,
             "chronicle_cap" => self.chronicle_cap = v.max(0.0) as usize,
             _ => return Err(UnknownField(name.to_string())),
         }

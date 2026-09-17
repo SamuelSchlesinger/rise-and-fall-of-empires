@@ -47,9 +47,19 @@ KEYS = [
     *b':recap 100\r', b'\x1b',
     # SAVE/LOAD placeholder: filled in at run time with the temp directory
     b'@save@',
-    # lists, detail pages, scrolling, links
-    b'3', b'.', b' ', b'e', b'\t', b'\t', b'\t', b'\t', b'\t', b'\t', b'\t',
+    # lists, detail pages, scrolling, links. One Tab per list tab, so that
+    # adding a tab without a row builder or a column header is caught here.
+    b'3', b'.', b' ', b'e',
+    b'\t', b'\t', b'\t', b'\t', b'\t', b'\t', b'\t', b'\t', b'\t', b'\t', b'\t',
     b'/', b'a', b'\r', b'j', b'\r', b'\x04', b'\x15', b'G', b'g', b'g', b'm',
+    # the figures of the age, and from one of them into their house and out
+    # again by every link a house page offers
+    b'\x1b', *b':list figures\r', b'\r', b'H', b'f', b'\x7f', b'c', b'\x7f', b'\x1b',
+    # the houses themselves: a thousand years of succession, scrolled
+    *b':list houses\r', b'\r', b'j', b'j', b'\x04', b'G', b'g', b'g', b'b', b'\x7f',
+    b'm', b'\x1b',
+    # a realm's own house, its overlord and its spouse links
+    *b':list realms\r', b'\r', b'H', b'\x7f', b'O', b'r', b'm', b'v', b'\x7f', b'\x1b',
     # the chronicle, help
     b'c', b'/', b'w', b'a', b'r', b'\r', b'k', b'k', b'\x1b', b'\x1b',
     b'?', b'\x1b',

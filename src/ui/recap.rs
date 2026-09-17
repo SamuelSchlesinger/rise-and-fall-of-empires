@@ -378,6 +378,84 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize, height: u
         }
     }
 
+    // The figures of the period, and the houses that ended in it. This is
+    // the section a reader scans first: a fifty-year digest that names no
+    // people is a weather report.
+    {
+        let mut items: Vec<String> = Vec::new();
+        let mut named: Vec<usize> = (0..w.persons.len())
+            .filter(|&i| {
+                w.persons[i].acclaimed.map(|y| y >= since).unwrap_or(false)
+                    && mine(w.persons[i].polity.unwrap_or(usize::MAX))
+            })
+            .collect();
+        named.sort_by(|&a, &b| w.persons[b].greatness.total_cmp(&w.persons[a].greatness));
+        for &i in named.iter().take(3) {
+            let per = &w.persons[i];
+            let realm = per
+                .polity
+                .map(|p| w.polities[p].short.clone())
+                .unwrap_or_default();
+            let deed = crate::sim::dynasty::standing(w, i)
+                .first()
+                .map(|c| c.what.clone())
+                .unwrap_or_default();
+            items.push(format!(
+                "{} of {} was called great in {}, having {}.{}",
+                per.full_name(),
+                realm,
+                per.acclaimed.unwrap_or(0),
+                deed,
+                if per.alive() { " Still living." } else { "" }
+            ));
+        }
+        // Somebody still alive and still worth watching, even if the world
+        // named them before this period began.
+        let mut living: Vec<usize> = (0..w.persons.len())
+            .filter(|&i| {
+                w.persons[i].alive()
+                    && w.persons[i].is_acclaimed()
+                    && w.persons[i].acclaimed.map(|y| y < since).unwrap_or(false)
+                    && mine(w.persons[i].polity.unwrap_or(usize::MAX))
+            })
+            .collect();
+        living.sort_by(|&a, &b| w.persons[b].greatness.total_cmp(&w.persons[a].greatness));
+        for &i in living.iter().take(2) {
+            let per = &w.persons[i];
+            items.push(format!(
+                "{} still holds {}, {} years on the throne.",
+                per.full_name(),
+                per.polity
+                    .map(|p| w.polities[p].short.clone())
+                    .unwrap_or_default(),
+                per.reign_years
+            ));
+        }
+        let ended: Vec<usize> = (0..w.houses.len())
+            .filter(|&h| {
+                w.houses[h].ended.map(|y| y >= since).unwrap_or(false)
+                    && w.houses[h].seniors.len() >= 3
+            })
+            .collect();
+        for &h in ended.iter().take(2) {
+            let ho = &w.houses[h];
+            items.push(format!(
+                "{} died out after {} years and {} who ruled.",
+                ho.name,
+                ho.span(w.year).max(0),
+                ho.seniors.len()
+            ));
+        }
+        if !items.is_empty() {
+            sections.push(Section {
+                label: "Figures",
+                head: String::new(),
+                items,
+                color: Rgb(255, 210, 90),
+            });
+        }
+    }
+
     // The loudest things the chronicle itself recorded.
     let loud: Vec<usize> = w
         .chronicle
@@ -427,7 +505,16 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize, height: u
     let spare = budget.saturating_sub(sections.len() * 2);
     let per_section = (spare / sections.len().max(1)).max(1);
     let mut cut = false;
+    // The share-out above can round up — `per_section` has a floor of one
+    // line, so enough sections will still overrun a short page. The page is
+    // a promise, so it is also enforced here: once there is only room for
+    // the "there was more" line, the digest stops.
+    let room = |out: &Vec<Line>| out.len() + 1 < height;
     for s in sections {
+        if !room(&out) {
+            cut = true;
+            break;
+        }
         if !s.head.is_empty() {
             out.push(line(
                 format!("{:<lw$}{}", s.label, s.head, lw = lw),
@@ -439,7 +526,7 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize, height: u
         }
         let mut used = 0usize;
         for it in s.items {
-            if used >= per_section {
+            if used >= per_section || !room(&out) {
                 cut = true;
                 break;
             }
@@ -459,13 +546,20 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize, height: u
         }
         out.push(line("", FG, 0));
     }
-    if cut {
+    // Trailing blank lines are not worth a row of a page this tight.
+    while out.last().map(|l| l.text.is_empty()).unwrap_or(false) {
+        out.pop();
+    }
+    if cut && out.len() < height {
         out.push(line(
             "There was more. The chronicle (c) has all of it.",
             DIMC,
             DIM,
         ));
     }
+    // The page is a promise: whatever the share-out above worked out, the
+    // digest never returns more rows than it was given.
+    out.truncate(height);
     out
 }
 

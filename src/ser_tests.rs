@@ -105,14 +105,17 @@ fn a_realms_peak_cities_survive_a_round_trip() {
     let loaded = ser::load(&bytes).expect("loads");
     let back: Vec<usize> = loaded.polities.iter().map(|p| p.peak_cities).collect();
     assert_eq!(back, peaks);
-    // The section says version 2, which is what tells an older build to skip
-    // the chunk rather than read the new field as something else.
+    // The chunk carries a record version above 1, which is what tells an
+    // older build to skip it rather than read the new fields as something
+    // else. The literal is a deliberate tripwire: adding a field to the
+    // realm record means bumping the version in the `sections!` table, and
+    // this line is here to fail until that has been done.
     let ver = chunks(&bytes)
         .into_iter()
         .find(|c| &c.0 == b"poly")
         .expect("the realms are in there")
         .1;
-    assert_eq!(ver, 2);
+    assert_eq!(ver, 3);
 }
 
 #[test]
@@ -128,12 +131,15 @@ fn header_is_what_we_say_it_is() {
     assert_eq!(n, bytes.len() - HEADER);
     let sum = u64::from_le_bytes(bytes[16..HEADER].try_into().unwrap());
     assert_eq!(sum, ser::fnv1a(&bytes[HEADER..]));
-    // Every section is there, and the chunks tile the body exactly.
+    // Every section is there, and the chunks tile the body exactly. The
+    // count is the length of the `sections!` table, so adding a section
+    // means updating this line — which is the point of asserting it.
     let cs = chunks(&bytes);
-    assert_eq!(cs.len(), 18);
+    assert_eq!(cs.len(), 19);
     assert_eq!(cs.last().unwrap().3, bytes.len());
     assert!(cs.iter().any(|c| &c.0 == b"terr"));
     assert!(cs.iter().any(|c| &c.0 == b"chrn"));
+    assert!(cs.iter().any(|c| &c.0 == b"hous"));
 }
 
 #[test]

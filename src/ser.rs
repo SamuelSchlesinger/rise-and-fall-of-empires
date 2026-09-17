@@ -387,7 +387,7 @@ const POLITY_KINDS: [PolityKind; 8] = [
     PolityKind::Magocracy,
     PolityKind::Horde,
 ];
-const ROLES: [Role; 9] = [
+const ROLES: [Role; 10] = [
     Role::Ruler,
     Role::General,
     Role::Mage,
@@ -397,8 +397,57 @@ const ROLES: [Role; 9] = [
     Role::Rebel,
     Role::Explorer,
     Role::Martyr,
+    Role::Noble,
 ];
 const GENDERS: [Gender; 3] = [Gender::F, Gender::M, Gender::N];
+const STANCES: [Stance; 4] = [
+    Stance::Neutral,
+    Stance::Rival,
+    Stance::Allied,
+    Stance::Married,
+];
+const INHERITANCES: [Inheritance; 4] = [
+    Inheritance::Primogeniture,
+    Inheritance::Partition,
+    Inheritance::Tanistry,
+    Inheritance::Elective,
+];
+
+/// A war aim, as a tag byte and a payload index.
+///
+/// [`enum8`] cannot carry this one because three of its variants name an
+/// entity, so the encoding is written by hand: the tag, then the index,
+/// which is zero and ignored for the variants that do not have one.
+fn war_aim<S: Io>(s: &mut S, v: &mut WarAim) {
+    let (mut tag, mut arg) = match *v {
+        WarAim::Border => (0u8, 0usize),
+        WarAim::City(c) => (1, c),
+        WarAim::Vassalage => (2, 0),
+        WarAim::Independence => (3, 0),
+        WarAim::Claimant(r) => (4, r),
+        WarAim::Faith => (5, 0),
+        WarAim::Relic(a) => (6, a),
+        WarAim::Plunder => (7, 0),
+        WarAim::Containment => (8, 0),
+    };
+    s.u8(&mut tag);
+    s.usize(&mut arg);
+    if s.reading() {
+        // An unknown tag from a newer build becomes a border war, which is
+        // the aim that needs no entity to make sense of.
+        *v = match tag {
+            1 => WarAim::City(arg),
+            2 => WarAim::Vassalage,
+            3 => WarAim::Independence,
+            4 => WarAim::Claimant(arg),
+            5 => WarAim::Faith,
+            6 => WarAim::Relic(arg),
+            7 => WarAim::Plunder,
+            8 => WarAim::Containment,
+            _ => WarAim::Border,
+        };
+    }
+}
 const SCHOOL_KINDS: [SchoolKind; 3] = [
     SchoolKind::Arcane,
     SchoolKind::Divine,
@@ -446,6 +495,7 @@ fn reff<S: Io>(s: &mut S, r: &mut Ref) {
         Ref::War(i) => (5, i),
         Ref::Race(i) => (6, i),
         Ref::Feature(i) => (7, i),
+        Ref::House(i) => (9, i),
         Ref::Artifact(i) => (8, i),
     };
     s.u8(&mut tag);
@@ -460,6 +510,7 @@ fn reff<S: Io>(s: &mut S, r: &mut Ref) {
             5 => Ref::War(id),
             6 => Ref::Race(id),
             7 => Ref::Feature(id),
+            9 => Ref::House(id),
             _ => Ref::Artifact(id),
         };
     }
@@ -741,6 +792,28 @@ fn polity<S: Io>(s: &mut S, p: &mut Polity) {
     s.i32(&mut p.last_kind_change);
     map(s, &mut p.culture_counts, Io::u32);
     map(s, &mut p.truce, Io::i32);
+    if s.ver() >= 3 {
+        // Absent from earlier files: a realm loaded from one starts with no
+        // arrangements, no overlord and the default inheritance, which is
+        // exactly what it had before these existed.
+        map(s, &mut p.stance, |s, v| enum8(s, v, &STANCES));
+        map(s, &mut p.stance_since, Io::i32);
+        opt_usize(s, &mut p.overlord);
+        vec_usize(s, &mut p.tributaries);
+        enum8(s, &mut p.inheritance, &INHERITANCES);
+        // The house on the throne. `dynasty` beside it is only the name;
+        // this is the identity, and leaving it out meant a reloaded world
+        // had no houses at all and married the wrong people the next year.
+        opt_usize(s, &mut p.house);
+        s.f32(&mut p.peak_share);
+        opt_i32(s, &mut p.hegemon_since);
+        // `sprawl` is derived, but `recompute` sets it at the *end* of a
+        // tick and `economy` reads it at the start of the next one, so a
+        // world reloaded without it governs its first year on a zero and
+        // diverges from the world that wrote the file.
+        s.f32(&mut p.sprawl);
+        vec_usize(s, &mut p.heirs);
+    }
 }
 
 fn blank_polity() -> Polity {
@@ -791,6 +864,16 @@ fn blank_polity() -> Polity {
         last_kind_change: 0,
         culture_counts: BTreeMap::new(),
         truce: BTreeMap::new(),
+        stance: BTreeMap::new(),
+        stance_since: BTreeMap::new(),
+        overlord: None,
+        tributaries: Vec::new(),
+        inheritance: Inheritance::Primogeniture,
+        house: None,
+        peak_share: 0.0,
+        hegemon_since: None,
+        heirs: Vec::new(),
+        sprawl: 0.0,
     }
 }
 
@@ -812,6 +895,60 @@ fn person<S: Io>(s: &mut S, p: &mut Person) {
     s.f32(&mut p.renown);
     opt_usize(s, &mut p.parent);
     s.u32(&mut p.battles_won);
+    if s.ver() >= 2 {
+        // Absent from version-1 files. A person loaded from one has no kin
+        // and no tally, so they read as an ordinary life — which is what
+        // they were when the file was written.
+        opt_usize(s, &mut p.spouse);
+        vec_usize(s, &mut p.children);
+        opt_usize(s, &mut p.house);
+        s.i32(&mut p.gained);
+        s.i32(&mut p.taken);
+        s.u32(&mut p.cities_founded);
+        s.u32(&mut p.cities_taken);
+        s.u32(&mut p.wars_won);
+        s.i32(&mut p.reign_years);
+        opt_i32(s, &mut p.crowned);
+        opt_string(s, &mut p.title);
+        s.f32(&mut p.greatness);
+        opt_i32(s, &mut p.acclaimed);
+        opt_usize(s, &mut p.rival);
+        opt_usize(s, &mut p.served);
+    }
+}
+
+fn house<S: Io>(s: &mut S, h: &mut House) {
+    s.usize(&mut h.id);
+    s.string(&mut h.name);
+    s.usize(&mut h.culture);
+    opt_usize(s, &mut h.founder);
+    s.i32(&mut h.founded);
+    opt_i32(s, &mut h.ended);
+    vec_usize(s, &mut h.members);
+    vec_usize(s, &mut h.realms);
+    vec_usize(s, &mut h.seniors);
+    opt_usize(s, &mut h.parent);
+    s.usize(&mut h.peak_realms);
+}
+
+fn blank_house() -> House {
+    House {
+        id: 0,
+        name: String::new(),
+        culture: 0,
+        founder: None,
+        founded: 0,
+        ended: None,
+        members: Vec::new(),
+        realms: Vec::new(),
+        seniors: Vec::new(),
+        parent: None,
+        peak_realms: 0,
+    }
+}
+
+fn houses<S: Io>(s: &mut S, w: &mut World) {
+    seq(s, &mut w.houses, blank_house, house);
 }
 
 fn blank_person() -> Person {
@@ -833,6 +970,21 @@ fn blank_person() -> Person {
         renown: 0.0,
         parent: None,
         battles_won: 0,
+        spouse: None,
+        children: Vec::new(),
+        house: None,
+        gained: 0,
+        taken: 0,
+        cities_founded: 0,
+        cities_taken: 0,
+        wars_won: 0,
+        reign_years: 0,
+        crowned: None,
+        title: None,
+        greatness: 0.0,
+        acclaimed: None,
+        rival: None,
+        served: None,
     }
 }
 
@@ -895,6 +1047,14 @@ fn war<S: Io>(s: &mut S, x: &mut War) {
     s.string(&mut x.result);
     s.i32(&mut x.cells_taken);
     enum8(s, &mut x.kind, &WAR_KINDS);
+    if s.ver() >= 2 {
+        // Absent from version-1 files: an old war was always bilateral and
+        // always about the border, which is what these defaults say.
+        vec_usize(s, &mut x.allies_a);
+        vec_usize(s, &mut x.allies_d);
+        war_aim(s, &mut x.aim);
+        s.bool(&mut x.aim_met);
+    }
 }
 
 fn blank_war() -> War {
@@ -910,6 +1070,10 @@ fn blank_war() -> War {
         battles: 0,
         result: String::new(),
         cells_taken: 0,
+        allies_a: Vec::new(),
+        allies_d: Vec::new(),
+        aim: WarAim::Border,
+        aim_met: false,
         kind: WarKind::Conquest,
     }
 }
@@ -1104,6 +1268,12 @@ fn head<S: Io>(s: &mut S, w: &mut World) {
 
 fn terrain_sec<S: Io>(s: &mut S, w: &mut World) {
     terrain(s, &mut w.terrain);
+    if s.reading() {
+        // Sea routes are a pure function of the terrain, which never
+        // changes, so they are rebuilt rather than stored — a section could
+        // only disagree with the map it describes.
+        w.terrain.crossings = crate::geo::sea_routes(&w.terrain);
+    }
 }
 fn cells<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.cells, CellState::default, cell);
@@ -1119,9 +1289,29 @@ fn cities<S: Io>(s: &mut S, w: &mut World) {
 }
 fn polities<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.polities, blank_polity, polity);
+    if s.reading() {
+        // Derived, so rebuilt rather than stored — see `persons`.
+        w.alive_polities = w
+            .polities
+            .iter()
+            .filter(|p| p.alive())
+            .map(|p| p.id)
+            .collect();
+    }
 }
 fn persons<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.persons, blank_person, person);
+    if s.reading() {
+        // The living index is derived, so it is rebuilt rather than stored:
+        // one pass at load beats a section that could disagree with the
+        // people it indexes.
+        w.alive_persons = w
+            .persons
+            .iter()
+            .filter(|p| p.alive())
+            .map(|p| p.id)
+            .collect();
+    }
 }
 fn schools<S: Io>(s: &mut S, w: &mut World) {
     seq(s, &mut w.schools, blank_school, school);
@@ -1225,10 +1415,11 @@ sections! {
     T_RACE = b"race", 1, races;
     T_CULT = b"cult", 1, cultures;
     T_CITY = b"city", 1, cities;
-    T_POLY = b"poly", 2, polities;
-    T_PERS = b"pers", 1, persons;
+    T_POLY = b"poly", 3, polities;
+    T_PERS = b"pers", 2, persons;
+    T_HOUS = b"hous", 1, houses;
     T_SCHL = b"schl", 1, schools;
-    T_WARS = b"wars", 1, wars;
+    T_WARS = b"wars", 2, wars;
     T_ERAS = b"eras", 1, eras;
     T_PLAG = b"plag", 1, plagues;
     T_ARTI = b"arti", 1, artifacts;
@@ -1595,6 +1786,7 @@ fn validate(w: &World) -> Result<(), SaveError> {
                 Ref::War(i) => ok(i, wars)?,
                 Ref::Race(i) => ok(i, races)?,
                 Ref::Feature(i) => ok(i, features)?,
+                Ref::House(i) => ok(i, w.houses.len())?,
                 Ref::Artifact(i) => ok(i, w.artifacts.len())?,
             }
         }

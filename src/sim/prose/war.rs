@@ -11,16 +11,6 @@ use crate::sim::{WarKind, World};
 // Naming a war
 // ---------------------------------------------------------------------------
 
-/// "the Second " for a second war between the same two realms, and
-/// nothing at all for the first.
-pub fn war_ordinal(previous: usize) -> String {
-    match previous {
-        0 => String::new(),
-        n if n < 10 => format!("{} ", cap(&ordinal_word(n as i64 + 1))),
-        _ => "Latest ".to_string(),
-    }
-}
-
 /// The name of a rising, civil war, war of succession or holy war.
 pub fn war_name_internal(w: &World, attacker: usize, defender: usize, kind: WarKind) -> String {
     match kind {
@@ -39,27 +29,63 @@ pub fn war_name_internal(w: &World, attacker: usize, defender: usize, kind: WarK
 }
 
 /// A war named after the ground it is fought over.
-pub fn war_name_feature(ordinal: &str, feature: &str) -> String {
-    format!("the {}War of {}", ordinal, feature)
+pub fn war_name_feature(feature: &str) -> String {
+    format!("the War of {}", feature)
 }
 
 /// A war named after the realms fighting it. One draw.
-pub fn war_name_realms(
-    w: &World,
-    attacker: usize,
-    defender: usize,
-    ordinal: &str,
-    pick: &Pick,
-) -> String {
+pub fn war_name_realms(w: &World, attacker: usize, defender: usize, pick: &Pick) -> String {
     match pick.index(3) {
         0 => format!(
-            "the {}{}-{} War",
-            ordinal,
+            "the {}-{} War",
             realm_adj(w, attacker),
             realm_adj(w, defender)
         ),
-        1 => format!("the {}{} War", ordinal, realm_adj(w, defender)),
-        _ => format!("the {}War of {}", ordinal, realm(w, attacker)),
+        1 => format!("the {} War", realm_adj(w, defender)),
+        _ => format!("the War of {}", realm(w, attacker)),
+    }
+}
+
+/// A war fought to take one city.
+pub fn war_name_city(city: &str) -> String {
+    format!("the War for {}", city)
+}
+
+/// A war fought to throw off an overlord.
+pub fn war_name_independence(adj: &str) -> String {
+    format!("the {} War of Independence", adj)
+}
+
+/// A war fought to make a realm pay tribute.
+pub fn war_name_vassalage(short: &str) -> String {
+    format!("the Subjugation of {}", short)
+}
+
+/// A war fought to put somebody on a throne.
+pub fn war_name_claim(claimant: &str) -> String {
+    format!("the War of {}'s Claim", claimant)
+}
+
+/// A war fought over a relic.
+pub fn war_name_relic(relic: &str) -> String {
+    format!("the War of {}", relic)
+}
+
+/// A war fought to pull down the strongest realm in the world.
+pub fn war_name_containment(adj: &str) -> String {
+    format!("the Great {} War", adj)
+}
+
+/// Number a war after the ones before it of the same name: the first keeps
+/// the bare name, and the rest are counted.
+pub fn war_name_numbered(base: &str, previous: usize) -> String {
+    if previous == 0 {
+        return base.to_string();
+    }
+    let stem = base.strip_prefix("the ").unwrap_or(base);
+    match previous {
+        n if n < 10 => format!("the {} {}", cap(&ordinal_word(n as i64 + 1)), stem),
+        _ => format!("the Latest {}", stem),
     }
 }
 
@@ -363,38 +389,6 @@ pub fn independence_recognised(w: &World, attacker: usize, defender: usize) -> S
         "ended with {} recognising the independence of {}.",
         realm(w, defender),
         realm_full(w, attacker)
-    )
-}
-
-/// The attacker got what it came for.
-pub fn peace_attacker_won(
-    w: &World,
-    attacker: usize,
-    defender: usize,
-    years_fought: i32,
-) -> String {
-    format!(
-        "ended in victory for {} after {}; {} ceded the lands it had lost and paid tribute.",
-        realm(w, attacker),
-        years(years_fought.max(1) as i64),
-        realm(w, defender)
-    )
-}
-
-/// The attacker was thrown back.
-pub fn peace_defender_won(w: &World, attacker: usize, years_fought: i32) -> String {
-    format!(
-        "ended after {} with {} thrown back and humbled.",
-        years(years_fought.max(1) as i64),
-        realm(w, attacker)
-    )
-}
-
-/// Neither side could finish the other.
-pub fn peace_stalemate(years_fought: i32) -> String {
-    format!(
-        "ended after {} with neither side the master; the exhausted realms made peace.",
-        years(years_fought.max(1) as i64)
     )
 }
 

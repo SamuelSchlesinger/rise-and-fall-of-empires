@@ -99,6 +99,17 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         ),
     );
 
+    // Distance. Mirrors the sprawl term in `politics::economy`; the two are
+    // written to be read side by side and must change together.
+    push(
+        &mut out,
+        -(pol.sprawl - 1.0).max(0.0) * tn.stability_sprawl_weight,
+        format!(
+            "its provinces lie {:.0}% beyond the reach the crown can comfortably govern",
+            (pol.sprawl - 1.0).max(0.0) * 100.0
+        ),
+    );
+
     // Foreign subjects.
     push(
         &mut out,
@@ -132,6 +143,13 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         } else {
             "the dynasty has grown decadent".into()
         },
+    );
+
+    // Regalia. Mirrors the `artifact_stability` term in `politics::economy`.
+    push(
+        &mut out,
+        w.artifact_stability(p),
+        "the old regalia still command respect".into(),
     );
 
     // The cities.
@@ -541,6 +559,10 @@ pub fn standing(w: &World, id: usize) -> String {
         Role::Rebel => "A rebel, whose cause the chronicle judges by its end.".into(),
         Role::Martyr => "A martyr, killed for what they would not give up.".into(),
         Role::Explorer => "An explorer, who went where the maps stopped.".into(),
+        Role::Noble => match per.house {
+            Some(h) => format!("Of {}, and never came to a throne.", w.houses[h].name),
+            None => "Of a ruling house, and never came to a throne.".into(),
+        },
     }
 }
 

@@ -112,6 +112,14 @@ fn owner_index_matches_the_map() {
 
 /// Compaction drops the small old events, keeps the great ones, and leaves
 /// the by-ref index pointing at the right entries.
+///
+/// The guarantee is about *which* events survive, not about how few: a
+/// world that logs a great deal of trivia will keep some of it, because
+/// compaction only removes as much as it has to. So the test runs the same
+/// seed twice — once capped, once uncapped — and demands that every event
+/// worth keeping in the uncapped run is still there in the capped one.
+/// Asserting instead that no importance-0 event survives held only while
+/// trivia was too rare to fill the excess by itself.
 #[test]
 fn chronicle_compaction_keeps_the_great_events() {
     let mut w = world(13);
@@ -119,12 +127,27 @@ fn chronicle_compaction_keeps_the_great_events() {
     run(&mut w, 400);
     assert!(w.chronicle.dropped > 0, "nothing was ever dropped");
     assert!(w.chronicle.len() <= 400 + w.chronicle.dropped);
+
+    let mut full = world(13);
+    full.tuning.chronicle_cap = 0;
+    run(&mut full, 400);
+    assert_eq!(full.chronicle.dropped, 0, "an uncapped chronicle dropped");
+    let great = |w: &World| -> Vec<(i32, u8, String)> {
+        w.chronicle
+            .events
+            .iter()
+            .filter(|e| e.importance >= 2)
+            .map(|e| (e.year, e.importance, e.text.clone()))
+            .collect()
+    };
+    assert_eq!(
+        great(&w),
+        great(&full),
+        "compaction dropped an event it had to keep"
+    );
+
     let mut refs: Vec<crate::sim::chronicle::Ref> = Vec::new();
     for e in &w.chronicle.events {
-        assert!(
-            e.importance >= 1,
-            "an importance-0 event survived a full cap"
-        );
         refs.extend(e.refs.iter().copied());
     }
     refs.sort();
@@ -497,14 +520,19 @@ const PLURALS_OF_ONE: &[&str] = &[
 ];
 
 /// Whether `text` says "one" of something in digits, with the plural noun.
-/// Only a standalone 1 counts, so "31 years" is left alone.
+///
+/// Only a standalone 1 counts, so "31 years" is left alone — and so is
+/// "3.1 lands a year", where the 1 is the tail of a decimal and the noun is
+/// correctly plural. A digit or a decimal point before the 1 means it is
+/// not the number one.
 fn says_one_as_a_plural(text: &str) -> Option<&'static str> {
     let bytes = text.as_bytes();
     PLURALS_OF_ONE.iter().copied().find(|&bad| {
         let mut from = 0;
         while let Some(at) = text[from..].find(bad) {
             let at = from + at;
-            if at == 0 || !bytes[at - 1].is_ascii_digit() {
+            let joined = at > 0 && (bytes[at - 1].is_ascii_digit() || bytes[at - 1] == b'.');
+            if !joined {
                 return true;
             }
             from = at + 1;
@@ -596,4 +624,210 @@ fn a_cramped_world_survives_a_long_run() {
     let back = ser::load(&bytes).expect("a tiny world should reload");
     assert_eq!(back.year, w.year);
     assert_eq!(back.polities.len(), w.polities.len());
+}
+
+/// A house page holds together at millennia scale: the line of succession
+/// is in order, every ruler on it belongs to the house, and nothing on the
+/// page runs past the width it was given.
+///
+/// This is the test that would have caught the three things wrong with the
+/// first version of the family tree — accessions dated from the wrong
+/// realm's `reign_start` and so printed out of order, elected rulers
+/// enrolled in houses they were not born to, and non-ruling kin who never
+/// died and so appeared as thousand-year-old children.
+#[test]
+fn a_house_page_reads_down_the_centuries() {
+    let mut w = world(7);
+    run(&mut w, 1200);
+    let big = (0..w.houses.len())
+        .max_by_key(|&h| w.houses[h].seniors.len())
+        .expect("a world of twelve centuries has ruling houses in it");
+    assert!(
+        w.houses[big].seniors.len() >= 5,
+        "no house ever managed five rulers, so this proves nothing"
+    );
+    for h in 0..w.houses.len() {
+        let ho = &w.houses[h];
+        // Everyone who ruled for the house is of the house.
+        for &r in &ho.seniors {
+            assert!(
+                ho.members.contains(&r),
+                "{} ruled for {} without belonging to it",
+                w.persons[r].name,
+                ho.name
+            );
+            assert_eq!(
+                w.persons[r].house,
+                Some(h),
+                "{} is on two houses' lists",
+                w.persons[r].name
+            );
+        }
+        // The line runs forwards in time.
+        let mut years: Vec<i32> = ho
+            .seniors
+            .iter()
+            .map(|&r| w.persons[r].crowned.unwrap_or(w.persons[r].born))
+            .collect();
+        let sorted = {
+            let mut v = years.clone();
+            v.sort_unstable();
+            v
+        };
+        years.sort_unstable();
+        assert_eq!(years, sorted);
+        // Nobody outlives their own people by a wide margin.
+        for &m in &ho.members {
+            let per = &w.persons[m];
+            let span = w.races[per.race].lifespan;
+            assert!(
+                per.age(w.year) as f32 <= span * 3.0,
+                "{} is {} years old and their people live about {:.0}",
+                per.name,
+                per.age(w.year),
+                span
+            );
+        }
+    }
+    // The page itself renders, and fits.
+    for width in [60usize, 96, 200] {
+        let ls = crate::ui::detail::detail_lines(
+            &w,
+            crate::sim::chronicle::Ref::House(big),
+            width,
+            false,
+        );
+        assert!(ls.len() > 8, "the page came out empty");
+        for l in &ls {
+            assert!(
+                l.text.chars().count() <= width,
+                "a line ran past {} columns: {:?}",
+                width,
+                l.text
+            );
+        }
+    }
+}
+
+/// Every landmass worth settling can be reached from the largest one by a
+/// chain of sea crossings, so a realm that masters the sea can in principle
+/// reach the whole world.
+///
+/// This is the property the sea exists for. Without it a fifth of some
+/// worlds sat two cells of water away and no army could ever go there.
+#[test]
+fn the_sea_joins_the_world() {
+    for seed in [7u64, 1, 42, 99, 3, 128] {
+        let w = World::new(seed, 160, 64, Detail::Medium);
+        let t = &w.terrain;
+        // Landmass sizes, and which are worth reaching at all.
+        let mut size: std::collections::BTreeMap<u16, usize> = Default::default();
+        for i in 0..t.w * t.h {
+            if t.landmass[i] != 0 {
+                *size.entry(t.landmass[i]).or_insert(0) += 1;
+            }
+        }
+        let biggest = *size.iter().max_by_key(|(_, &s)| s).expect("land").0;
+        // Flood the landmass graph through crossings.
+        let mut seen: std::collections::BTreeSet<u16> = Default::default();
+        seen.insert(biggest);
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for c in &t.crossings {
+                let (a, b) = (t.landmass[c.from as usize], t.landmass[c.to as usize]);
+                if seen.contains(&a) && !seen.contains(&b) {
+                    seen.insert(b);
+                    grew = true;
+                }
+            }
+        }
+        let stranded: Vec<(u16, usize)> = size
+            .iter()
+            .filter(|(lm, &s)| s >= 20 && !seen.contains(lm))
+            .map(|(&lm, &s)| (lm, s))
+            .collect();
+        let land: usize = size.values().sum();
+        let reachable: usize = size
+            .iter()
+            .filter(|(lm, _)| seen.contains(lm))
+            .map(|(_, &s)| s)
+            .sum();
+        assert!(
+            stranded.is_empty(),
+            "seed {}: landmasses of {:?} cells cannot be reached by sea at all \
+             ({:.0}% of land reachable)",
+            seed,
+            stranded.iter().map(|&(_, s)| s).collect::<Vec<_>>(),
+            reachable as f32 / land as f32 * 100.0
+        );
+        assert!(
+            !t.crossings.is_empty(),
+            "seed {} has no sea crossings at all",
+            seed
+        );
+    }
+}
+
+/// Realms actually cross the water: they settle across it and they fight
+/// across it. Both roads have to work, because a crossing whose far shore is
+/// empty is a colony and one whose far shore is somebody else's is a war,
+/// and a world only reaches its islands if it can do both.
+#[test]
+fn the_sea_is_crossed_both_ways() {
+    let mut colonies = 0;
+    let mut landings = 0;
+    let mut straddled = 0;
+    for seed in [7u64, 1, 42, 99] {
+        let mut w = World::new(seed, 160, 64, Detail::Medium);
+        run(&mut w, 900);
+        landings += w
+            .chronicle
+            .events
+            .iter()
+            .filter(|e| e.text.contains("come by sea"))
+            .count();
+        for p in 0..w.polities.len() {
+            let mut on: Vec<u16> = w
+                .cells_of_ref(p)
+                .iter()
+                .map(|&i| w.terrain.landmass[i])
+                .filter(|&l| l != 0)
+                .collect();
+            on.sort_unstable();
+            on.dedup();
+            if on.len() > 1 {
+                straddled += 1;
+            }
+        }
+        // Somebody peopled an island their ancestors could not have walked
+        // to: a landmass other than the biggest that carries population.
+        let mut lm: std::collections::BTreeMap<u16, (usize, f32)> = Default::default();
+        for i in 0..w.terrain.w * w.terrain.h {
+            let l = w.terrain.landmass[i];
+            if l == 0 {
+                continue;
+            }
+            let e = lm.entry(l).or_insert((0, 0.0));
+            e.0 += 1;
+            e.1 += w.cells[i].pop;
+        }
+        let biggest = *lm.iter().max_by_key(|(_, &(s, _))| s).expect("land").0;
+        colonies += lm
+            .iter()
+            .filter(|(&l, &(s, pop))| l != biggest && s >= 8 && pop > 0.0)
+            .count();
+    }
+    assert!(
+        landings > 0,
+        "no army in four worlds ever landed on a hostile shore"
+    );
+    assert!(
+        straddled > 0,
+        "no realm in four worlds ever held land on two landmasses"
+    );
+    assert!(
+        colonies > 0,
+        "no island in four worlds was ever peopled across water"
+    );
 }

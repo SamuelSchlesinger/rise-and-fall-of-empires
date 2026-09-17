@@ -46,6 +46,10 @@ impl World {
     }
 }
 
+/// How far a people can carry itself over water on its own, at the utmost
+/// of its seafaring — before any state's shipwrights are involved.
+const PEOPLE_SEA_REACH: f32 = 8.0;
+
 pub fn grow_and_migrate(w: &mut World) {
     let n = w.cells.len();
     let rng = w.rng.clone();
@@ -83,12 +87,37 @@ pub fn grow_and_migrate(w: &mut World) {
                 nbs[nnb] = x;
                 nnb += 1;
             }
-            let nb = nbs[rng.below(nnb)];
-            let b = w.terrain.biome[nb];
-            if b.is_water() {
-                continue;
+            let mut nb = nbs[rng.below(nnb)];
+            // People reached the islands by boat long before states did, and
+            // a strait that no one can settle across is a strait no realm
+            // will ever have a reason to cross either: the far shore stays
+            // empty, so there is nothing to colonise and nobody to conquer.
+            //
+            // A people's own reach is its seafaring alone — it has no
+            // development to draw on — so this carries them over narrow
+            // water and no further. The ocean still needs a state.
+            if w.terrain.biome[nb].is_water() {
+                let reach = (w.races[race].seafaring * PEOPLE_SEA_REACH) as u16;
+                if reach == 0 || !w.terrain.coast[i] {
+                    continue;
+                }
+                let routes: Vec<usize> = w
+                    .terrain
+                    .crossings_from(i)
+                    .iter()
+                    .filter(|c| c.width <= reach)
+                    .map(|c| c.to as usize)
+                    .collect();
+                if routes.is_empty() {
+                    continue;
+                }
+                if !rng.chance(tn.migration_sea_chance) {
+                    continue;
+                }
+                nb = routes[rng.below(routes.len())];
             }
-            if b.move_cost().is_none() {
+            let b = w.terrain.biome[nb];
+            if b.is_water() || b.move_cost().is_none() {
                 continue;
             }
             let aff = w.affinity(race, nb);
