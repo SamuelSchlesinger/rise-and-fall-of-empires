@@ -1210,6 +1210,97 @@ fn the_stability_breakdown_names_the_right_target() {
     );
 }
 
+/// Trade must keep its place in the economy as the economy grows.
+///
+/// A route's value came from the goods on the ground and the distance
+/// between the two cities — both fixed for ever — while city income grows
+/// with population, prosperity and development, all of which compound. So
+/// the whole trade of a world was a constant in a growing economy, and
+/// trade's share of what realms earned fell from a quarter in the second
+/// century to a fortieth by the twenty-eighth, purely by standing still.
+///
+/// Two things fix it and this holds both to account: the mass term of a
+/// gravity model, so a road between two great cities carries more than one
+/// between two villages, and a kind of innovation that improves the
+/// carrying trade — which had no place among the twelve effects a
+/// generated tree could hand out, so a realm could invent the ocean-going
+/// ship and its caravans carried what they carried in year one.
+#[test]
+fn trade_keeps_its_place_as_the_world_grows() {
+    use crate::sim::explain;
+    let share = |w: &World| -> f32 {
+        let mut gross = 0.0f32;
+        let mut tolls = 0.0f32;
+        for &p in &w.alive_polities {
+            gross += explain::income_factors(w, p)
+                .iter()
+                .filter(|f| f.weight > 0.0)
+                .map(|f| f.weight)
+                .sum::<f32>();
+            tolls += w.realm_trade(p) * w.tuning.trade_toll_factor;
+        }
+        tolls / gross.max(0.001)
+    };
+    let mut w = World::new(53, 160, 64, Detail::Medium);
+    run(&mut w, 500);
+    let young = share(&w);
+    run(&mut w, 1200);
+    let old = share(&w);
+    assert!(
+        young > 0.005,
+        "trade was never worth anything ({:.4})",
+        young
+    );
+    assert!(
+        old > young * 0.5,
+        "trade fell from {:.2}% of what realms earn to {:.2}% as the world \
+         grew: a route's value is not keeping up with the economy",
+        young * 100.0,
+        old * 100.0
+    );
+}
+
+/// A world can learn to carry goods better.
+///
+/// The twelve kinds of effect a generated tree could hand out were settled
+/// before trade grew into anything, and none of them touched a road. This
+/// checks the whole path: that a tree offers commerce at all, that the
+/// multiplier it produces is bounded, and that realms in a played-out world
+/// have actually picked some up.
+#[test]
+fn commerce_is_something_a_world_can_learn() {
+    use crate::sim::tech::Effect;
+    let mut w = World::new(59, 160, 64, Detail::Medium);
+    // The tree must contain some, or the path is decorative.
+    let offered = w
+        .techs
+        .iter()
+        .filter(|t| matches!(t.effect, Effect::Commerce(_)))
+        .count();
+    assert!(
+        offered > 0,
+        "a tree of {} innovations offers no way to improve the carrying trade",
+        w.techs.len()
+    );
+    // Bounded, and never below where it starts: an unknown art cannot make
+    // a realm's roads worse.
+    for &p in &w.alive_polities {
+        let m = w.tech_trade_mult(p);
+        assert!((1.0..3.0).contains(&m), "trade multiplier of {}", m);
+    }
+    run(&mut w, 900);
+    let best = w
+        .alive_polities
+        .iter()
+        .map(|&p| w.tech_trade_mult(p))
+        .fold(1.0f32, f32::max);
+    assert!(
+        best > 1.0,
+        "after nine centuries no realm in the world had learned anything \
+         about carrying goods"
+    );
+}
+
 /// A treasury must settle at what a realm earns, not climb with the years.
 ///
 /// Gold used to be pinned by a ceiling of six hundred, and the ceiling
@@ -1266,10 +1357,19 @@ fn a_treasury_settles_at_what_a_realm_earns() {
         held,
         ceiling
     );
+    // And that the bound is being tested against a world with money in it.
+    // The realm above is the one furthest past its own settling point,
+    // which on a small map can be a poor realm with a low one, so the
+    // richest is asked separately.
+    let richest_tuned = w
+        .alive_polities
+        .iter()
+        .map(|&q| w.polities[q].treasury)
+        .fold(0.0f32, f32::max);
     assert!(
-        held > w.tuning.court_reserve,
+        richest_tuned > w.tuning.court_reserve,
         "no realm in a 1500 year world got past its war chest ({:.0} held)",
-        held
+        richest_tuned
     );
 
     // And the same world with nothing draining it must break that bound,
@@ -1285,9 +1385,9 @@ fn a_treasury_settles_at_what_a_realm_earns() {
         .iter()
         .map(|&p| loose.polities[p].treasury)
         .fold(0.0f32, f32::max);
-    // Compared against the *tuned* settling point, since the loose world has
-    // no share to divide by.
-    let tuned_ceiling = ceiling.max(w.tuning.court_reserve * 4.0);
+    // Compared against the tuned world's richest, since the loose world has
+    // no share to divide by and so no settling point of its own.
+    let tuned_ceiling = (richest_tuned * 3.0).max(w.tuning.court_reserve * 4.0);
     assert!(
         richest > tuned_ceiling,
         "with no drains the richest realm held only {:.0}, under {:.0} — the \
@@ -1902,6 +2002,48 @@ fn probe_treasuries() {
                 sq(0.5),
                 sq(0.9),
                 mean_army
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn probe_trade_share() {
+    use crate::sim::explain;
+    let mut w = World::new(7, 288, 144, Detail::Medium);
+    for c in 0..14 {
+        run(&mut w, 200);
+        // What share of a realm's gross income the roads account for, both
+        // directly as tolls and indirectly through the prosperity that
+        // trade buys its cities.
+        let mut direct = 0.0f64;
+        let mut gross = 0.0f64;
+        let mut via_prosp = 0.0f64;
+        for &p in &w.alive_polities {
+            let g: f32 = explain::income_factors(&w, p)
+                .iter()
+                .filter(|f| f.weight > 0.0)
+                .map(|f| f.weight)
+                .sum();
+            gross += g as f64;
+            direct += (w.realm_trade(p) * w.tuning.trade_toll_factor) as f64;
+            // The prosperity a city owes to what passes through it, as a
+            // share of the prosperity it has.
+            for &ci in &w.polities[p].cities {
+                let from_trade = (w.city_trade(ci) * 0.06).min(0.6);
+                let share = (from_trade / w.cities[ci].prosperity.max(0.01)).min(1.0);
+                via_prosp += (w.cities[ci].pop
+                    * w.cities[ci].prosperity
+                    * w.tuning.city_income_factor
+                    * share) as f64;
+            }
+        }
+        if c % 3 == 0 || c == 13 {
+            println!(
+                "year {:>5}: gross {:>10.0} | tolls {:>8.0} ({:>4.1}%) | via prosperity {:>8.0} ({:>4.1}%)",
+                w.year, gross, direct, direct / gross.max(1.0) * 100.0,
+                via_prosp, via_prosp / gross.max(1.0) * 100.0
             );
         }
     }

@@ -364,6 +364,15 @@ pub struct Tuning {
     pub school_schism_min_adherents: usize,
     /// Chance an adherent realm follows the dissenters in a schism.
     pub school_schism_share: f64,
+    /// The size of city, in thousands, at which a pair of them trades at
+    /// its nominal worth.
+    ///
+    /// The mass term of the gravity model in `trade::refresh`. Two cities of
+    /// this size trade at exactly what their goods are worth; larger ones
+    /// trade more, smaller ones less, which is what lets the trade of a
+    /// world grow along with its cities instead of standing still while
+    /// everything else compounds.
+    pub trade_mass_ref: f32,
     /// The war chest a crown keeps back before its court starts spending.
     ///
     /// Everything above this is fair game for the court, which is the drain
@@ -722,6 +731,7 @@ impl Default for Tuning {
             school_schism_min_age: 60,
             school_schism_min_adherents: 4,
             school_schism_share: 0.45,
+            trade_mass_ref: 24.0,
             court_reserve: 150.0,
             court_spend_share: 0.12,
             court_decadence_rate: 0.010,
@@ -962,6 +972,7 @@ impl Tuning {
                 self.school_schism_min_adherents = v.max(2.0) as usize;
             }
             "school_schism_share" => self.school_schism_share = v,
+            "trade_mass_ref" => self.trade_mass_ref = v.max(0.1) as f32,
             "court_reserve" => self.court_reserve = v.max(0.0) as f32,
             "court_spend_share" => self.court_spend_share = v.clamp(0.0, 1.0) as f32,
             "court_decadence_rate" => self.court_decadence_rate = v.max(0.0) as f32,

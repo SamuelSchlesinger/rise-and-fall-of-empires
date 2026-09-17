@@ -453,6 +453,11 @@ pub fn form_polities(w: &mut World) {
 
 /// What a point of trade adds to a city's prosperity.
 const TRADE_TO_PROSPERITY: f32 = 0.035;
+/// The most prosperity a city can owe to the traffic through it, approached
+/// but never reached.
+const TRADE_PROSPERITY_MAX: f32 = 0.9;
+/// The amount of that traffic worth half of it.
+const TRADE_PROSPERITY_HALF: f32 = 0.35;
 
 // ---------------------------------------------------------------------------
 // Expansion
@@ -801,7 +806,15 @@ pub fn economy(w: &mut World) {
             // What passes through. This is the whole of why a city on a
             // strait is worth more than a city in a bog, and why a realm
             // astride the roads is worth attacking.
-            target += (w.city_trade(c) * TRADE_TO_PROSPERITY).min(0.6);
+            // Saturating rather than clipped. A hard ceiling here meant
+            // that every city past a modest amount of traffic drew exactly
+            // the same benefit from it, so the difference between a good
+            // position on the roads and a commanding one disappeared — the
+            // same mistake the treasury's ceiling made, in the place where
+            // it matters most, since what passes through is the whole reason
+            // a city on a strait is worth more than a city in a bog.
+            let passing = w.city_trade(c) * TRADE_TO_PROSPERITY;
+            target += TRADE_PROSPERITY_MAX * passing / (passing + TRADE_PROSPERITY_HALF);
             let city = &mut w.cities[c];
             // Taxed on the year's opening prosperity, before this year's
             // adjustment. A treasury is filled from what was actually

@@ -671,8 +671,13 @@ mod tests {
             assert!(!t.contains(".."), "doubled full stop in {}", ctx);
             assert!(!t.contains(",,"), "doubled comma in {}", ctx);
             let first = t.chars().next().unwrap();
+            // A digit is a fine way to begin a sentence — "26% of the
+            // world's settled land now lay under the Lafulannic Kingdom" —
+            // and the rule rejected it. Nothing noticed until a change
+            // elsewhere moved that line into the century this test reads,
+            // which is the trouble with a rule that is nearly right.
             assert!(
-                first.is_uppercase() || first == '"',
+                first.is_uppercase() || first == '"' || first.is_ascii_digit(),
                 "lower-case sentence start in {}",
                 ctx
             );

@@ -217,6 +217,7 @@ fn hinterland(w: &World, city: usize) -> u16 {
 /// route only pays for something dear — which is why spice travels further
 /// than grain, and why the cities that grow rich are the ones in between.
 pub fn refresh(w: &mut World) {
+    let tn = w.tuning;
     // What the roads that already exist have been doing, so that rebuilding
     // the network does not make them forget it. Every twentieth year this
     // function replaced the whole list with fresh routes marked open as of
@@ -266,7 +267,31 @@ pub fn refresh(w: &mut World) {
             let trade = worth(a_offers).min(worth(b_offers));
             // Distance is dear, and dearer by land.
             let far = d as f32 / if by_sea { SEA_RANGE } else { LAND_RANGE } as f32;
-            let value = trade * (1.0 - far * 0.7).max(0.1) * if by_sea { 1.2 } else { 1.0 };
+            // A road is worth what the two ends can buy from each other, and
+            // the ends were not being weighed at all: a route's value came
+            // from the goods on the ground and the distance between them,
+            // both of which are fixed for ever, so the whole trade of a
+            // world was a constant while its cities grew. Trade's share of
+            // a realm's income fell from a quarter in the second century to
+            // a fortieth by the twenty-eighth, purely by being left behind.
+            //
+            // This is the other half of a gravity model, whose distance term
+            // was already here. Bounded at both ends, because a term that
+            // grows with the square of a city is exactly the kind of thing
+            // that has to be stopped from running away.
+            let mass = ((w.cities[a].pop * w.cities[b].pop).sqrt() / tn.trade_mass_ref.max(0.01))
+                .clamp(0.2, 8.0);
+            // What the two ends know about carrying goods, taken from the
+            // better of them: a road is a thing two places share, and the
+            // more advanced partner is the one who organises the trade.
+            let craft = [w.cities[a].polity, w.cities[b].polity]
+                .into_iter()
+                .flatten()
+                .filter(|&q| w.polities[q].alive())
+                .map(|q| w.tech_trade_mult(q))
+                .fold(1.0f32, f32::max);
+            let value =
+                trade * mass * craft * (1.0 - far * 0.7).max(0.1) * if by_sea { 1.2 } else { 1.0 };
             if value < 0.35 {
                 continue;
             }

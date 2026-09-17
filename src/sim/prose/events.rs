@@ -596,6 +596,12 @@ fn tech_consequence(e: crate::sim::tech::Effect, pick: &Pick) -> String {
     use crate::sim::tech::Effect;
     let big = e.size() >= 0.16;
     match e {
+        Effect::Commerce(_) if big => {
+            "Goods that had never travelled further than the next valley began to turn up \
+             a thousand miles away."
+                .into()
+        }
+        Effect::Commerce(_) => "The carts went out heavier, and came back heavier.".into(),
         Effect::Yield(_) if big => "The same fields fed half again as many mouths.".into(),
         Effect::Yield(_) => "The harvests came in a little heavier.".into(),
         Effect::Arms(_) if big => {
