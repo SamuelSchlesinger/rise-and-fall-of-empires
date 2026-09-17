@@ -80,12 +80,35 @@ impl Ui {
         {
             self.screen.put(sw - 1, 0, '>', accent, bg);
         }
-        let rows = self.list_rows();
+        let (rows, total) = self.list_rows();
         let header = detail::list_header(self.list_tab);
         self.screen
             .text_attr(1, 1, header, Rgb(150, 150, 160), bg, BOLD);
-        if !self.list_filter.is_empty() {
-            let f = format!(" {} rows match \"{}\" ", rows.len(), self.list_filter);
+        // What the page is not showing. A filter takes precedence, because
+        // the player just typed it; otherwise, say so when the page is a
+        // window on more history than it lists — which on a long game it
+        // always is, and `/` is how the rest is reached.
+        let note = if !self.list_filter.is_empty() {
+            Some(format!(
+                " {} rows match \"{}\" ",
+                rows.len(),
+                self.list_filter
+            ))
+        } else if !detail::query_fields(self.list_tab).is_empty() && total <= rows.len() {
+            // What may be asked of this page. A filter that can compare
+            // numbers is no use to anybody who cannot discover the names of
+            // the numbers, and they differ from page to page.
+            Some(format!(" / {} ", detail::query_fields(self.list_tab)))
+        } else if total > rows.len() {
+            Some(format!(
+                " showing {} of {} — press / to search ",
+                rows.len(),
+                total
+            ))
+        } else {
+            None
+        };
+        if let Some(f) = note {
             self.screen.text_attr(
                 sw.saturating_sub(f.chars().count() + 1),
                 sh.saturating_sub(1),
@@ -416,11 +439,11 @@ impl Ui {
     }
 
     pub(super) fn render_fate(&mut self) {
-        let p = match self.selected {
-            Some(Ref::Polity(p)) => p,
-            _ => return,
-        };
-        let lines = detail::fate_menu(&self.world, p);
+        let Some(r) = self.selected else { return };
+        let lines = detail::fate_menu_for(&self.world, r);
+        if lines.is_empty() {
+            return;
+        }
         let w = lines.iter().map(|l| l.chars().count()).max().unwrap_or(20) + 4;
         let h = lines.len() + 2;
         let (_, _, mw, mh) = self.map_rect();

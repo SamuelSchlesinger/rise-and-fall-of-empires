@@ -135,6 +135,15 @@ pub enum Effect {
     Order(f32),
     /// Fewer people die of what kills people.
     Health(f32),
+    /// Caravans and ships carry more, and further.
+    ///
+    /// The twelve kinds above were settled before trade grew into anything,
+    /// and trade was the one thing in the world technology could not touch:
+    /// a realm could invent writing, coinage and the ocean-going ship and
+    /// its caravans went on carrying exactly what they carried in year one.
+    /// Defensible while the roads were a twentieth of a realm's income and
+    /// falling; not once they were a sixth and holding.
+    Commerce(f32),
 }
 
 impl Effect {
@@ -149,6 +158,7 @@ impl Effect {
             | Effect::Revenue(v)
             | Effect::Roadcraft(v)
             | Effect::Seacraft(v)
+            | Effect::Commerce(v)
             | Effect::Prosperity(v)
             | Effect::Doctrine(v)
             | Effect::Order(v)
@@ -164,6 +174,7 @@ impl Effect {
             Effect::Ramparts(_) => "ramparts",
             Effect::Administration(_) => "administration",
             Effect::Revenue(_) => "revenue",
+            Effect::Commerce(_) => "commerce",
             Effect::Roadcraft(_) => "roads",
             Effect::Seacraft(_) => "seamanship",
             Effect::Prosperity(_) => "wealth",
@@ -514,18 +525,21 @@ fn field_shape(f: Field) -> (&'static [Ground], &'static [u8]) {
         Field::Metalcraft => (&[Ground::Ore, Ground::Town], &[1, 1, 2, 8]),
         Field::Building => (
             &[Ground::Highland, Ground::Town, Ground::GreatCity],
-            &[3, 6, 8, 0],
+            &[3, 6, 8, 0, 12],
         ),
-        Field::Seafaring => (&[Ground::Shore], &[7, 7, 8, 5]),
-        Field::Statecraft => (&[Ground::Town, Ground::GreatCity], &[4, 5, 10, 4]),
+        Field::Seafaring => (&[Ground::Shore], &[7, 7, 8, 5, 12]),
+        Field::Statecraft => (&[Ground::Town, Ground::GreatCity], &[4, 5, 10, 4, 12]),
         Field::Warcraft => (
             &[Ground::Town, Ground::Open, Ground::Anywhere],
             &[1, 2, 3, 1],
         ),
         Field::Leycraft => (&[Ground::Ley], &[9, 9, 1, 10]),
         Field::Physic => (&[Ground::Town, Ground::Anywhere], &[11, 11, 8, 10]),
-        Field::Letters => (&[Ground::Town, Ground::GreatCity], &[4, 9, 10, 4]),
-        Field::Reckoning => (&[Ground::GreatCity, Ground::Town], &[7, 5, 4, 9]),
+        Field::Letters => (&[Ground::Town, Ground::GreatCity], &[4, 9, 10, 4, 12]),
+        // Commerce twice over, because reckoning is its home: a bill of
+        // exchange and a counting-house are arithmetic before they are
+        // anything else.
+        Field::Reckoning => (&[Ground::GreatCity, Ground::Town], &[7, 5, 4, 9, 12, 12]),
     }
 }
 
@@ -543,7 +557,8 @@ pub fn effect_of(code: u8, v: f32) -> Effect {
         8 => Effect::Prosperity(v),
         9 => Effect::Doctrine(v),
         10 => Effect::Order(v),
-        _ => Effect::Health(v),
+        11 => Effect::Health(v),
+        _ => Effect::Commerce(v),
     }
 }
 
@@ -562,6 +577,7 @@ pub fn effect_code(e: Effect) -> u8 {
         Effect::Doctrine(_) => 9,
         Effect::Order(_) => 10,
         Effect::Health(_) => 11,
+        Effect::Commerce(_) => 12,
     }
 }
 
@@ -645,6 +661,15 @@ fn effect_words(e: Effect) -> Option<&'static [&'static str]> {
         Effect::Yield(_) => Some(&["plough", "harrow", "sluice", "terrace", "granary", "dyke"]),
         Effect::Administration(_) => Some(&["register", "roll", "chancery", "assize", "survey"]),
         Effect::Revenue(_) => Some(&["mint", "treasury", "toll-house", "customs roll", "ledger"]),
+        Effect::Commerce(_) => Some(&[
+            "bill of exchange",
+            "caravanserai",
+            "counting-house",
+            "warehouse",
+            "wagon-road",
+            "harbour-works",
+            "carrying trade",
+        ]),
         _ => None,
     }
 }
@@ -824,6 +849,21 @@ impl World {
             _ => None,
         });
         1.0 + Self::diminishing(raw, 0.55, 0.5)
+    }
+
+    /// How much more a realm's roads carry for what it knows.
+    ///
+    /// Read off the *better* of a route's two ends rather than one of them,
+    /// because a road is a thing two places share and the more advanced
+    /// partner is the one who organises the trade — and because a technique
+    /// for carrying goods is exactly the sort of thing that travels along
+    /// the road it improves.
+    pub fn tech_trade_mult(&self, p: usize) -> f32 {
+        let raw = self.effect_sum(p, |e| match e {
+            Effect::Commerce(v) => Some(v),
+            _ => None,
+        });
+        1.0 + Self::diminishing(raw, 1.2, 0.5)
     }
 
     pub fn tech_prosperity_bonus(&self, p: usize) -> f32 {

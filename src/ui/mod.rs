@@ -5,8 +5,10 @@
 
 mod commands;
 pub(crate) mod detail;
+mod export;
 mod input;
 mod learn;
+pub mod query;
 mod recap;
 mod render;
 mod words;
@@ -21,6 +23,149 @@ use std::time::{Duration, Instant};
 
 pub const SPEEDS: [f64; 8] = [0.5, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0];
 
+/// The storyteller: what is worth watching right now.
+pub(crate) fn stories(w: &World) -> Vec<(String, Ref)> {
+    let mut out: Vec<(f32, String, Ref)> = Vec::new();
+    // This runs on every frame, so it reads the living indexes rather than
+    // the vectors behind them. Those hold everything that has ever been: by
+    // the eightieth century of a large map, forty thousand finished wars and
+    // four hundred thousand dead, against some thirty wars and a thousand
+    // people who are actually going on. Walking the whole of history sixty
+    // times a second is what made a long game feel slow.
+    for x in w.alive_wars.iter().map(|&i| &w.wars[i]) {
+        let (a, d) = (x.attacker, x.defender);
+        let size = (w.polities[a].cells + w.polities[d].cells) as f32;
+        let lean = if x.score > 0.3 {
+            format!("{} gaining", w.polities[a].short)
+        } else if x.score < -0.3 {
+            format!("{} holding", w.polities[d].short)
+        } else {
+            "in the balance".to_string()
+        };
+        out.push((
+            size * 0.02 + x.battles as f32 * 0.5,
+            format!(
+                "{}: {} v {}, {}, {}",
+                x.name,
+                w.polities[a].short,
+                w.polities[d].short,
+                crate::sim::prose::years((w.year - x.started).max(1) as i64),
+                lean
+            ),
+            Ref::War(x.id),
+        ));
+    }
+    for p in w.living_polities() {
+        let pol = &w.polities[p];
+        if pol.cells > 40 && pol.stability < 0.25 {
+            out.push((
+                pol.cells as f32 * 0.05 + (0.25 - pol.stability) * 40.0,
+                // The vocabulary from `words::stability`, not a word of
+                // its own: the sidebar, the lists and the pages all have
+                // to call 19% the same thing. The number is on the
+                // realm's own page; this is a headline.
+                format!(
+                    "{} is {}{}",
+                    pol.name,
+                    words::stability(pol.stability),
+                    if pol.at_war() { ", and at war" } else { "" }
+                ),
+                Ref::Polity(p),
+            ));
+        }
+        if pol.kind == crate::sim::PolityKind::Empire && w.year - pol.last_kind_change < 60 {
+            out.push((
+                6.0 + pol.cells as f32 * 0.01,
+                format!("A new empire: {} under {}", pol.name, w.ruler_short(p)),
+                Ref::Polity(p),
+            ));
+        }
+        if pol.reign_gained > 40 {
+            out.push((
+                pol.reign_gained as f32 * 0.1,
+                format!(
+                    "{} has won {} lands for {}",
+                    w.ruler_short(p),
+                    pol.reign_gained,
+                    pol.short
+                ),
+                Ref::Polity(p),
+            ));
+        }
+    }
+    // The figures of the age, weighted above almost everything else.
+    // A reader who looks up once a century should find the name that
+    // century will be remembered by without going hunting for it, and
+    // the deed is carried with the name so it means something the first
+    // time they see it.
+    for r in w.alive_persons.iter().copied() {
+        let per = &w.persons[r];
+        if !per.alive() || !per.is_acclaimed() {
+            continue;
+        }
+        let Some(p) = per.polity.filter(|&p| w.polities[p].alive()) else {
+            continue;
+        };
+        let deed = crate::sim::dynasty::standing(w, r)
+            .first()
+            .map(|c| c.what.clone())
+            .unwrap_or_else(|| "is spoken of everywhere".into());
+        // Weighted above the ordinary run of wars and unrest: a living
+        // figure is the most interesting thing in a century, and the
+        // line is kept short so it fits a sidebar row without wrapping.
+        out.push((
+            30.0 + per.greatness * 0.02,
+            format!("{} of {}: {}", per.full_name(), w.polities[p].short, deed),
+            Ref::Person(r),
+        ));
+    }
+    // The power of the age, if there is one.
+    if let Some(h) = crate::sim::war::hegemon(w) {
+        out.push((
+            26.0,
+            format!(
+                "{} holds {:.0}% of the world",
+                w.polities[h].short,
+                crate::sim::dynasty::world_share(w, h) * 100.0
+            ),
+            Ref::Polity(h),
+        ));
+    }
+    for pl in &w.plagues {
+        let names: Vec<&str> = pl
+            .polities
+            .iter()
+            .filter(|&&p| w.polities[p].alive())
+            .map(|&p| w.polities[p].short.as_str())
+            .take(3)
+            .collect();
+        if let Some(&p) = pl.polities.first() {
+            out.push((
+                5.0 + pl.deaths as f32 * 0.01,
+                format!("{} ravages {}", pl.name, names.join(", ")),
+                Ref::Polity(p),
+            ));
+        }
+    }
+    for pr in w.prophecies.iter().filter(|pr| pr.outcome.is_none()) {
+        let left = pr.deadline - w.year;
+        if left < 30 {
+            out.push((
+                4.0 + (30 - left) as f32 * 0.1,
+                format!(
+                    "{} years left for the prophecy that {}",
+                    left.max(0),
+                    pr.what
+                ),
+                Ref::Person(pr.seer),
+            ));
+        }
+    }
+    out.sort_by(|a, b| b.0.total_cmp(&a.0));
+    out.truncate(3);
+    out.into_iter().map(|(_, t, r)| (t, r)).collect()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Map,
@@ -33,6 +178,49 @@ pub enum Mode {
     Recap,
 }
 
+/// The kind of question a layer answers. Tab steps between these.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LayerFamily {
+    /// Who holds what.
+    Power,
+    /// Who the people are and what they believe.
+    People,
+    /// What the ground is.
+    Land,
+    /// How people live on it: how many, on what, and how well.
+    Living,
+    /// What is changing, rather than what is: see [`crate::sim::flows`].
+    Motion,
+}
+
+impl LayerFamily {
+    pub fn name(self) -> &'static str {
+        match self {
+            LayerFamily::Power => "power",
+            LayerFamily::People => "peoples",
+            LayerFamily::Land => "land",
+            LayerFamily::Living => "living",
+            LayerFamily::Motion => "motion",
+        }
+    }
+    pub fn all() -> [LayerFamily; 5] {
+        [
+            LayerFamily::Power,
+            LayerFamily::People,
+            LayerFamily::Land,
+            LayerFamily::Living,
+            LayerFamily::Motion,
+        ]
+    }
+    /// The layers of this family, in the order they step.
+    pub fn layers(self) -> Vec<Layer> {
+        Layer::all()
+            .into_iter()
+            .filter(|l| l.family() == self)
+            .collect()
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Layer {
     Political,
@@ -41,6 +229,23 @@ pub enum Layer {
     Magic,
     Population,
     Biomes,
+    /// What the ground yields, per cell.
+    Goods,
+    /// What trade is worth, and the roads it moves along.
+    Trade,
+    /// What the land can feed, which is fertility, weather and knowledge
+    /// multiplied together.
+    Harvest,
+    /// What the ground remembers: the local technology multiplier.
+    Knowledge,
+    /// Where people are arriving and where they are leaving.
+    Settling,
+    /// Where the fighting actually is.
+    Fighting,
+    /// Where the map is being redrawn.
+    Frontier,
+    /// Where the weather has turned since living memory.
+    Drift,
 }
 
 impl Layer {
@@ -52,9 +257,17 @@ impl Layer {
             Layer::Magic => "mana",
             Layer::Population => "population",
             Layer::Biomes => "biomes",
+            Layer::Goods => "goods",
+            Layer::Trade => "trade",
+            Layer::Harvest => "harvest",
+            Layer::Knowledge => "knowledge",
+            Layer::Settling => "settling",
+            Layer::Fighting => "fighting",
+            Layer::Frontier => "frontier",
+            Layer::Drift => "drift",
         }
     }
-    pub fn all() -> [Layer; 6] {
+    pub fn all() -> [Layer; 14] {
         [
             Layer::Political,
             Layer::Terrain,
@@ -62,17 +275,66 @@ impl Layer {
             Layer::Magic,
             Layer::Population,
             Layer::Biomes,
+            Layer::Goods,
+            Layer::Trade,
+            Layer::Harvest,
+            Layer::Knowledge,
+            Layer::Settling,
+            Layer::Fighting,
+            Layer::Frontier,
+            Layer::Drift,
         ]
     }
+
+    /// Which family a layer belongs to, for stepping between kinds of
+    /// question rather than between individual layers.
+    ///
+    /// Ten layers is too many to cycle one at a time — a reader looking for
+    /// the trade map should not have to pass through biomes and mana to
+    /// reach it. Tab moves between families, and within a family the layers
+    /// are variations on one question.
+    pub fn family(self) -> LayerFamily {
+        match self {
+            Layer::Political => LayerFamily::Power,
+            Layer::Culture | Layer::Magic => LayerFamily::People,
+            Layer::Terrain | Layer::Biomes => LayerFamily::Land,
+            Layer::Population | Layer::Goods | Layer::Trade | Layer::Harvest | Layer::Knowledge => {
+                LayerFamily::Living
+            }
+            Layer::Settling | Layer::Fighting | Layer::Frontier | Layer::Drift => {
+                LayerFamily::Motion
+            }
+        }
+    }
+    /// The next layer within the same family, wrapping.
+    ///
+    /// Stepping *within* a family rather than across the whole list is what
+    /// keeps ten layers navigable: Tab moves between kinds of question and
+    /// this moves between the variations on one.
     pub fn next(self) -> Layer {
-        let all = Layer::all();
-        let i = all.iter().position(|&l| l == self).unwrap_or(0);
-        all[(i + 1) % all.len()]
+        let within = self.family().layers();
+        let i = within.iter().position(|&l| l == self).unwrap_or(0);
+        within[(i + 1) % within.len()]
     }
     pub fn prev(self) -> Layer {
-        let all = Layer::all();
-        let i = all.iter().position(|&l| l == self).unwrap_or(0);
-        all[(i + all.len() - 1) % all.len()]
+        let within = self.family().layers();
+        let i = within.iter().position(|&l| l == self).unwrap_or(0);
+        within[(i + within.len() - 1) % within.len()]
+    }
+    /// The first layer of the next family, wrapping.
+    pub fn next_family(self) -> Layer {
+        Layer::step_family(self, 1)
+    }
+    pub fn prev_family(self) -> Layer {
+        Layer::step_family(self, -1)
+    }
+    fn step_family(from: Layer, by: isize) -> Layer {
+        let fams = LayerFamily::all();
+        let here = from.family();
+        let i = fams.iter().position(|&f| f == here).unwrap_or(0) as isize;
+        let n = fams.len() as isize;
+        let next = fams[((i + by).rem_euclid(n)) as usize];
+        next.layers().first().copied().unwrap_or(Layer::Political)
     }
     pub fn from_name(s: &str) -> Option<Layer> {
         let s = s.to_lowercase();
@@ -86,6 +348,18 @@ impl Layer {
             l.name().starts_with(&s)
                 || (s == "magic" && *l == Layer::Magic)
                 || (s == "pop" && *l == Layer::Population)
+                || (s == "mana" && *l == Layer::Magic)
+                // What people call them when they are looking for them.
+                || (s == "economy" && *l == Layer::Trade)
+                || (s == "roads" && *l == Layer::Trade)
+                || (s == "food" && *l == Layer::Harvest)
+                || (s == "tech" && *l == Layer::Knowledge)
+                || (s == "prosperity" && *l == Layer::Trade)
+                || (s == "migration" && *l == Layer::Settling)
+                || (s == "war" && *l == Layer::Fighting)
+                || (s == "battles" && *l == Layer::Fighting)
+                || (s == "climate" && *l == Layer::Drift)
+                || (s == "weather" && *l == Layer::Drift)
         })
     }
 }
@@ -251,6 +525,32 @@ pub fn run(
 
 /// Render one frame offscreen after simulating `years`, writing a plain
 /// text dump and a coloured HTML page. Used for testing and screenshots.
+/// Build a `Ui` over a world and render `frames` frames, returning the
+/// average milliseconds a frame took.
+///
+/// Only for measurement: the interactive loop renders every frame, so what
+/// a frame costs at year five thousand is the number that decides whether
+/// the game still feels responsive in a long world.
+/// A paused interface over a given world, for the tests that exercise what
+/// the interface can produce rather than how it is driven.
+#[cfg(test)]
+pub(crate) fn for_test(world: World, cols: usize, rows: usize) -> Ui {
+    let mut ui = Ui::new(world, false, false, cols, rows);
+    ui.paused = true;
+    ui
+}
+
+#[cfg(test)]
+pub(crate) fn time_frames(world: World, cols: usize, rows: usize, frames: u32) -> f64 {
+    let mut ui = Ui::new(world, false, false, cols, rows);
+    ui.paused = true;
+    let t = std::time::Instant::now();
+    for _ in 0..frames {
+        ui.render();
+    }
+    t.elapsed().as_secs_f64() * 1000.0 / f64::from(frames)
+}
+
 pub fn snapshot(
     world: World,
     ascii: bool,
@@ -338,6 +638,18 @@ pub fn snapshot(
         "recap-realm" => ui.open_recap(Some(100)),
         "tour" => ui.tour = true,
         "list" => ui.mode = Mode::List,
+        // Any list page by name, so a snapshot can depict one. `:list
+        // wealth` reaches the same page in play.
+        name if detail::LIST_TABS
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(name)) =>
+        {
+            ui.list_tab = detail::LIST_TABS
+                .iter()
+                .position(|t| t.eq_ignore_ascii_case(name))
+                .unwrap_or(0);
+            ui.mode = Mode::List;
+        }
         "chronicle" => {
             ui.mode = Mode::Chronicle;
             ui.chron_min = 2;
@@ -862,15 +1174,26 @@ impl Ui {
         None
     }
 
-    fn list_rows(&self) -> Vec<(String, Ref)> {
-        let rows = detail::list_rows(&self.world, self.list_tab);
+    /// The rows of the open list page, and how many the page is a window on.
+    ///
+    /// The second number is the world's count before the page was trimmed,
+    /// so the footer can say when there is more history than fits.
+    fn list_rows(&self) -> (Vec<(String, Ref)>, usize) {
+        let (rows, total) = detail::list_rows(&self.world, self.list_tab);
         if self.list_filter.is_empty() {
-            return rows;
+            return (rows, total);
         }
-        let f = self.list_filter.to_lowercase();
-        rows.into_iter()
-            .filter(|(s, _)| s.to_lowercase().contains(&f))
-            .collect()
+        // A filter term is a word to look for or a comparison against a
+        // named quantity — `lands>200`, `income<0` — so a list can be asked
+        // what things *are* and not only what they are called. See
+        // [`query`].
+        let terms = query::parse(&self.list_filter);
+        (
+            rows.into_iter()
+                .filter(|(text, r)| query::matches(&self.world, *r, text, &terms))
+                .collect(),
+            total,
+        )
     }
 
     fn cycle_realm(&mut self, delta: i32) {
@@ -1023,144 +1346,6 @@ impl Ui {
         hits.into_iter().map(|(_, r)| r).collect()
     }
 
-    /// The storyteller: what is worth watching right now.
-    fn stories(&self) -> Vec<(String, Ref)> {
-        let w = &self.world;
-        let mut out: Vec<(f32, String, Ref)> = Vec::new();
-        for x in w.wars.iter().filter(|x| x.alive()) {
-            let (a, d) = (x.attacker, x.defender);
-            let size = (w.polities[a].cells + w.polities[d].cells) as f32;
-            let lean = if x.score > 0.3 {
-                format!("{} gaining", w.polities[a].short)
-            } else if x.score < -0.3 {
-                format!("{} holding", w.polities[d].short)
-            } else {
-                "in the balance".to_string()
-            };
-            out.push((
-                size * 0.02 + x.battles as f32 * 0.5,
-                format!(
-                    "{}: {} v {}, {}, {}",
-                    x.name,
-                    w.polities[a].short,
-                    w.polities[d].short,
-                    crate::sim::prose::years((w.year - x.started).max(1) as i64),
-                    lean
-                ),
-                Ref::War(x.id),
-            ));
-        }
-        for p in w.living_polities() {
-            let pol = &w.polities[p];
-            if pol.cells > 40 && pol.stability < 0.25 {
-                out.push((
-                    pol.cells as f32 * 0.05 + (0.25 - pol.stability) * 40.0,
-                    // The vocabulary from `words::stability`, not a word of
-                    // its own: the sidebar, the lists and the pages all have
-                    // to call 19% the same thing. The number is on the
-                    // realm's own page; this is a headline.
-                    format!(
-                        "{} is {}{}",
-                        pol.name,
-                        words::stability(pol.stability),
-                        if pol.at_war() { ", and at war" } else { "" }
-                    ),
-                    Ref::Polity(p),
-                ));
-            }
-            if pol.kind == crate::sim::PolityKind::Empire && w.year - pol.last_kind_change < 60 {
-                out.push((
-                    6.0 + pol.cells as f32 * 0.01,
-                    format!("A new empire: {} under {}", pol.name, w.ruler_short(p)),
-                    Ref::Polity(p),
-                ));
-            }
-            if pol.reign_gained > 40 {
-                out.push((
-                    pol.reign_gained as f32 * 0.1,
-                    format!(
-                        "{} has won {} lands for {}",
-                        w.ruler_short(p),
-                        pol.reign_gained,
-                        pol.short
-                    ),
-                    Ref::Polity(p),
-                ));
-            }
-        }
-        // The figures of the age, weighted above almost everything else.
-        // A reader who looks up once a century should find the name that
-        // century will be remembered by without going hunting for it, and
-        // the deed is carried with the name so it means something the first
-        // time they see it.
-        for r in 0..w.persons.len() {
-            let per = &w.persons[r];
-            if !per.alive() || !per.is_acclaimed() {
-                continue;
-            }
-            let Some(p) = per.polity.filter(|&p| w.polities[p].alive()) else {
-                continue;
-            };
-            let deed = crate::sim::dynasty::standing(w, r)
-                .first()
-                .map(|c| c.what.clone())
-                .unwrap_or_else(|| "is spoken of everywhere".into());
-            // Weighted above the ordinary run of wars and unrest: a living
-            // figure is the most interesting thing in a century, and the
-            // line is kept short so it fits a sidebar row without wrapping.
-            out.push((
-                30.0 + per.greatness * 0.02,
-                format!("{} of {}: {}", per.full_name(), w.polities[p].short, deed),
-                Ref::Person(r),
-            ));
-        }
-        // The power of the age, if there is one.
-        if let Some(h) = crate::sim::war::hegemon(w) {
-            out.push((
-                26.0,
-                format!(
-                    "{} holds {:.0}% of the world",
-                    w.polities[h].short,
-                    crate::sim::dynasty::world_share(w, h) * 100.0
-                ),
-                Ref::Polity(h),
-            ));
-        }
-        for pl in &w.plagues {
-            let names: Vec<&str> = pl
-                .polities
-                .iter()
-                .filter(|&&p| w.polities[p].alive())
-                .map(|&p| w.polities[p].short.as_str())
-                .take(3)
-                .collect();
-            if let Some(&p) = pl.polities.first() {
-                out.push((
-                    5.0 + pl.deaths as f32 * 0.01,
-                    format!("{} ravages {}", pl.name, names.join(", ")),
-                    Ref::Polity(p),
-                ));
-            }
-        }
-        for pr in w.prophecies.iter().filter(|pr| pr.outcome.is_none()) {
-            let left = pr.deadline - w.year;
-            if left < 30 {
-                out.push((
-                    4.0 + (30 - left) as f32 * 0.1,
-                    format!(
-                        "{} years left for the prophecy that {}",
-                        left.max(0),
-                        pr.what
-                    ),
-                    Ref::Person(pr.seer),
-                ));
-            }
-        }
-        out.sort_by(|a, b| b.0.total_cmp(&a.0));
-        out.truncate(3);
-        out.into_iter().map(|(_, t, r)| (t, r)).collect()
-    }
-
     /// Open the digest, for the whole world or for the realm in hand.
     pub(super) fn open_recap(&mut self, years: Option<i32>) {
         if let Some(y) = years {
@@ -1182,18 +1367,39 @@ impl Ui {
         if self.selected.is_none() {
             self.selected = self.entity_at_cursor();
         }
-        if let Some(Ref::Polity(_)) = self.selected {
-            self.prev_mode = self.mode;
-            self.mode = Mode::Fate;
-        } else {
-            self.say("select a realm first (Enter or s over its lands)");
+        // A realm, a town, a person or a stretch of country. It used to
+        // reach realms alone, so the only way to touch a city was to find
+        // whichever realm happened to hold it and act on all of that
+        // instead — and a city is the unit most of this world's history
+        // actually happens to.
+        //
+        // Failing all of those, the region under the cursor, so that there
+        // is always something to act on even where nobody lives.
+        let target = self
+            .selected
+            .filter(|&r| detail::fate_reaches(&self.world, r))
+            .or_else(|| {
+                let i = self.world.terrain.idx(self.cursor.0, self.cursor.1);
+                self.world.terrain.feature_at(i).map(Ref::Feature)
+            });
+        match target {
+            Some(r) => {
+                self.selected = Some(r);
+                self.prev_mode = self.mode;
+                self.mode = Mode::Fate;
+            }
+            None => self.say("nothing here the hand of fate can reach"),
         }
     }
 
-    fn choose_fate(&mut self, p: usize, choice: usize) {
-        let msg = detail::hand_of_fate(&mut self.world, p, choice as u8);
+    fn choose_fate(&mut self, r: Ref, choice: usize) {
+        let msg = detail::hand_of_fate_on(&mut self.world, r, choice as u8);
         self.say(&msg);
         self.mode = self.prev_mode;
+        // What was done may have changed what the derived indexes say — a
+        // blighted region, an emptied one, a town that has doubled — and the
+        // next frame reads them.
+        self.world.recompute();
     }
 }
 
@@ -1219,6 +1425,70 @@ pub fn biome_style(b: Biome, ascii: bool) -> (Rgb, char) {
         Biome::Wastes => (Rgb(70, 50, 76), '¤', '%'),
     };
     (c, if ascii { a } else { g })
+}
+
+/// A trade good's colour and glyph, for the Goods layer and its key.
+///
+/// The same bargain as [`biome_style`]: the map and the legend both call
+/// this, so the key cannot drift from what is drawn. Hues are grouped by
+/// what a good *is* — greens grow, browns are dug up, blues come out of the
+/// water — so that a glance at the map separates farmland from mining
+/// country without reading the key at all.
+pub fn good_style(g: crate::sim::trade::Good, ascii: bool) -> (Rgb, char) {
+    use crate::sim::trade::Good;
+    let (c, uni, a) = match g {
+        Good::Grain => (Rgb(214, 190, 90), '⁂', 'g'),
+        Good::Livestock => (Rgb(168, 150, 96), 'ᴥ', 'c'),
+        Good::Fish => (Rgb(90, 170, 200), '≈', 'f'),
+        Good::Timber => (Rgb(46, 124, 60), '♣', 'T'),
+        Good::Stone => (Rgb(150, 150, 156), '▣', 's'),
+        Good::Metal => (Rgb(196, 132, 72), '◆', 'o'),
+        Good::Salt => (Rgb(236, 236, 226), '▫', 'x'),
+        Good::Furs => (Rgb(140, 100, 74), '❖', 'u'),
+        Good::Spice => (Rgb(214, 96, 52), '✳', 'p'),
+        Good::Wine => (Rgb(160, 60, 110), '❉', 'w'),
+        Good::Horses => (Rgb(190, 164, 120), 'Ω', 'h'),
+        Good::Leystone => (Rgb(170, 60, 230), '✦', 'l'),
+    };
+    (c, if ascii { a } else { uni })
+}
+
+/// The cells a straight line from `a` to `b` passes through, ends included.
+///
+/// Bresenham, because a trade route is stored as a pair of cities and has to
+/// be drawn as a path. Deliberately ignorant of terrain: the line a reader
+/// wants is the one joining the two towns, not the road a caravan would
+/// actually pick through the hills, and a sea route has no road at all.
+pub(crate) fn cells_between(t: &crate::geo::Terrain, a: usize, b: usize) -> Vec<usize> {
+    let (x0, y0) = t.xy(a);
+    let (x1, y1) = t.xy(b);
+    let (mut x, mut y) = (x0 as i64, y0 as i64);
+    let (x1, y1) = (x1 as i64, y1 as i64);
+    let (dx, dy) = ((x1 - x).abs(), -(y1 - y).abs());
+    let (sx, sy) = (if x < x1 { 1 } else { -1 }, if y < y1 { 1 } else { -1 });
+    let mut err = dx + dy;
+    // A line can be no longer than the map's diagonal; the bound is a guard
+    // against a malformed save rather than an expected case.
+    let mut out = Vec::with_capacity((dx.max(-dy) as usize) + 1);
+    let limit = t.w + t.h + 2;
+    for _ in 0..limit {
+        if x >= 0 && y >= 0 && (x as usize) < t.w && (y as usize) < t.h {
+            out.push(t.idx(x as usize, y as usize));
+        }
+        if x == x1 && y == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+    }
+    out
 }
 
 /// Where a world `world` cells across starts in a pane `pane` characters

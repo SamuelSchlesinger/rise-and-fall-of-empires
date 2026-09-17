@@ -669,7 +669,11 @@ pub fn tick_legends(w: &mut World) {
         }
     }
     // Legends: generals and notables of great renown are remembered at death.
-    for i in 0..w.persons.len() {
+    //
+    // Everyone who died this year is still on the living list — it is swept
+    // in `recompute`, which runs after this — so the list serves, and it is
+    // a thousandth the length of the person vector.
+    for i in w.alive_persons.clone() {
         let per = &w.persons[i];
         if per.died != Some(w.year)
             || per.role == Role::Ruler

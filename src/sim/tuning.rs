@@ -364,6 +364,66 @@ pub struct Tuning {
     pub school_schism_min_adherents: usize,
     /// Chance an adherent realm follows the dissenters in a schism.
     pub school_schism_share: f64,
+    /// The size of city, in thousands, at which a pair of them trades at
+    /// its nominal worth.
+    ///
+    /// The mass term of the gravity model in `trade::refresh`. Two cities of
+    /// this size trade at exactly what their goods are worth; larger ones
+    /// trade more, smaller ones less, which is what lets the trade of a
+    /// world grow along with its cities instead of standing still while
+    /// everything else compounds.
+    pub trade_mass_ref: f32,
+    /// The war chest a crown keeps back before its court starts spending.
+    ///
+    /// Everything above this is fair game for the court, which is the drain
+    /// that lets the treasury have no ceiling at all. A treasury's only cost
+    /// used to be upkeep, which scales with the army and the land and not
+    /// at all with how full the coffers are — so gold was an accumulator
+    /// with no matching outflow, and the only way to stop the number
+    /// becoming meaningless was to stop it growing.
+    pub court_reserve: f32,
+    /// What share of the money above that reserve the court spends a year.
+    pub court_spend_share: f32,
+    /// How much decadence a court acquires per unit of its own spending,
+    /// relative to the reserve. This is what makes wealth *rot* a realm
+    /// rather than merely fortify it, and the reason an empire at the height
+    /// of its riches is the one whose stability is about to go.
+    pub court_decadence_rate: f32,
+    /// How much prestige that spending buys. Gold spent on the court is not
+    /// wasted — it is how a dynasty is remembered — which is why a realm
+    /// does it even though it costs stability.
+    pub court_prestige_rate: f32,
+    /// What share of gross income a thoroughly rotten court takes before the
+    /// money reaches the treasury.
+    pub corruption_decadence_weight: f32,
+    /// And what share a realm loses to the distance its taxes must travel.
+    pub corruption_sprawl_weight: f32,
+    /// How much of a treasury goes into standing soldiers, as a share of the
+    /// army a realm's people would otherwise support. Wealth turning into
+    /// force is the other self-correcting drain: the soldiers it buys then
+    /// cost upkeep for as long as they stand.
+    pub army_gold_weight: f32,
+    /// The treasury at which the crown's money is worth half of everything
+    /// it can ever be worth to stability.
+    ///
+    /// A saturating curve rather than a ratio against a ceiling. The ratio
+    /// gave every wealthy realm in the world the identical bonus and a cliff
+    /// at the top, which showed the moment there was a page ranking realms
+    /// by what they held: eight of the first ten were tied at exactly the
+    /// cap.
+    pub treasury_stability_half: f32,
+    /// How many living traditions the world carries comfortably, per living
+    /// realm. Past this the ground is crowded and a schism struggles to take
+    /// root at all.
+    ///
+    /// Without a term like this the schools compound: each one that lasts a
+    /// century throws off a daughter with near-certainty, each daughter does
+    /// the same, and nothing anywhere depends on how many there already are.
+    /// A large map reached seventeen hundred living schools by the
+    /// thirty-fourth century against four hundred realms — eighty-six
+    /// thousand school-and-realm pairs, each rolling for persecution every
+    /// year, which buried the world in martyrs and the simulation in work.
+    pub schools_per_realm: f64,
     /// Influence below which a school is considered to be fading.
     pub school_extinction_threshold: f32,
     /// Years a school may fade before its teachings are forgotten.
@@ -671,6 +731,16 @@ impl Default for Tuning {
             school_schism_min_age: 60,
             school_schism_min_adherents: 4,
             school_schism_share: 0.45,
+            trade_mass_ref: 24.0,
+            court_reserve: 150.0,
+            court_spend_share: 0.12,
+            court_decadence_rate: 0.010,
+            court_prestige_rate: 0.35,
+            corruption_decadence_weight: 0.30,
+            corruption_sprawl_weight: 0.10,
+            army_gold_weight: 0.30,
+            treasury_stability_half: 180.0,
+            schools_per_realm: 0.5,
             school_extinction_threshold: 0.04,
             school_fading_years: 15,
             school_absorb_threshold: 0.85,
@@ -902,6 +972,18 @@ impl Tuning {
                 self.school_schism_min_adherents = v.max(2.0) as usize;
             }
             "school_schism_share" => self.school_schism_share = v,
+            "trade_mass_ref" => self.trade_mass_ref = v.max(0.1) as f32,
+            "court_reserve" => self.court_reserve = v.max(0.0) as f32,
+            "court_spend_share" => self.court_spend_share = v.clamp(0.0, 1.0) as f32,
+            "court_decadence_rate" => self.court_decadence_rate = v.max(0.0) as f32,
+            "court_prestige_rate" => self.court_prestige_rate = v.max(0.0) as f32,
+            "corruption_decadence_weight" => {
+                self.corruption_decadence_weight = v.clamp(0.0, 0.9) as f32;
+            }
+            "corruption_sprawl_weight" => self.corruption_sprawl_weight = v.clamp(0.0, 0.9) as f32,
+            "army_gold_weight" => self.army_gold_weight = v.max(0.0) as f32,
+            "treasury_stability_half" => self.treasury_stability_half = v.max(1.0) as f32,
+            "schools_per_realm" => self.schools_per_realm = v.max(0.02),
             "school_extinction_threshold" => self.school_extinction_threshold = v as f32,
             "school_fading_years" => self.school_fading_years = v as i32,
             "school_absorb_threshold" => self.school_absorb_threshold = v as f32,

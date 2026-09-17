@@ -453,6 +453,16 @@ pub fn form_polities(w: &mut World) {
 
 /// What a point of trade adds to a city's prosperity.
 const TRADE_TO_PROSPERITY: f32 = 0.035;
+/// The prosperity a city can approach but not reach.
+const PROSPERITY_MAX: f32 = 2.5;
+/// Below this a city's prosperity is whatever its advantages add up to;
+/// above it, each further advantage is worth less than the last.
+const PROSPERITY_KNEE: f32 = 1.5;
+/// The most prosperity a city can owe to the traffic through it, approached
+/// but never reached.
+const TRADE_PROSPERITY_MAX: f32 = 0.9;
+/// The amount of that traffic worth half of it.
+const TRADE_PROSPERITY_HALF: f32 = 0.35;
 
 // ---------------------------------------------------------------------------
 // Expansion
@@ -801,13 +811,40 @@ pub fn economy(w: &mut World) {
             // What passes through. This is the whole of why a city on a
             // strait is worth more than a city in a bog, and why a realm
             // astride the roads is worth attacking.
-            target += (w.city_trade(c) * TRADE_TO_PROSPERITY).min(0.6);
+            // Saturating rather than clipped. A hard ceiling here meant
+            // that every city past a modest amount of traffic drew exactly
+            // the same benefit from it, so the difference between a good
+            // position on the roads and a commanding one disappeared — the
+            // same mistake the treasury's ceiling made, in the place where
+            // it matters most, since what passes through is the whole reason
+            // a city on a strait is worth more than a city in a bog.
+            let passing = w.city_trade(c) * TRADE_TO_PROSPERITY;
+            target += TRADE_PROSPERITY_MAX * passing / (passing + TRADE_PROSPERITY_HALF);
             let city = &mut w.cities[c];
+            // Taxed on the year's opening prosperity, before this year's
+            // adjustment. A treasury is filled from what was actually
+            // produced, and prosperity is a slow-moving stock rather than a
+            // flow — but the real reason the order matters is that `explain`
+            // has to be able to state where the money came from, and it can
+            // only read the world as it stands, not as this loop is about to
+            // leave it. An explanation that is a percent out is worse than
+            // none, because a reader checks the parts against the whole.
+            income += city.pop * city.prosperity * tn.city_income_factor;
+            // The target is bent towards its ceiling rather than the value
+            // being clipped against it. Everything that makes a city rich —
+            // development, wonders, what passes through, what its realm
+            // knows — was added up and the sum then clamped, so by the
+            // twenty-first century the *median* city in the world sat at
+            // exactly the maximum and more than half of them had their
+            // income decided by population alone. Prosperity had stopped
+            // distinguishing anything, which also made the saturating trade
+            // term pointless for the cities it mattered most to: their
+            // target was already over the cap.
+            let target = super::soft_ceiling(target, PROSPERITY_KNEE, PROSPERITY_MAX);
             city.prosperity += (target - city.prosperity) * tn.prosperity_adjust_rate;
-            city.prosperity = city.prosperity.clamp(0.05, 2.5);
+            city.prosperity = city.prosperity.clamp(0.05, PROSPERITY_MAX);
             city.walls += (dev * 0.8 - city.walls) * 0.03;
             prosp_sum += city.prosperity;
-            income += city.pop * city.prosperity * tn.city_income_factor;
         }
         let avg_prosp = if cities.is_empty() {
             0.3
@@ -818,8 +855,25 @@ pub fn economy(w: &mut World) {
         income += pol.cells as f32 * tn.cell_income_factor * (1.0 + pol.dev);
         income += trade_income * tn.trade_toll_factor;
         income *= tech_income;
+        // What never reaches the treasury. A rotten court and a long road to
+        // the capital both take their cut of the tax roll before the crown
+        // sees it, which is what gives economic decline a cause of its own
+        // rather than leaving it a consequence of losing wars.
+        let skim = super::corruption_share(&tn, pol.decadence, pol.sprawl);
+        income *= 1.0 - skim;
         let upkeep = pol.army * tn.army_upkeep_factor + pol.cells as f32 * tn.cell_upkeep_factor;
-        pol.treasury = (pol.treasury + income - upkeep).clamp(-60.0, 600.0);
+        // And what the court spends, which is the drain that makes a ceiling
+        // unnecessary: everything above the war chest is fair game, so the
+        // richer a crown is the more it burns, and the burning rots it.
+        let spend = super::court_spending(&tn, pol.treasury);
+        pol.treasury = (pol.treasury + income - upkeep - spend).max(super::TREASURY_FLOOR);
+        if spend > 0.0 {
+            // Gold spent on a court is not wasted — it is how a dynasty is
+            // remembered — but it is how a dynasty rots, too.
+            let scale = spend / tn.court_reserve.max(1.0);
+            pol.prestige += scale * tn.court_prestige_rate;
+            pol.decadence = (pol.decadence + scale * tn.court_decadence_rate).clamp(0.0, 1.0);
+        }
         // Army.
         let kind_mult = match pol.kind {
             PolityKind::Horde => 2.2,
@@ -835,7 +889,11 @@ pub fn economy(w: &mut World) {
             * (1.0 + pol.dev * 0.5)
             * army_mult
             * art_mult
-            * tech_army;
+            * tech_army
+            // Gold buys soldiers, and the soldiers then cost upkeep for as
+            // long as they stand: the third drain, and the one that turns a
+            // hoard into something the rest of the world has to reckon with.
+            * (1.0 + super::wealth_reach(&tn, pol.treasury) * tn.army_gold_weight);
         let rate = if at_war {
             tn.army_build_rate_war
         } else {
@@ -902,7 +960,7 @@ pub fn economy(w: &mut World) {
             + tech_order
             + (avg_prosp - 0.4) * 0.15
             + vals.tradition * 0.05
-            + (pol.treasury / 600.0).max(-0.2) * 0.2;
+            + super::treasury_confidence(&tn, pol.treasury) * 0.2;
         pol.stability +=
             (target - pol.stability) * tn.stability_adjust_rate + rng.range32(-0.02, 0.02);
         pol.stability = pol.stability.clamp(0.0, 1.0);

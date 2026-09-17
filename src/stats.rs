@@ -369,12 +369,18 @@ pub fn bench(world: &mut World, years: i32) {
         (elapsed - accounted) / years_f,
         (elapsed - accounted) / elapsed * 100.0
     );
+    // Living against ever-lived, because that is the difference between work
+    // a bigger world has honestly earned and work spent walking its dead.
     println!(
-        "events {} (dropped {}) | polities {} | persons {} | cities {} | rss {}",
+        "events {} (dropped {}) | polities {}/{} | persons {}/{} | wars {}/{} | cities {} | rss {}",
         world.chronicle.len(),
         world.chronicle.dropped,
+        world.alive_polities.len(),
         world.polities.len(),
+        world.alive_persons.len(),
         world.persons.len(),
+        world.alive_wars.len(),
+        world.wars.len(),
         world.cities.len(),
         rss()
     );

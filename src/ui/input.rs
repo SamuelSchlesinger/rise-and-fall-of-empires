@@ -271,8 +271,29 @@ impl Ui {
                 self.cursor = (tw / 2, th / 2);
                 self.center_view();
             }
-            Key::Tab => self.layer = self.layer.next(),
-            Key::BackTab => self.layer = self.layer.prev(),
+            // Tab moves between kinds of question; `\\` steps the variations
+            // within one. With ten layers, cycling them one at a time meant
+            // passing through biomes and mana to reach the trade map.
+            Key::Tab => {
+                self.layer = self.layer.next_family();
+                let name = self.layer.name();
+                self.say(&format!("{} — {} layer", self.layer.family().name(), name));
+            }
+            Key::BackTab => {
+                self.layer = self.layer.prev_family();
+                let name = self.layer.name();
+                self.say(&format!("{} — {} layer", self.layer.family().name(), name));
+            }
+            Key::Char('\\') => {
+                self.layer = self.layer.next();
+                let name = self.layer.name();
+                self.say(&format!("{} layer", name));
+            }
+            Key::Char('|') => {
+                self.layer = self.layer.prev();
+                let name = self.layer.name();
+                self.say(&format!("{} layer", name));
+            }
             Key::Enter => {
                 if let Some(r) = self.entity_at_cursor() {
                     self.open_detail(r);
@@ -321,7 +342,7 @@ impl Ui {
             }
             Key::Char('x') | Key::Char('X') => self.open_fate(),
             Key::Char('t') | Key::Char('T') => {
-                let st = self.stories();
+                let st = stories(&self.world);
                 match st.first() {
                     Some((text, r)) => {
                         let (text, r) = (text.clone(), *r);
@@ -350,7 +371,7 @@ impl Ui {
 
     fn key_list(&mut self, k: &Key) {
         let n = self.count.unwrap_or(1).max(1);
-        let rows = self.list_rows();
+        let (rows, _) = self.list_rows();
         let len = rows.len();
         let page = self.content_height().saturating_sub(3).max(1);
         match k {
@@ -564,17 +585,17 @@ impl Ui {
     }
 
     fn key_fate(&mut self, k: &Key) {
-        let p = match self.selected {
-            Some(Ref::Polity(p)) => p,
-            _ => {
-                self.mode = self.prev_mode;
-                return;
-            }
+        let Some(r) = self
+            .selected
+            .filter(|&r| crate::ui::detail::fate_reaches(&self.world, r))
+        else {
+            self.mode = self.prev_mode;
+            return;
         };
         match k {
             Key::Esc | Key::Char('x') | Key::Char('q') => self.mode = self.prev_mode,
             Key::Char(c) if ('1'..='6').contains(c) => {
-                self.choose_fate(p, *c as usize - '1' as usize);
+                self.choose_fate(r, *c as usize - '1' as usize);
             }
             _ => {}
         }
@@ -734,8 +755,8 @@ impl Ui {
                     if m.x >= fx && m.x < fx + fw && m.y >= fy && m.y < fy + fh {
                         let row = m.y.saturating_sub(fy + 1);
                         if (2..8).contains(&row) {
-                            if let Some(Ref::Polity(p)) = self.selected {
-                                self.choose_fate(p, row - 2);
+                            if let Some(r) = self.selected {
+                                self.choose_fate(r, row - 2);
                             }
                         }
                     } else {
@@ -810,7 +831,7 @@ impl Ui {
                         }
                     } else if m.y >= self.list_y0 && m.y < self.content_height().saturating_sub(1) {
                         let row = m.y - self.list_y0 + self.list_scroll;
-                        let rows = self.list_rows();
+                        let (rows, _) = self.list_rows();
                         if row < rows.len() {
                             let r = rows[row].1;
                             // The right button opens at once; the left needs

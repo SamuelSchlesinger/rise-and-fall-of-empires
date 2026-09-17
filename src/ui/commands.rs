@@ -134,6 +134,12 @@ impl Ui {
                 }
             }
             "e" | "edit" | "load" | "open" => self.load(arg),
+            // Writing the world out for somebody who does not have the
+            // game: a save file is no use to them.
+            "export" | "write-out" => {
+                let msg = self.export(arg, "");
+                self.say(&msg);
+            }
             "autosave" => match arg.parse::<i32>() {
                 Ok(n) => {
                     self.autosave = n.max(0);
@@ -479,11 +485,20 @@ impl Ui {
     /// Everything else: the Hand of Fate, muting and the storyteller.
     fn cmd_misc(&mut self, cmd: &str, arg: &str) -> Cmd {
         match cmd {
-            "fate" => match (self.selected, arg.parse::<usize>()) {
-                (Some(Ref::Polity(p)), Ok(c)) if (1..=6).contains(&c) => self.choose_fate(p, c - 1),
-                (Some(Ref::Polity(_)), _) => self.open_fate(),
-                _ => self.say("select a realm first"),
-            },
+            // A realm, a town, a person or a region — whatever is selected
+            // that the hand of fate can reach.
+            "fate" => {
+                let reach = self
+                    .selected
+                    .filter(|&r| crate::ui::detail::fate_reaches(&self.world, r));
+                match (reach, arg.parse::<usize>()) {
+                    (Some(r), Ok(c)) if (1..=6).contains(&c) => self.choose_fate(r, c - 1),
+                    (Some(_), _) => self.open_fate(),
+                    // Nothing selected still opens it, since the region
+                    // under the cursor will do.
+                    _ => self.open_fate(),
+                }
+            }
             "mute" | "unmute" => {
                 if arg.is_empty() {
                     let names: Vec<&str> = self.muted.iter().map(|k| k.name()).collect();
@@ -504,7 +519,7 @@ impl Ui {
                 }
             }
             "story" | "t" | "now" => {
-                let st = self.stories();
+                let st = stories(&self.world);
                 match st.first() {
                     Some((text, r)) => {
                         let (text, r) = (text.clone(), *r);

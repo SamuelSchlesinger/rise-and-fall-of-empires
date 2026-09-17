@@ -47,7 +47,9 @@ fn notables(w: &World) -> Vec<usize> {
         .copied()
         .filter(|&i| {
             let per = &w.persons[i];
-            if per.renown < NOTABLE_RENOWN {
+            // The living index carries this year's dead until `recompute`
+            // sweeps it, and a corpse is nobody's rival.
+            if !per.alive() || per.renown < NOTABLE_RENOWN {
                 return false;
             }
             // A ruler's story is told elsewhere.
@@ -141,7 +143,7 @@ fn take_proteges(w: &mut World) {
     // four times in the same words.
     if w.alive_persons
         .iter()
-        .any(|&x| w.persons[x].served == Some(patron))
+        .any(|&x| w.persons[x].alive() && w.persons[x].served == Some(patron))
     {
         return;
     }

@@ -5,8 +5,9 @@ use crate::sim::chronicle::{EventKind, Ref};
 use crate::sim::{dynasty, explain};
 use crate::sim::{SchoolKind, Stance, World};
 use crate::term::{self, Rgb, BOLD, DIM};
+use std::cmp::Ordering;
 
-pub const LIST_TABS: [&str; 11] = [
+pub const LIST_TABS: [&str; 13] = [
     "Realms",
     "Cities",
     "Peoples",
@@ -18,6 +19,12 @@ pub const LIST_TABS: [&str; 11] = [
     "Prophecies",
     "Figures",
     "Houses",
+    // Two views of the economy. Kept as their own pages rather than as more
+    // columns on Realms and Cities, which are already as wide as a narrow
+    // terminal will take — and because sorting realms by what they are
+    // worth is a different question from sorting them by how large they are.
+    "Wealth",
+    "Roads",
 ];
 
 pub struct Line {
@@ -366,6 +373,16 @@ pub fn summary(w: &World, r: Ref) -> Vec<(String, Rgb)> {
     out
 }
 
+/// The quantities a list page's rows can be compared on, for the hint line.
+pub fn query_fields(tab: usize) -> String {
+    let fields = crate::ui::query::fields_for(tab);
+    if fields.is_empty() {
+        return String::new();
+    }
+    let first = fields.split_whitespace().next().unwrap_or("");
+    format!("filter by name, or {}>0 — {}", first, fields)
+}
+
 pub fn list_header(tab: usize) -> &'static str {
     match tab {
         0 => "  name                              kind          lands    people  stability          ruler",
@@ -378,16 +395,68 @@ pub fn list_header(tab: usize) -> &'static str {
         7 => "  relic                                   kind      made   held by",
         9 => "  figure                        points  realm               lived      chiefly remembered for",
         10 => "  house                               people           ruled  thrones  span",
+        11 => "  realm                             treasury   a year   devt   trade  prosperity",
+        12 => "  road                                            worth  carrying          since",
         _ => "  prophecy                                                          seer                 by     outcome",
     }
 }
 
-pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
+/// How many rows a list page puts in order and renders.
+///
+/// A page is a window on a world's whole history, and history does not stop
+/// growing: by the eightieth century of a large map a hundred thousand
+/// people have lived and twenty-five thousand wars have been fought. Every
+/// one of them was sorted and rendered to a line of text on every frame,
+/// which cost the Wars page nine milliseconds a frame by itself — the
+/// interface got slower the longer a game went on, for no reason a player
+/// could see. Nobody scrolls past the first few hundred of anything; `/`
+/// is what finds the rest.
+const LIST_CAP: usize = 2000;
+
+/// And for the Figures page, which is not a catalogue but a short list of
+/// the people an age is remembered by — and which pays for every row it
+/// shows, because each one carries the deed the person is known for.
+const FIGURES_CAP: usize = 400;
+
+/// Put the best `cap` of `v` in order and return how many there were.
+///
+/// The selection is linear in the length and the sort is over the survivors,
+/// so a page costs what it shows rather than what the world remembers.
+fn keep_best(
+    v: &mut Vec<usize>,
+    cap: usize,
+    mut cmp: impl FnMut(&usize, &usize) -> Ordering,
+) -> usize {
+    let total = v.len();
+    if total > cap {
+        v.select_nth_unstable_by(cap - 1, &mut cmp);
+        v.truncate(cap);
+    }
+    v.sort_by(cmp);
+    total
+}
+
+/// The same, for a page ordered by a key rather than a comparison. The
+/// index goes on the end of every key so that the order is total: an
+/// unstable selection may reorder ties, and a list that shuffles as it is
+/// scrolled is worse than a slow one.
+fn keep_best_by_key<K: Ord>(
+    v: &mut Vec<usize>,
+    cap: usize,
+    mut key: impl FnMut(usize) -> K,
+) -> usize {
+    keep_best(v, cap, |&a, &b| (key(a), a).cmp(&(key(b), b)))
+}
+
+pub fn list_rows(w: &World, tab: usize) -> (Vec<(String, Ref)>, usize) {
     let mut rows = Vec::new();
+    // How many there were before the page was trimmed to [`LIST_CAP`], so
+    // the footer can say that there is more than is shown.
+    let total;
     match tab {
         0 => {
             let mut ps: Vec<usize> = (0..w.polities.len()).collect();
-            ps.sort_by_key(|&p| {
+            total = keep_best_by_key(&mut ps, LIST_CAP, |p| {
                 (
                     w.polities[p].fell.is_some(),
                     std::cmp::Reverse(w.polities[p].cells),
@@ -424,12 +493,13 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         1 => {
             let mut cs: Vec<usize> = (0..w.cities.len()).collect();
             // Living cities first, largest first within each group.
-            cs.sort_by(|&a, &b| {
+            total = keep_best(&mut cs, LIST_CAP, |&a, &b| {
                 let (ca, cb) = (&w.cities[a], &w.cities[b]);
                 ca.destroyed
                     .is_some()
                     .cmp(&cb.destroyed.is_some())
                     .then_with(|| cb.pop.total_cmp(&ca.pop))
+                    .then_with(|| a.cmp(&b))
             });
             for c in cs {
                 let city = &w.cities[c];
@@ -457,7 +527,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         2 => {
             let mut cs: Vec<usize> = (0..w.cultures.len()).collect();
-            cs.sort_by_key(|&c| {
+            total = keep_best_by_key(&mut cs, LIST_CAP, |c| {
                 (
                     w.cultures[c].extinct.is_some(),
                     std::cmp::Reverse(w.cultures[c].cells),
@@ -485,12 +555,13 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         3 => {
             let mut ss: Vec<usize> = (0..w.schools.len()).collect();
             // Living schools first, most influential first within each group.
-            ss.sort_by(|&a, &b| {
+            total = keep_best(&mut ss, LIST_CAP, |&a, &b| {
                 let (sa, sb) = (&w.schools[a], &w.schools[b]);
                 sa.extinct
                     .is_some()
                     .cmp(&sb.extinct.is_some())
                     .then_with(|| sb.total_influence().total_cmp(&sa.total_influence()))
+                    .then_with(|| a.cmp(&b))
             });
             for s in ss {
                 let sc = &w.schools[s];
@@ -513,15 +584,16 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         4 => {
             let mut ps: Vec<usize> = (0..w.persons.len()).collect();
             // The living first, then by renown, then youngest first.
-            ps.sort_by(|&a, &b| {
+            total = keep_best(&mut ps, LIST_CAP, |&a, &b| {
                 let (pa, pb) = (&w.persons[a], &w.persons[b]);
                 pa.died
                     .is_some()
                     .cmp(&pb.died.is_some())
                     .then_with(|| pb.renown.total_cmp(&pa.renown))
                     .then_with(|| pb.born.cmp(&pa.born))
+                    .then_with(|| a.cmp(&b))
             });
-            for p in ps.into_iter().take(400) {
+            for p in ps {
                 let per = &w.persons[p];
                 let realm = per
                     .polity
@@ -544,7 +616,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         5 => {
             let mut ws: Vec<usize> = (0..w.wars.len()).collect();
-            ws.sort_by_key(|&x| {
+            total = keep_best_by_key(&mut ws, LIST_CAP, |x| {
                 (
                     w.wars[x].ended.is_some(),
                     std::cmp::Reverse(w.wars[x].started),
@@ -573,7 +645,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         7 => {
             let mut arts: Vec<usize> = (0..w.artifacts.len()).collect();
-            arts.sort_by_key(|&a| {
+            total = keep_best_by_key(&mut arts, LIST_CAP, |a| {
                 (
                     matches!(w.artifacts[a].holder, crate::sim::Holder::Lost),
                     w.artifacts[a].made,
@@ -593,7 +665,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         }
         8 => {
             let mut prs: Vec<usize> = (0..w.prophecies.len()).collect();
-            prs.sort_by_key(|&i| {
+            total = keep_best_by_key(&mut prs, LIST_CAP, |i| {
                 (
                     w.prophecies[i].outcome.is_some(),
                     std::cmp::Reverse(w.prophecies[i].year),
@@ -625,7 +697,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
             let mut fs: Vec<usize> = (0..w.persons.len())
                 .filter(|&i| w.persons[i].is_acclaimed() || w.persons[i].greatness >= 80.0)
                 .collect();
-            fs.sort_by(|&a, &b| {
+            total = keep_best(&mut fs, FIGURES_CAP, |&a, &b| {
                 let (pa, pb) = (&w.persons[a], &w.persons[b]);
                 pa.died
                     .is_some()
@@ -633,7 +705,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                     .then_with(|| pb.greatness.total_cmp(&pa.greatness))
                     .then_with(|| a.cmp(&b))
             });
-            for i in fs.into_iter().take(400) {
+            for i in fs {
                 let per = &w.persons[i];
                 let realm = per
                     .polity
@@ -662,7 +734,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
         // and the longest-lasting at the top of each group.
         10 => {
             let mut hs: Vec<usize> = (0..w.houses.len()).collect();
-            hs.sort_by(|&a, &b| {
+            total = keep_best(&mut hs, LIST_CAP, |&a, &b| {
                 let (ha, hb) = (&w.houses[a], &w.houses[b]);
                 ha.ended
                     .is_some()
@@ -692,9 +764,86 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
                 rows.push((row, Ref::House(h)));
             }
         }
+        // What each realm is worth, richest first, with what it is gaining
+        // or losing a year beside it: a realm with a full treasury and a
+        // deficit is a different thing from one with the same treasury and
+        // a surplus, and nothing in the interface said so.
+        11 => {
+            let mut ps: Vec<usize> = w.alive_polities.clone();
+            // Treasury first, then what the year will bring. Most great
+            // realms sit at the ceiling of what a treasury can hold, so
+            // without the second key the page was ten realms tied at the
+            // cap in arbitrary order — and a realm with a full treasury and
+            // a deficit is a different thing from one with a surplus.
+            total = keep_best_by_key(&mut ps, LIST_CAP, |p| {
+                (
+                    std::cmp::Reverse((w.polities[p].treasury * 100.0) as i64),
+                    std::cmp::Reverse((explain::income_total(w, p) * 100.0) as i64),
+                )
+            });
+            for p in ps {
+                let pol = &w.polities[p];
+                let prosp = if pol.cities.is_empty() {
+                    0.0
+                } else {
+                    pol.cities
+                        .iter()
+                        .map(|&c| w.cities[c].prosperity)
+                        .sum::<f32>()
+                        / pol.cities.len() as f32
+                };
+                let row = format!(
+                    "{:<34}{:>8.0}  {:>+7.1}  {:>5.2}  {:>6.1}  {:>7.0}",
+                    clip(&pol.name, 33),
+                    pol.treasury,
+                    explain::income_total(w, p),
+                    pol.dev,
+                    w.realm_trade(p),
+                    prosp * 100.0
+                );
+                rows.push((row, Ref::Polity(p)));
+            }
+        }
+        // The roads themselves, busiest first. The Trade layer draws the
+        // network; this is the same network as a list that can be sorted and
+        // searched, which is the only way to find the one road a war has
+        // shut.
+        12 => {
+            let mut rs: Vec<usize> = (0..w.routes.len())
+                .filter(|&i| {
+                    w.cities[w.routes[i].a].destroyed.is_none()
+                        && w.cities[w.routes[i].b].destroyed.is_none()
+                })
+                .collect();
+            total = keep_best_by_key(&mut rs, LIST_CAP, |i| {
+                (
+                    !w.routes[i].open,
+                    std::cmp::Reverse((w.routes[i].value * 100.0) as i64),
+                )
+            });
+            for i in rs {
+                let r = &w.routes[i];
+                let row = format!(
+                    "{:<46}{:>7.1}  {:<16}{:>6}",
+                    clip(
+                        &format!(
+                            "{} — {}{}",
+                            w.cities[r.a].name,
+                            w.cities[r.b].name,
+                            if r.by_sea { " (by sea)" } else { "" }
+                        ),
+                        45
+                    ),
+                    r.value,
+                    if r.open { "open" } else { "shut by war" },
+                    r.since
+                );
+                rows.push((row, Ref::City(r.a)));
+            }
+        }
         _ => {
             let mut fs: Vec<usize> = (0..w.terrain.features.len()).collect();
-            fs.sort_by_key(|&f| {
+            total = keep_best_by_key(&mut fs, LIST_CAP, |f| {
                 (
                     w.terrain.features[f].name.is_none(),
                     std::cmp::Reverse(w.terrain.features[f].cells.len()),
@@ -707,7 +856,7 @@ pub fn list_rows(w: &World, tab: usize) -> Vec<(String, Ref)> {
             }
         }
     }
-    rows
+    (rows, total)
 }
 
 fn clip(s: &str, n: usize) -> String {
@@ -1041,6 +1190,58 @@ fn realm_page(
                 format!(
                     "  everything together pulls stability towards {:.0}%",
                     explain::stability_target(w, p) * 100.0
+                ),
+                DIMC,
+                DIM,
+            ));
+            out.push(line("", FG, 0));
+        }
+        // And where the money comes from. Stability had an explanation from
+        // the beginning and money never did, which left the two economic
+        // entries in the block above — the full treasury, the prosperous
+        // cities — as the only visible economics in the game, both of them
+        // effects with no stated cause.
+        let money = explain::income_shown(w, p, 5);
+        if !money.is_empty() {
+            out.push(line("Money", ACCENT, BOLD));
+            // Every line of it: `income_factors` already trims the
+            // revenues and keeps all the costs, so the figures shown add
+            // up to the total printed beneath them.
+            for f in money.iter() {
+                let (mark, c) = if f.weight > 0.0 {
+                    (if ascii { '+' } else { '▲' }, Rgb(230, 200, 120))
+                } else {
+                    (if ascii { '-' } else { '▼' }, Rgb(200, 140, 120))
+                };
+                for (k, l) in term::wrap(&f.text, w2.saturating_sub(18))
+                    .into_iter()
+                    .enumerate()
+                {
+                    let pre = if k == 0 {
+                        format!("  {} {:>6}  ", mark, format!("{:+.2}", f.weight))
+                    } else {
+                        "            ".to_string()
+                    };
+                    out.push(line(format!("{}{}", pre, l), c, 0));
+                }
+            }
+            let net = explain::income_total(w, p);
+            let years_to_empty = if net < -0.01 {
+                let t = w.polities[p].treasury;
+                if t > 0.0 {
+                    format!(", and empty in {:.0} years at that rate", t / -net)
+                } else {
+                    ", and already in debt".to_string()
+                }
+            } else {
+                String::new()
+            };
+            out.push(line(
+                format!(
+                    "  the treasury {} about {:.2} a year{}",
+                    if net >= 0.0 { "gains" } else { "loses" },
+                    net.abs(),
+                    years_to_empty
                 ),
                 DIMC,
                 DIM,
@@ -1398,7 +1599,11 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
     ));
     out.push(line(
         format!(
-            "    Fortunes  {} ({:.0}% prosperity)   walls {}   sacked {} times",
+            // An index where a hundred is an ordinary town, not a share of
+            // anything: prosperity runs to two and a half, so printing it
+            // with a percent sign produced "194% prosperity", which invites
+            // a reader to wonder 194% of what.
+            "    Fortunes  {} (prosperity {:.0}, ordinary is 100)   walls {}   sacked {}",
             if city.prosperity > 0.8 {
                 "thriving"
             } else if city.prosperity > 0.45 {
@@ -1416,11 +1621,15 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
             } else {
                 "thin"
             },
-            city.times_sacked
+            crate::sim::prose::count(city.times_sacked as i64, "time")
         ),
         FG,
         0,
     ));
+    // The hand of fate reaches towns now, so the page that describes one
+    // should say so: a reader who has never pressed `x` will not guess that
+    // it does anything here.
+    out.push(line("[x] Intervene with the Hand of Fate", DIMC, DIM));
     for wn in &city.wonders {
         out.push(line(format!("    Wonder    {}", wn), ACCENT, 0));
     }
@@ -1690,6 +1899,9 @@ fn person_page(
     }
     for l in term::wrap(&desc, w2) {
         out.push(line(l, FG, 0));
+    }
+    if per.alive() {
+        out.push(line("[x] Intervene with the Hand of Fate", DIMC, DIM));
     }
     for l in term::wrap(&explain::standing(w, pi), w2) {
         out.push(line(l, ACCENT, 0));
@@ -2176,7 +2388,7 @@ pub const HELP: &[&str] = &[
     "             ] [ next / previous realm   } { next / previous city   t go to the top story",
     "             r a recap of the last fifty years (of the selected realm or city, if selected)",
     "             v the event log's level: 1 everything, 2 the notable (the default), 3 the great",
-    "             x the Hand of Fate for that realm",
+    "             x the Hand of Fate: a realm, a town, a person or a region",
     "",
     "Search       /name finds realms, cities, people, peoples, schools, wars, places and relics;",
     "             Enter jumps, n N cycle.  In lists and the chronicle, / filters the rows instead.",
@@ -2188,9 +2400,13 @@ pub const HELP: &[&str] = &[
     "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
     "             :fate 3  :q  :wq  :q!",
+    "             :export chronicle|map|realms|wealth|cities|roads|persons|wars|houses [path]",
+    "             (Markdown for the history, HTML for the map, CSV for a table)",
     "",
     "Browsing     e lists (realms, cities, peoples, schools, persons, wars, places, relics,",
-    "             prophecies, figures, houses)   c the chronicle (f or v cycles importance 0-3,",
+    "             prophecies, figures, houses, wealth, roads)   In a list, / filters by name or",
+    "             by number: lands>200, income<0, prosperity>=150. The footer says what a page",
+    "             will answer to.   c the chronicle (f or v cycles importance 0-3,",
     "             / filters by text)   Figures are those the world called great; Houses are the",
     "             ruling families, each with its whole line of succession.",
     "             Everywhere: j k scroll, Ctrl-d Ctrl-u half a page, Ctrl-f Ctrl-b a page,",
@@ -2221,6 +2437,411 @@ pub const HELP: &[&str] = &[
     "             has a Why block: what pulls its stability up or down, ranked, in words.",
 ];
 
+/// Whether the Hand of Fate has anything to say about a thing.
+///
+/// It used to reach realms and nothing else, which meant the only way to
+/// touch a city, a person or a stretch of country was to find the realm that
+/// happened to hold it and act on the whole of that instead. A city is the
+/// unit most of this world's history actually happens to.
+pub fn fate_reaches(w: &World, r: Ref) -> bool {
+    match r {
+        Ref::Polity(p) => p < w.polities.len() && w.polities[p].alive(),
+        Ref::City(c) => c < w.cities.len() && w.cities[c].destroyed.is_none(),
+        Ref::Person(i) => i < w.persons.len() && w.persons[i].alive(),
+        Ref::Feature(f) => f < w.terrain.features.len(),
+        _ => false,
+    }
+}
+
+/// The menu for whatever is selected, or an empty list if nothing fitting is.
+pub fn fate_menu_for(w: &World, r: Ref) -> Vec<String> {
+    match r {
+        Ref::Polity(p) if fate_reaches(w, r) => fate_menu(w, p),
+        Ref::City(c) if fate_reaches(w, r) => vec![
+            format!("What befalls {}?", w.cities[c].name),
+            String::new(),
+            "1  A boom: the town fills, and the money with it".into(),
+            "2  A fire: half of it burns, and the people scatter".into(),
+            "3  Walls: masons raise them higher than the crown could afford".into(),
+            "4  A wonder: something is built here that outlasts the realm".into(),
+            "5  A sickness: it comes with the ships and empties the streets".into(),
+            "6  A great road: the carrying trade finds this town".into(),
+        ],
+        Ref::Person(i) if fate_reaches(w, r) => vec![
+            format!("What befalls {}?", w.persons[i].full_name()),
+            String::new(),
+            "1  Renown: their name is suddenly on every tongue".into(),
+            "2  Ruin: they are disgraced, and everybody remembers why".into(),
+            "3  Brilliance: wisdom and presence beyond their years".into(),
+            "4  Ambition: they begin to want what is not theirs".into(),
+            "5  A knife: they do not see the year out".into(),
+            "6  An heir: a child is born to them who will be remarkable".into(),
+        ],
+        Ref::Feature(f) if fate_reaches(w, r) => vec![
+            format!("What befalls {}?", w.terrain.features[f].display()),
+            String::new(),
+            "1  Good earth: the land grows kinder for a long age".into(),
+            "2  Exhaustion: the soil gives out and the people drift away".into(),
+            "3  A blight: the country is poisoned and left to the waste".into(),
+            "4  A lode: ore is struck, and everything follows from that".into(),
+            "5  A quickening: the ley runs strong here now".into(),
+            "6  Emptying: whoever lived here leaves, and the ground forgets".into(),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// Work the chosen intervention on whatever is selected.
+pub fn hand_of_fate_on(w: &mut World, r: Ref, choice: u8) -> String {
+    if !fate_reaches(w, r) {
+        return "that is beyond reach now".into();
+    }
+    match r {
+        Ref::Polity(p) => hand_of_fate(w, p, choice),
+        Ref::City(c) => city_fate(w, c, choice),
+        Ref::Person(i) => person_fate(w, i, choice),
+        Ref::Feature(f) => land_fate(w, f, choice),
+        _ => "nothing answers".into(),
+    }
+}
+
+/// What can be done to a single town.
+fn city_fate(w: &mut World, c: usize, choice: u8) -> String {
+    let name = w.cities[c].name.clone();
+    let cell = w.cities[c].cell;
+    let at = Some(cell);
+    let refs = |w: &World| -> Vec<Ref> {
+        let mut v = vec![Ref::City(c)];
+        if let Some(p) = w.cities[c].polity {
+            v.push(Ref::Polity(p));
+        }
+        v
+    };
+    match choice {
+        0 => {
+            w.cities[c].pop *= 1.6;
+            w.cities[c].prosperity = (w.cities[c].prosperity + 0.5).min(2.5);
+            let r = refs(w);
+            let text = format!(
+                "For a generation everybody who could get to {} went there, and \
+                 the town could not build houses fast enough.",
+                name
+            );
+            w.log(2, EventKind::Founding, &r, at, text);
+            format!("{} is booming", name)
+        }
+        1 => {
+            w.cities[c].pop *= 0.5;
+            w.cities[c].prosperity *= 0.6;
+            w.cities[c].walls *= 0.5;
+            let r = refs(w);
+            let text = format!(
+                "The fire began in the warehouses of {} and did not stop until \
+                 there was nothing left in that quarter to burn.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &r, at, text);
+            format!("{} has burned", name)
+        }
+        2 => {
+            w.cities[c].walls = (w.cities[c].walls + 1.2).min(3.0);
+            let r = refs(w);
+            let text = format!(
+                "The new walls of {} were the talk of the age, and its \
+                 neighbours drew their own conclusions.",
+                name
+            );
+            w.log(1, EventKind::Wonder, &r, at, text);
+            format!("{} is walled", name)
+        }
+        3 => {
+            let pick = crate::sim::prose::Pick::rolled(&w.rng);
+            let wonder = crate::sim::prose::wonder_name(&name, &pick);
+            w.cities[c].wonders.push(wonder.clone());
+            w.cities[c].prosperity = (w.cities[c].prosperity + 0.2).min(2.5);
+            if let Some(p) = w.cities[c].polity {
+                w.polities[p].prestige += 25.0;
+            }
+            let r = refs(w);
+            let text = format!(
+                "{} was finished in a single reign, which nobody had thought \
+                 possible, and stood long after the realm that raised it.",
+                wonder
+            );
+            w.log(2, EventKind::Wonder, &r, at, text);
+            format!("{} now stands", wonder)
+        }
+        4 => {
+            w.cells[cell].plague = 6;
+            w.cities[c].pop *= 0.75;
+            let polities = w.cities[c].polity.map(|p| vec![p]).unwrap_or_default();
+            w.plagues.push(crate::sim::Plague {
+                name: "the Harbour Fever".into(),
+                years_left: 4,
+                polities,
+                deaths: 0.0,
+            });
+            let r = refs(w);
+            let text = format!(
+                "It came into {} on a ship nobody thought to turn away.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &r, at, text);
+            format!("sickness is loose in {}", name)
+        }
+        _ => {
+            // Every road this town works, made worth far more. The network
+            // is rebuilt every twentieth year, so this lasts until then and
+            // then settles wherever the town's size now justifies.
+            let mut touched = 0;
+            for route in w.routes.iter_mut() {
+                if route.a == c || route.b == c {
+                    route.value *= 2.5;
+                    route.open = true;
+                    touched += 1;
+                }
+            }
+            crate::sim::trade::reckon(w);
+            w.cities[c].prosperity = (w.cities[c].prosperity + 0.3).min(2.5);
+            let r = refs(w);
+            let text = format!(
+                "The caravans changed their route that year and came through \
+                 {} instead, and went on coming.",
+                name
+            );
+            w.log(2, EventKind::Founding, &r, at, text);
+            format!(
+                "{} carries {}",
+                name,
+                crate::sim::prose::count(touched as i64, "road")
+            )
+        }
+    }
+}
+/// What can be done to one person.
+fn person_fate(w: &mut World, i: usize, choice: u8) -> String {
+    let who = w.persons[i].full_name();
+    let at = w.persons[i].polity.and_then(|p| w.capital_cell(p));
+    let refs = |w: &World| -> Vec<Ref> {
+        let mut v = vec![Ref::Person(i)];
+        if let Some(p) = w.persons[i].polity {
+            v.push(Ref::Polity(p));
+        }
+        v
+    };
+    match choice {
+        0 => {
+            w.persons[i].renown += 6.0;
+            w.persons[i].greatness += 40.0;
+            let r = refs(w);
+            let text = format!(
+                "Whatever {} had done, the story of it reached places {} had \
+                 never been, and grew in the telling.",
+                who, who
+            );
+            w.log(2, EventKind::Person, &r, at, text);
+            format!("{} is renowned", who)
+        }
+        1 => {
+            w.persons[i].renown = (w.persons[i].renown - 6.0).max(0.0);
+            w.persons[i].greatness = (w.persons[i].greatness - 40.0).max(0.0);
+            if let Some(p) = w.persons[i].polity {
+                w.polities[p].stability = (w.polities[p].stability - 0.05).max(0.0);
+            }
+            let r = refs(w);
+            let text = format!(
+                "What {} had done in private was suddenly known, and nobody \
+                 who had praised them would admit to it afterwards.",
+                who
+            );
+            w.log(2, EventKind::Person, &r, at, text);
+            format!("{} is disgraced", who)
+        }
+        2 => {
+            let t = &mut w.persons[i].traits;
+            t.wisdom = (t.wisdom + 0.4).min(1.0);
+            t.charisma = (t.charisma + 0.4).min(1.0);
+            let r = refs(w);
+            let text = format!(
+                "{} spoke, and people who had come to argue found they agreed.",
+                who
+            );
+            w.log(1, EventKind::Person, &r, at, text);
+            format!("{} is brilliant", who)
+        }
+        3 => {
+            let t = &mut w.persons[i].traits;
+            t.ambition = 1.0;
+            t.cruelty = (t.cruelty + 0.2).min(1.0);
+            let r = refs(w);
+            let text = format!(
+                "{} began to speak of what was owed to them, and to count who \
+                 had not paid it.",
+                who
+            );
+            w.log(1, EventKind::Person, &r, at, text);
+            format!("{} is ambitious", who)
+        }
+        4 => {
+            w.persons[i].died = Some(w.year);
+            w.persons[i].death = "was found dead, and no one was ever charged.".into();
+            if let Some(h) = w.persons[i].house {
+                w.close_house_if_spent(h);
+            }
+            let r = refs(w);
+            let text = format!("{} was found dead, and no one was ever charged.", who);
+            w.log(2, EventKind::Death, &r, at, text);
+            format!("{} is dead", who)
+        }
+        _ => {
+            let Some(p) = w.persons[i].polity.filter(|&p| w.polities[p].alive()) else {
+                return format!("{} belongs to no realm that could raise a child", who);
+            };
+            let culture = w.polities[p].culture;
+            let child = w.new_person(culture, crate::sim::Role::Noble, Some(p), w.year, None);
+            // Given the blood of somebody remarkable rather than a roll of
+            // the dice: this is an intervention, and the point of it is that
+            // the child will be worth watching.
+            w.persons[child].parent = Some(i);
+            let t = &mut w.persons[child].traits;
+            t.ambition = (t.ambition + 0.35).min(1.0);
+            t.wisdom = (t.wisdom + 0.3).min(1.0);
+            t.charisma = (t.charisma + 0.3).min(1.0);
+            w.persons[child].vigour = 1.15;
+            if let Some(h) = w.persons[i].house {
+                w.join_house(child, h);
+            }
+            w.persons[i].children.push(child);
+            let born = w.persons[child].full_name();
+            let text = format!(
+                "A child was born to {} that the midwives talked about for \
+                 years afterwards, though none of them could say why.",
+                who
+            );
+            w.log(
+                2,
+                EventKind::Person,
+                &[Ref::Person(child), Ref::Person(i), Ref::Polity(p)],
+                at,
+                text,
+            );
+            format!("{} is born", born)
+        }
+    }
+}
+
+/// What can be done to a stretch of country.
+///
+/// The one kind of intervention that outlives everybody it touches: the
+/// ground keeps what is done to it, and knowledge belongs to the ground, so
+/// emptying a region is how a dark age is started on purpose.
+fn land_fate(w: &mut World, f: usize, choice: u8) -> String {
+    let name = w.terrain.features[f].display();
+    let cells: Vec<usize> = w.terrain.features[f].cells.clone();
+    let at = {
+        let c = w.terrain.features[f].center;
+        Some(w.terrain.idx(c.0, c.1))
+    };
+    let land: Vec<usize> = cells
+        .iter()
+        .copied()
+        .filter(|&i| w.terrain.is_land(i))
+        .collect();
+    if land.is_empty() {
+        return format!("{} is all water", name);
+    }
+    let refs = vec![Ref::Feature(f)];
+    match choice {
+        0 => {
+            for &i in &land {
+                w.terrain.fertility[i] = (w.terrain.fertility[i] + 0.25).min(1.0);
+            }
+            let text = format!(
+                "The rains came right for a lifetime over {}, and then kept \
+                 coming right.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &refs, at, text);
+            format!("{} is fertile", name)
+        }
+        1 => {
+            for &i in &land {
+                w.terrain.fertility[i] *= 0.45;
+            }
+            let text = format!(
+                "The fields of {} gave less every year until the people \
+                 stopped pretending it was the weather.",
+                name
+            );
+            w.log(2, EventKind::Disaster, &refs, at, text);
+            format!("{} is exhausted", name)
+        }
+        2 => {
+            w.terrain.blight(&land);
+            for &i in &land {
+                w.cells[i].pop *= 0.3;
+            }
+            let text = format!(
+                "Whatever was done in {}, nothing has grown there since, and \
+                 the few who go in do not stay.",
+                name
+            );
+            w.log(3, EventKind::Magic, &refs, at, text);
+            format!("{} is blighted", name)
+        }
+        3 => {
+            for &i in &land {
+                w.terrain.minerals[i] = (w.terrain.minerals[i] + 0.4).min(1.0);
+            }
+            // The goods of a cell are a pure reading of its terrain, so
+            // changing the terrain means reading them again.
+            w.goods = crate::sim::trade::goods_of(&w.terrain);
+            let text = format!(
+                "Somebody sank a shaft in {} on a hunch, and a hundred years \
+                 of everybody's iron came out of it.",
+                name
+            );
+            w.log(2, EventKind::Discovery, &refs, at, text);
+            format!("{} has ore", name)
+        }
+        4 => {
+            for &i in &land {
+                w.terrain.mana[i] = (w.terrain.mana[i] + 0.35).min(1.0);
+            }
+            // The goods of a cell are a pure reading of its terrain, so
+            // changing the terrain means reading them again.
+            w.goods = crate::sim::trade::goods_of(&w.terrain);
+            let text = format!(
+                "The old stones of {} began to be warm to the touch, and the \
+                 dogs would not go near them.",
+                name
+            );
+            w.log(2, EventKind::Magic, &refs, at, text);
+            format!("the ley runs strong in {}", name)
+        }
+        _ => {
+            // Knowledge belongs to the ground and ground that empties of
+            // people forgets, so this is the one way to start a dark age on
+            // purpose.
+            for &i in &land {
+                w.cells[i].pop = 0.0;
+                w.known[i] = 0;
+            }
+            for &i in &land {
+                w.refresh_yield(i);
+            }
+            let text = format!(
+                "Within a generation there was nobody left in {} who \
+                 remembered why anyone had ever lived there.",
+                name
+            );
+            w.log(3, EventKind::Disaster, &refs, at, text);
+            format!("{} is empty", name)
+        }
+    }
+}
+
+/// The six things that can be done to a whole realm.
 pub fn fate_menu(w: &World, p: usize) -> Vec<String> {
     let pol = &w.polities[p];
     vec![
@@ -2235,6 +2856,7 @@ pub fn fate_menu(w: &World, p: usize) -> Vec<String> {
     ]
 }
 
+/// Work one of them.
 pub fn hand_of_fate(w: &mut World, p: usize, choice: u8) -> String {
     if !w.polities[p].alive() {
         return "that realm is gone".into();

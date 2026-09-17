@@ -162,8 +162,8 @@ on adding a field.
 # mouse = on
 # ascii = off
 # autosave = 100         # years between autosaves when a save file is set (0 = off)
-# width = 160            # 40-600
-# height = 64            # 20-300
+# width = 288            # 40-600
+# height = 144           # 20-300
 # log = 2                # least importance shown in the event log: 1 everything,
 #                        # 2 the notable (the default), 3 only the great
 # follow = off           # jump the cursor to major events when enabled
@@ -187,6 +187,7 @@ on adding a field.
 #   tune.trade_toll_factor = 0.05         # what the crown takes from trade passing through
 #   tune.hegemony_weight = 1.35           # what ruling too much of the world costs in stability
 #   tune.rivalry_chance = 0.12            # how often two notables become rivals
+#   tune.schools_per_realm = 0.5          # how many living traditions the world carries
 
 # map w k                # examples: map <S-Up> K, map <C-p> :, map ; :
 ```
@@ -416,8 +417,8 @@ as a list of turning points rather than a diary.
 | Option | Purpose |
 | --- | --- |
 | `-s, --seed N` | Choose the world seed; defaults to the current time. |
-| `-w, --width W` | Map width: 40–600 cells; default 160. |
-| `--height H` | Map height: 20–300 cells; default 64. |
+| `-w, --width W` | Map width: 40–600 cells; default 288. |
+| `--height H` | Map height: 20–300 cells; default 144. |
 | `-d, --detail LEVEL` | Chronicle detail: `low`, `medium` (default), or `high`. |
 | `-l, --load FILE` | Continue a saved world. |
 | `-o, --save FILE` | Save every 100 years and on quit; in headless mode, save at the end. |

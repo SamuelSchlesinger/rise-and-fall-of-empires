@@ -8,6 +8,7 @@ pub mod climate;
 pub mod dynasty;
 pub mod events;
 pub mod explain;
+pub mod flows;
 pub mod genesis;
 pub mod magic;
 pub mod people;
@@ -990,7 +991,100 @@ const MEANINGFUL_WORLD: usize = 300;
 const SEA_REACH_BASE: f32 = 3.0;
 
 /// The phases of a tick, in the order `World::tick` runs them.
-pub const PHASES: [&str; 26] = [
+/// How deep into debt a crown may go. Past this its army melts away, which
+/// is the only hard limit a treasury has.
+///
+/// There is deliberately no ceiling to match it. There was — six hundred,
+/// written out in four places, three of which enforced it — and it had to
+/// go, because a cap destroys every fact about wealth above it. The moment
+/// there was a page ranking realms by what they held, eight of the first ten
+/// were tied at exactly the cap, and every one of them drew the identical
+/// `the treasury is full` on its stability, because that read as a ratio
+/// against the ceiling.
+///
+/// What a cap was standing in for is a drain. A treasury's only cost was
+/// upkeep, which scales with the army and the land and not at all with how
+/// full the coffers are, so gold was an accumulator with no matching
+/// outflow — the same shape as the schools that compounded and the martyrs
+/// that piled up, and the reason the number had to be pinned rather than
+/// balanced. Three drains replace it, all proportional to wealth:
+/// [`court_spending`], [`corruption_share`] and the gold term in
+/// `politics::economy`'s army target.
+pub const TREASURY_FLOOR: f32 = -60.0;
+
+/// What a crown's court spends this year out of a treasury of `treasury`.
+///
+/// Everything above the war chest is fair game, at a fixed share. Shared
+/// between the simulation and `explain` so the two cannot disagree about
+/// where the money went.
+pub fn court_spending(tn: &tuning::Tuning, treasury: f32) -> f32 {
+    (treasury - tn.court_reserve).max(0.0) * tn.court_spend_share
+}
+
+/// What share of the tax roll never reaches the crown.
+///
+/// A rotten court takes its cut, and so does distance: a province beyond
+/// the reach the crown can comfortably govern remits less of what it
+/// collects. Capped well below everything, because a realm that collected
+/// nothing at all would simply dissolve and the interesting case is the one
+/// that limps.
+pub fn corruption_share(tn: &tuning::Tuning, decadence: f32, sprawl: f32) -> f32 {
+    let rot = decadence.clamp(0.0, 1.0) * tn.corruption_decadence_weight;
+    let far = (sprawl - 1.0).clamp(0.0, 2.0) * tn.corruption_sprawl_weight;
+    (rot + far).clamp(0.0, 0.75)
+}
+
+/// How far a crown's wealth carries it towards whatever the wealth can buy,
+/// in `[0, 1)`.
+///
+/// Saturating on the war chest, so that a hoard cannot go on buying without
+/// limit. The army term wanted a plain ratio at first, and a realm sitting
+/// on twenty years' income then fielded eight times the soldiers its people
+/// could support — which is not a rich realm, it is a different game.
+pub fn wealth_reach(tn: &tuning::Tuning, treasury: f32) -> f32 {
+    let t = treasury.max(0.0);
+    t / (t + tn.court_reserve.max(1.0))
+}
+
+/// Bend a sum towards a ceiling instead of clipping it against one.
+///
+/// Below `knee` the value is returned unchanged, so nothing about the
+/// ordinary case moves. Above it the remaining room is approached
+/// asymptotically, so the sum can go on growing and the result can go on
+/// answering to it. It never exceeds `max`, and reaches it only where the
+/// exponential underflows — around a sum some hundreds of times the room
+/// available, which no quantity here comes near.
+///
+/// This is the same shape as [`treasury_confidence`] and the trade term in
+/// `politics::economy`, and it is the answer to a mistake this simulation
+/// made in four separate places: a quantity built by adding up every
+/// advantage a thing has, and then clamped. The clamp is invisible until
+/// enough things reach it, and then it silently destroys the difference
+/// between them — a row of realms tied at exactly six hundred, half the
+/// cities in the world at exactly two and a half.
+pub fn soft_ceiling(v: f32, knee: f32, max: f32) -> f32 {
+    if v <= knee || max <= knee {
+        return v;
+    }
+    let room = max - knee;
+    knee + room * (1.0 - (-(v - knee) / room).exp())
+}
+
+/// How much confidence a crown's money buys, in `[-0.2, 1]`.
+///
+/// Saturating rather than a ratio against a ceiling, so that there is a
+/// gradient all the way up and no cliff at the top: the first hundred in the
+/// treasury is worth far more than the thousandth.
+pub fn treasury_confidence(tn: &tuning::Tuning, treasury: f32) -> f32 {
+    if treasury <= 0.0 {
+        // Debt is worth something on its own account, and bounded, because
+        // a realm cannot be infinitely alarmed.
+        return (treasury / tn.treasury_stability_half).max(-0.2);
+    }
+    treasury / (treasury + tn.treasury_stability_half.max(1.0))
+}
+
+pub const PHASES: [&str; 28] = [
     "grow_and_migrate",
     "form_polities",
     "expand",
@@ -1017,6 +1111,8 @@ pub const PHASES: [&str; 26] = [
     "legends",
     "recompute",
     "eras",
+    "flows",
+    "grow_cities",
 ];
 
 /// Per-phase timings, accumulated only while `on` is set. The flag is
@@ -1107,6 +1203,27 @@ pub struct World {
     /// The standing trades between cities, worked out afresh every few
     /// decades by `trade::refresh`.
     pub routes: Vec<trade::Route>,
+    /// What trade is worth to each city this year, and to each pair of
+    /// realms. Totalled once a year by `trade::reckon` rather than counted
+    /// again on every question, because `economy` asks per realm and
+    /// `diplomacy` asks per pair of neighbours.
+    pub city_takings: Vec<f32>,
+    pub pair_trade: BTreeMap<(usize, usize), f32>,
+    /// What the world has been doing lately, as distinct from what it is:
+    /// see [`flows`].
+    pub flows: flows::Flows,
+    /// How many wars already carry each name, so the next one of its kind
+    /// can be called the Second or the Latest.
+    ///
+    /// Counting this by walking `wars` was fine for a few hundred wars and
+    /// ruinous for sixteen thousand: a scan of every war ever fought, with a
+    /// string built per war to compare against, on every declaration. That
+    /// grows with the length of a world's history, which is exactly the
+    /// shape of slowdown a player notices — the same map that ran at two
+    /// milliseconds a year in its first century took twenty-three in its
+    /// fiftieth. Kept as a tally instead, and rebuilt from the war names on
+    /// load: see [`prose::war_name_stem`].
+    pub war_names: BTreeMap<String, usize>,
     /// What each cell's knowledge is worth to its harvests, cached.
     ///
     /// `cell_capacity` is called for every cell every year, and working the
@@ -1135,6 +1252,14 @@ pub struct World {
     /// Appended to by `new_person` and pruned once a tick by
     /// `World::forget_the_dead`.
     pub alive_persons: Vec<usize>,
+    /// The wars still being fought, by id.
+    ///
+    /// The same bargain again. Every year `resolve_wars` wants the wars
+    /// currently alive, and finding them by filtering the war vector costs
+    /// the whole of a world's military history — twenty-seven thousand
+    /// finished wars by the fiftieth century — to turn up the two hundred
+    /// that are actually being fought.
+    pub alive_wars: Vec<usize>,
     /// Cells owned by each polity, ascending. Rebuilt by `recompute` and kept
     /// exact in between by `claim` and `fall`, so that no subsystem has to
     /// scan the whole map to find one realm's land.
@@ -1164,11 +1289,16 @@ impl World {
             climate: climate::Climate::default(),
             goods: Vec::new(),
             routes: Vec::new(),
+            city_takings: Vec::new(),
+            pair_trade: BTreeMap::new(),
+            flows: flows::Flows::default(),
+            war_names: BTreeMap::new(),
             cell_yield: Vec::new(),
             techs: Vec::new(),
             tech_seen: Vec::new(),
             tech_first_year: Vec::new(),
             alive_persons: Vec::new(),
+            alive_wars: Vec::new(),
             alive_polities: Vec::new(),
             schools: Vec::new(),
             wars: Vec::new(),
@@ -1248,11 +1378,16 @@ impl World {
             climate: climate::Climate::default(),
             goods: Vec::new(),
             routes: Vec::new(),
+            city_takings: Vec::new(),
+            pair_trade: BTreeMap::new(),
+            flows: flows::Flows::default(),
+            war_names: BTreeMap::new(),
             cell_yield: Vec::new(),
             techs: Vec::new(),
             tech_seen: Vec::new(),
             tech_first_year: Vec::new(),
             alive_persons: Vec::new(),
+            alive_wars: Vec::new(),
             alive_polities: Vec::new(),
             schools: Vec::new(),
             wars: Vec::new(),
@@ -1381,6 +1516,12 @@ impl World {
     /// Costs the number of living rather than the number who have ever
     /// lived, and keeps the list sorted, which several phases rely on for
     /// a stable visit order.
+    ///
+    /// Called from `recompute` and nowhere else, which is deliberate: it is
+    /// the last phase of the tick, so for the whole of a year the list is
+    /// the living *plus* everyone who has died since the year began. Phases
+    /// that want only the living say so — they all guard on `alive()` — and
+    /// the one that wants the newly dead can have them.
     pub fn forget_the_dead(&mut self) {
         let persons = &self.persons;
         self.alive_persons.retain(|&i| persons[i].alive());
@@ -1495,8 +1636,13 @@ impl World {
             return;
         }
         self.persons[person].house = Some(house);
-        if !self.houses[house].members.contains(&person) {
-            self.houses[house].members.push(person);
+        // Kept in person order, which is also birth order, so that the test
+        // for a member already listed is a search rather than a walk. A
+        // house that stands for two thousand years has tens of thousands of
+        // names on it and every new one was compared against all of them.
+        let members = &mut self.houses[house].members;
+        if let Err(at) = members.binary_search(&person) {
+            members.insert(at, person);
         }
         // Somebody joining is proof the line is not extinct after all,
         // which happens when a cadet branch outlives the senior one.
@@ -1561,9 +1707,14 @@ impl World {
         if holds_throne {
             return;
         }
+        // Newest first: this is called on every death, and the living
+        // members of a house are the ones most recently born into it, so the
+        // search ends in the first handful instead of walking a millennium
+        // of ancestors to find them.
         let living = self.houses[house]
             .members
             .iter()
+            .rev()
             .any(|&m| self.persons[m].alive());
         if !living {
             self.houses[house].ended = Some(self.year);
@@ -1818,6 +1969,7 @@ impl World {
     pub fn recompute(&mut self) {
         self.forget_the_fallen();
         self.forget_the_dead();
+        self.forget_the_peace();
         // Knowledge is parallel to the cells; a world assembled from an
         // older file may not have brought one for every cell.
         if self.known.len() != self.cells.len() {
@@ -1908,9 +2060,7 @@ impl World {
         // somebody's reach can actually make it, and it counts for little —
         // a sea border is one cell of contact, so tension over water rises
         // slowly, the way a quarrel with a realm you rarely meet should.
-        let reaches: Vec<u16> = (0..self.polities.len())
-            .map(|p| self.sea_reach(p))
-            .collect();
+        let reaches = war::sea_reaches(self);
         for c in &self.terrain.crossings {
             let (a, b) = (c.from as usize, c.to as usize);
             let (Some(p), Some(q)) = (self.cells[a].owner, self.cells[b].owner) else {
@@ -1927,7 +2077,11 @@ impl World {
             borders.push((p.min(q), p.max(q)));
         }
         self.polity_known = known_by;
-        for p in 0..self.polities.len() {
+        // Only the living. `tech_admin_bonus` walks the world's whole tree
+        // of innovations, so doing it for every realm that has *ever*
+        // existed costs the age of the world every year — which is the
+        // regression this file warns about, committed here.
+        for p in self.alive_polities.clone() {
             self.polities[p].tech_admin = self.tech_admin_bonus(p);
         }
         borders.sort_unstable();
@@ -1956,9 +2110,11 @@ impl World {
         // Mean distance of a realm's land from its seat. One pass over the
         // owner index, which is already built, so this costs the map once
         // rather than the map times the number of realms.
-        let mut sprawl_sum: Vec<f64> = Vec::with_capacity(self.polities.len());
-        for p in 0..self.polities.len() {
-            sprawl_sum.push(match self.capital_cell(p) {
+        // Only the living, for the same reason: a fallen realm's sprawl is
+        // never read again, and working it out walks its old territory.
+        let mut sprawl_sum: Vec<f64> = vec![0.0; self.polities.len()];
+        for p in self.alive_polities.clone() {
+            sprawl_sum[p] = match self.capital_cell(p) {
                 Some(seat) => {
                     // Land across water counts for less the better the realm
                     // sails. For most of history the sea was the fast road:
@@ -1988,7 +2144,7 @@ impl World {
                         .sum()
                 }
                 None => 0.0,
-            });
+            };
         }
         let reach_base = self.tuning.admin_reach_base;
         let reach_dev = self.tuning.admin_reach_dev_weight;
@@ -2031,7 +2187,7 @@ impl World {
             self.stats.peak_pop = total_pop;
         }
         self.stats.polities_alive = self.polities.iter().filter(|p| p.alive()).count();
-        self.stats.wars_active = self.wars.iter().filter(|w| w.alive()).count();
+        self.stats.wars_active = self.alive_wars.len();
         self.stats.cities_alive = self.cities.iter().filter(|c| c.destroyed.is_none()).count();
         self.stats.cultures_alive = self.cultures.iter().filter(|c| c.extinct.is_none()).count();
         self.stats.schools_alive = self.schools.iter().filter(|s| s.alive()).count();
@@ -2065,6 +2221,9 @@ impl World {
         phase!(2, politics::expand(self));
         phase!(3, politics::found_cities(self));
         phase!(4, politics::economy(self));
+        // And the towns grow after the crown has assessed them: see
+        // `people::grow_cities`.
+        phase!(27, people::grow_cities(self));
         phase!(5, war::diplomacy(self));
         phase!(6, war::alliances(self));
         phase!(7, war::tribute(self));
@@ -2078,6 +2237,14 @@ impl World {
         phase!(12, magic::tick(self));
         phase!(13, people::culture_drift(self));
         phase!(14, climate::tick(self));
+        // Trade stays *after* the economy that taxes it, which looks like
+        // the wrong way round and is not. A toll roll is assessed in
+        // arrears: the crown levies this year on last year's traffic. The
+        // alternative was tried, and it costs more than it buys — every
+        // other input to the income arithmetic is a year's opening value,
+        // so counting the roads first is the one thing that stops
+        // `explain::income_factors` from being checkable against the
+        // treasury it describes.
         phase!(15, trade::tick(self));
         phase!(16, tech::tick(self));
         phase!(17, events::disasters(self));
@@ -2089,6 +2256,9 @@ impl World {
         phase!(23, stories::tick_legends(self));
         phase!(24, self.recompute());
         phase!(25, events::eras(self));
+        // Last, so that what the flow layers draw includes the year just
+        // finished rather than lagging it by one.
+        phase!(26, flows::tick(self));
         self.chronicle.compact(self.tuning.chronicle_cap);
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);
@@ -2121,6 +2291,9 @@ impl World {
             self.unown_cell(cell, old);
         }
         self.cells[cell].owner = Some(p);
+        // Every change of hands goes through here, which makes it the one
+        // place the frontier layer has to be told about.
+        self.note_changed(cell);
         if self.owner_cells.len() <= p {
             self.owner_cells.resize_with(p + 1, Vec::new);
         }
@@ -2180,6 +2353,12 @@ impl World {
     pub fn forget_the_fallen(&mut self) {
         let polities = &self.polities;
         self.alive_polities.retain(|&p| polities[p].alive());
+    }
+
+    /// Drop the settled from [`World::alive_wars`].
+    pub fn forget_the_peace(&mut self) {
+        let wars = &self.wars;
+        self.alive_wars.retain(|&i| wars[i].alive());
     }
 
     /// The cell the realm's capital sits on, if it has one standing.

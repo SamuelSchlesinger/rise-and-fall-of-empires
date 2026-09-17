@@ -10,6 +10,255 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [Unreleased]
+
+Understanding a world, and reaching into it.
+
+### Added
+
+- **Eight new map layers, in two groups.** Four say how people live on the
+  ground, from data the simulation already kept and never drew: **goods**
+  (what each cell yields — the only way to learn a stretch of country was
+  salt land was to open every city on it one at a time), **trade** (what the
+  roads carry, drawn as a network, bright where busy and dark where a war
+  has shut them), **harvest** (fertility, this century's weather and what is
+  known, multiplied — the number that decides where anybody can live) and
+  **knowledge** (the local technology multiplier, which is where a dark age
+  finally looks like one).
+
+  Four more say what is *moving*: **settling** (where people are arriving
+  and leaving), **fighting** (where the war actually is, rather than who is
+  nominally at war), **frontier** (where the map is being redrawn) and
+  **drift** (where the weather has turned since living memory). Every layer
+  of the map used to be a photograph — true of one year and silent about the
+  year before — so a steppe emptying out and a steppe that had always been
+  empty looked the same.
+
+  Fourteen layers is too many to cycle one at a time, so Tab steps between
+  families (power, peoples, land, living, motion) and `\` steps the maps
+  within one.
+
+- **A world remembers its own motion.** Four signed fields, one value per
+  cell, each a decaying running total of something that happened rather than
+  something that is. A window over the last N years would have meant N
+  snapshots of a forty-thousand-cell map to carry and to save; a running
+  total with a half-life carries one number per cell, and needs no place in
+  a save file — these fields are not derived, but they heal, so a loaded
+  world has them back within a lifetime of play.
+
+- **A Money block on every realm's page.** Where the money comes from and
+  where it goes, with the figures adding up to the line printed under them
+  and, for a realm running down, how many years of treasury it has left.
+  Stability has had an explanation since the beginning; money never did,
+  which left the two economic entries in that block as the only visible
+  economics in the game, both of them effects with no stated cause.
+
+- **A list can be asked a question.** The filter matched the text of a
+  rendered row; a term is now a word to look for *or* a comparison against a
+  named quantity — `lands>200`, `income<0`, `prosperity>=150`. Each page
+  advertises what may be asked of it.
+
+- **Two new list pages.** **Wealth** ranks realms by what they hold with
+  what the year will bring beside it, because a full treasury with a deficit
+  is a different thing from the same treasury with a surplus. **Roads** is
+  the trade network as a list that can be sorted and filtered, which is the
+  only way to find the one road a war has shut.
+
+- **The Hand of Fate reaches more than realms.** Twenty-four interventions
+  across four kinds of thing: a realm, a town, a person, or a region. A town
+  can boom, burn, be walled, raise a wonder, take a sickness off a ship or
+  find the carrying trade. A person can be made renowned or disgraced,
+  brilliant or ambitious, can be killed, or can be given a child who will be
+  remarkable. A region can be made fertile or exhausted, blighted, struck
+  with ore, quickened with ley — or emptied, which is the only way to start
+  a dark age on purpose, because knowledge belongs to the ground and ground
+  that empties of people forgets.
+
+- **`:export`** writes a world out for somebody who does not have the game:
+  the chronicle as Markdown grouped by century, the map as HTML, or any list
+  page as CSV with a column for every quantity its filter advertises.
+
+### Changed
+
+- **A treasury has no ceiling, and three drains instead.** *World-changing.*
+  Gold was pinned at six hundred, and the ceiling destroyed every fact about
+  wealth above it: eight of the ten richest realms sat at exactly the cap,
+  each drawing the identical bonus to its stability. What a cap was standing
+  in for is a drain — a treasury's only cost was upkeep, which scales with
+  the army and the land and not at all with how full the coffers are. Now a
+  **court spends what it has**, buying prestige and *decadence*; **corruption
+  skims the tax roll**, from a rotten court and from the distance taxes must
+  travel; and **gold raises soldiers**, who then cost upkeep for as long as
+  they stand. Confidence in a full treasury saturates rather than dividing
+  by a ceiling, so there is a gradient all the way up.
+
+  The effect is that the richest realms are now the ones about to have
+  trouble, which is the story this game has always been about and could not
+  previously tell.
+
+- **Trade grows with the world.** *World-changing.* A route's worth came
+  from the goods on the ground and the distance between two cities, both
+  fixed for ever, while city income compounds — so trade's share of what
+  realms earned fell from a quarter in the second century to a fortieth by
+  the twenty-eighth, purely by standing still. Added the mass half of a
+  gravity model, whose distance term was already there. Trade now holds near
+  a fifth of realm income, flat across the ages.
+
+- **A world can learn to carry goods.** *World-changing.* Twelve kinds of
+  effect a generated tree could hand out, and not one touched a road: a
+  realm could invent writing, coinage and the ocean-going ship and its
+  caravans carried what they carried in year one. There is a thirteenth now,
+  and five of the ten fields can produce it.
+
+- **A world carries only so many traditions.** *World-changing.* See below.
+
+- **Prosperity is bent towards its ceiling rather than clipped against it.**
+  *World-changing.* Everything that makes a city rich was added up and the
+  sum then clamped, so by the twenty-first century the *median* city in the
+  world sat at exactly the maximum: more than half of them had their income
+  decided by population alone, and prosperity had stopped telling cities
+  apart. It also made the saturating trade term pointless for the cities it
+  mattered most to, since their target was already over the cap. The
+  pile-up at the top falls from 56% of cities to 7%.
+
+  That is the fourth place this simulation had made the same mistake — sum
+  every advantage a thing has, then clamp the sum — after the treasury, the
+  confidence a treasury buys, and the prosperity a city draws from its
+  traffic. There is one shape for it now, `sim::soft_ceiling`, and a test
+  that holds prosperity to it.
+
+- The prosperity a city draws from its traffic saturates rather than
+  stopping at a hard ceiling, so the difference between a good position on
+  the roads and a commanding one no longer disappears.
+
+- A city is taxed on the year's opening prosperity and its towns grow after
+  the assessment rather than before it. *World-changing*, and what makes the
+  Money block checkable against the treasury it describes.
+
+### Fixed
+
+- **Schools compounded without limit**, and a teaching with nowhere to go
+  lived for ever. Every school rolled a flat yearly chance to schism, so the
+  count grew by a fixed fraction per century — seventeen hundred living
+  schools against four hundred realms by the thirty-fourth century — and the
+  ordinary way a school ends needs a larger cousin holding ground where it
+  still stands, which one that had retreated somewhere no cousin reached met
+  never. Since every school rolls against every realm it touches, and each
+  persecution makes a martyr — a person created already dead and appended to
+  the person list for ever — the person list reached three and a half
+  million while barely a thousand people were alive, and a large map went
+  from two milliseconds a year to unbounded. Schism now answers to how
+  crowded the ground is, and a tradition that has been fading for
+  generations with nothing to be folded into is forgotten.
+
+- **The stability breakdown had drifted from the simulation.** Its treasury
+  term was a second copy of the old ratio, and went on dividing by a ceiling
+  that no longer existed — so a realm holding three thousand was told its
+  full treasury was worth a hundred and four points of stability out of a
+  hundred, printed at the top of the page as the reason for everything.
+
+- **A road forgot that a war had closed it.** Every twentieth year the
+  network was rebuilt with every road marked open as of that year, which
+  also reset the clock that stops the chronicle reporting the same two
+  cities every three years — so a rebuild silenced those reports for a
+  decade.
+
+- Sacking a city was the one way into a treasury that did not enforce the
+  ceiling the other three did.
+
+- Prosperity is no longer printed as a percentage. It runs to two and a
+  half and is not a share of anything, so the city page read "194%
+  prosperity", which invites a reader to wonder 194% of what. It is an index
+  now, with "ordinary is 100" said beside it. And a city sacked once is
+  sacked "once" rather than "1 times".
+
+- A sentence may begin with a figure. "26% of the world's settled land now
+  lay under the Lafulannic Kingdom" is good English and the prose check
+  rejected it.
+
+## [0.3.1] - 2026-09-17
+
+A world that ran for five thousand years slowed to a crawl, and the default
+map was smaller than it needed to be. Both are fixed, and the second is only
+possible because of the first.
+
+### Changed
+
+- **The default map is now 288x144 rather than 160x64** — four times the
+  world. Two cells wide for every one tall, which is what draws square: at
+  zoom 1 a world cell is one terminal character, and a character is about
+  twice as tall as it is wide. Steady cost is about 2.5 ms a year, so the
+  fastest speed still keeps up with room to spare. *World-changing*: a seed
+  gives a different world than it did at the old size.
+
+- **The chronicle's cap is now real.** Events of importance 2 used to be
+  undroppable, which meant that on a long game the cap was a fiction — a
+  large map at the eightieth century held four hundred thousand events
+  against a cap of sixty thousand, because by then almost nothing left could
+  be dropped. Importance 2 is trimmed oldest-first when it must be; only
+  importance 3, the naming of an age and the rise and fall of a hegemony, is
+  kept whatever happens. A compaction that cannot reach its target now waits
+  proportionally longer before trying again, so a futile scan costs a
+  constant amount of work per event rather than a growing one.
+
+- **A world carries only so many traditions at once.** Every school rolled
+  the same yearly chance to schism whatever the state of the world, so the
+  count grew by a fixed fraction per century for ever: seventeen hundred
+  living schools against four hundred realms by the thirty-fourth century.
+  Schism now answers to how crowded the ground already is, through the new
+  `schools_per_realm` dial. *World-changing.*
+
+### Fixed
+
+- **The simulation no longer gets slower the longer it runs.** A large map
+  went from two milliseconds a year in its first century to twenty-three in
+  its fiftieth and grew without bound after that. It is now flat from about
+  year fifteen hundred to year ten thousand, the length of the longest game
+  anyone is likely to play. The causes were all the same shape — work
+  proportional to the length of a world's history rather than to what is
+  alive in it:
+
+  - Naming a war counted the wars that already carried the name by walking
+    every war ever fought, building a string per war to compare against.
+    Sixteen thousand of them by year three thousand, on every declaration.
+    Kept as a tally instead.
+  - The phases that age and kill notables, that remember the dead as
+    legends, that resolve wars, that work out every realm's reach over water
+    and that sweep the magical schools all walked the whole of a vector to
+    find the few thousand entries that were alive. They read the living
+    indexes now, and wars have an index of their own.
+  - **A teaching with nowhere to go lived for ever.** The ordinary way a
+    school ends is absorption into a larger school of its own kind holding
+    ground where it still stands. One that had retreated somewhere no cousin
+    reached met that condition never, and never fell below the extinction
+    floor either, so it survived holding a tenth of one realm and went on
+    rolling against every realm it touched. Six hundred of those had
+    accumulated by the hundredth century, and since each one could persecute
+    and make martyrs — people created already dead, appended to the person
+    list for ever — the person list reached three and a half million while
+    barely a thousand people were alive. A school that has been fading for
+    generations with nothing to be folded into is now forgotten.
+  - Joining a house compared the newcomer against every name the house had
+    ever carried, and closing a spent house walked the same list on every
+    death. Both are searches now.
+
+- **The interface no longer gets slower the longer it runs.** The
+  storyteller that fills the sidebar walked every person who had ever lived
+  and every war ever fought, sixty times a second. The list pages sorted the
+  whole of history and rendered all of it to text on every frame, which cost
+  the Wars page nine milliseconds a frame by the eightieth century. Both
+  read the living indexes or a bounded best-of now, and a page that is a
+  window on more than it shows says so in its footer.
+
+- **The map cursor is visible again.** It was drawn with reverse video
+  alone, which exchanges a cell's own two colours — and on a shaded map
+  those are often nearly the same. Deep water is drawn in (5, 17, 41) on
+  (4, 13, 31), eighteen apart out of seven hundred and sixty-five, and
+  better than a quarter of the map is within a fifth of that. Swapping them
+  changed nothing anyone could see, so the cursor vanished over open sea and
+  over any flat stretch of country. It is now forced to a contrasting pair
+  rather than an exchanged one.
+
 ## [0.3.0] - 2026-09-17
 
 History acquires a direction. Until now everything in the world cycled:
@@ -572,6 +821,9 @@ The first release. Everything below is the work that led to it.
 - Person traits and a school's following line up in columns; the headless
   summary says "1 school", not "1 schools".
 
+[0.3.1]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.3.1
+[0.3.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.3.0
+[0.2.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.2.0
 [0.1.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.0
 
 [0.1.2]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.1.2

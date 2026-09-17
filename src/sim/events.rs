@@ -451,8 +451,11 @@ pub fn notables(w: &mut World) {
         }
     }
     // Notables age and die; generals may usurp.
-    let np = w.persons.len();
-    for i in 0..np {
+    //
+    // The living, not everyone who has ever lived: on a large map that
+    // vector reaches half a million by the eightieth century and all but a
+    // few thousand of them are dust.
+    for i in w.alive_persons.clone() {
         let per = &w.persons[i];
         if !per.alive() || per.role == Role::Ruler {
             continue;

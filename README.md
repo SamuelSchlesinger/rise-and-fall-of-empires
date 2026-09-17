@@ -84,8 +84,8 @@ The [player guide](docs/GUIDE.md#playing) covers every key and command.
 | Option | Purpose |
 | --- | --- |
 | `-s, --seed N` | Choose a world seed. |
-| `-w, --width W` | Map width: 40–600; default 160. |
-| `--height H` | Map height: 20–300; default 64. |
+| `-w, --width W` | Map width: 40–600; default 288. |
+| `--height H` | Map height: 20–300; default 144. |
 | `-d, --detail LEVEL` | Chronicle detail: `low`, `medium` (default), or `high`. |
 | `-o, --save FILE` | Enable saving and autosaving. |
 | `-l, --load FILE` | Continue a saved world. |

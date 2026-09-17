@@ -70,8 +70,8 @@ const USAGE: &str = "\
 empires — rise and fall of empires
 
   -s, --seed N          world seed (default: the current time)
-  -w, --width W         map width, 40-600 (default 160)
-      --height H        map height, 20-300 (default 64)
+  -w, --width W         map width, 40-600 (default 288)
+      --height H        map height, 20-300 (default 144)
   -d, --detail L        how much of the history gets written down:
                         low | medium | high (default medium). It is a
                         verbosity setting only — all three produce exactly
@@ -110,8 +110,11 @@ fn parse_args(cfg: &config::Config) -> Args {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(1),
-        width: cfg.width.unwrap_or(160),
-        height: cfg.height.unwrap_or(64),
+        // Twice as wide as tall, which is what draws square: at zoom 1
+        // a world cell is one terminal character, and a character is about
+        // twice as tall as it is wide.
+        width: cfg.width.unwrap_or(288),
+        height: cfg.height.unwrap_or(144),
         detail: cfg.detail.unwrap_or(Detail::Medium),
         headless: None,
         stats: false,

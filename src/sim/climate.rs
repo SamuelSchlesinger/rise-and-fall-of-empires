@@ -49,6 +49,14 @@ pub struct Climate {
     pub mean: f32,
     /// What it was last time, so a turn can be noticed.
     pub was: f32,
+    /// The whole field as it stood a lifetime ago, per cell.
+    ///
+    /// Kept so that "how far has this place moved since my grandfather
+    /// farmed it" is a subtraction rather than a hundred noise samples, and
+    /// rebuilt with the rest because it is the same pure function of the
+    /// world's seed and a year. It is what the drift layer draws and what
+    /// [`notice_a_turn`] compares against.
+    pub was_long_ago: Vec<f32>,
 }
 
 impl Default for Climate {
@@ -57,6 +65,7 @@ impl Default for Climate {
             at: Vec::new(),
             mean: 0.0,
             was: 0.0,
+            was_long_ago: Vec::new(),
         }
     }
 }
@@ -118,9 +127,18 @@ pub fn rebuild(w: &mut World) {
     } else {
         (Vec::new(), mean)
     };
+    // And the field a lifetime back, which is what anybody actually
+    // notices. Three passes of noise every eight years; the alternative was
+    // for every reader of the drift layer to pay for one.
+    let long_ago = if epoch >= MEMORY {
+        compute(w, epoch - MEMORY).0
+    } else {
+        at.clone()
+    };
     w.climate.at = at;
     w.climate.mean = mean;
     w.climate.was = was;
+    w.climate.was_long_ago = long_ago;
 }
 
 /// Work the field out again, and say so if the age has turned.
@@ -153,7 +171,8 @@ fn notice_a_turn(w: &mut World) {
     if epoch < MEMORY || epoch % MEMORY != 0 {
         return;
     }
-    let (then, _) = compute(w, epoch - MEMORY);
+    // The field a lifetime ago is already to hand: `rebuild` keeps it.
+    let then = w.climate.was_long_ago.clone();
     // Which inhabited, named region has moved furthest in a lifetime.
     let mut worst: Option<(usize, f32, f32)> = None;
     for (fi, f) in w.terrain.features.iter().enumerate() {

@@ -406,6 +406,16 @@ fn tick_schools(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
     let nschool = w.schools.len();
+    // How crowded the ground already is, counted once for the year. A
+    // schism is a claim on followers somebody else has, and the more
+    // traditions are already competing for them the less likely a new one is
+    // to find any: see `Tuning::schools_per_realm`.
+    let crowding = {
+        let living = w.schools.iter().filter(|x| x.alive()).count() as f64;
+        let room = (w.alive_polities.len() as f64 * tn.schools_per_realm).max(1.0);
+        let over = living / room;
+        1.0 / (1.0 + over * over * over)
+    };
     for s in 0..nschool {
         if !w.schools[s].alive() {
             continue;
@@ -571,7 +581,7 @@ fn tick_schools(w: &mut World) {
         let age = w.year - w.schools[s].founded;
         if age > tn.school_schism_min_age
             && adherents >= tn.school_schism_min_adherents
-            && rng.chance(tn.school_schism_chance)
+            && rng.chance(tn.school_schism_chance * crowding)
         {
             let home = w.schools[s].home_city;
             // Pick a city in an adherent polity other than the home.
@@ -619,9 +629,26 @@ fn tick_schools(w: &mut World) {
         if maxv < tn.school_absorb_threshold && age > 10 {
             let waning_since = *w.schools[s].fading_since.get_or_insert(w.year);
             let waned = w.year - waning_since;
-            if maxv < tn.school_extinction_threshold && waned > tn.school_fading_years {
+            // Forgotten if it has faded to nothing, or if it has been
+            // fading for generations with no larger cousin willing to take
+            // it in. That second clause is what keeps the count of living
+            // traditions finite: absorption needs a bigger school of the
+            // same kind holding ground where this one still stands, and a
+            // teaching that has retreated somewhere no cousin reaches met
+            // that condition never — so it failed to be absorbed every year
+            // for ever, never fell below the extinction floor either, and
+            // lived on holding a tenth of one realm. Six hundred of those
+            // had accumulated by the hundredth century, and since every one
+            // of them rolls against every realm it touches, the world
+            // drowned in schisms and persecutions.
+            let abandoned = waned > tn.school_fading_years * 4 && !absorbable(w, s);
+            if (maxv < tn.school_extinction_threshold || abandoned)
+                && waned > tn.school_fading_years
+            {
                 w.schools[s].extinct = Some(w.year);
-                for p in 0..w.polities.len() {
+                // The living only. A fallen realm's state school is part of
+                // what it was, and nothing reads it to act on.
+                for p in w.alive_polities.clone() {
                     if w.polities[p].school == Some(s) {
                         w.polities[p].school = None;
                     }
@@ -656,20 +683,18 @@ fn tick_schools(w: &mut World) {
     }
 }
 
-/// Take a waning school into a larger school of its own kind, if one holds
-/// its home ground.
+/// Whether any larger school of the same kind could take this one in.
 ///
-/// Schools are founded far more often than they die, so without this the
-/// world ends up with a hundred half-forgotten orders nobody follows. A
-/// faith that has faded everywhere while a bigger faith owns the city that
-/// raised it does not linger for centuries: its remaining followers are
-/// counted among the larger one, which is what the influence merge says.
-fn absorb(w: &mut World, s: usize, waned: i32) {
+/// The same question [`absorb`] answers by doing it, asked without doing it,
+/// so that a school with nowhere to go can be told it is finished instead.
+fn absorbable(w: &World, s: usize) -> bool {
+    absorb_target(w, s).is_some()
+}
+
+/// The school a waning school would be folded into: the largest of its own
+/// kind that is bigger than it and holds ground where it still stands.
+fn absorb_target(w: &World, s: usize) -> Option<usize> {
     let kind = w.schools[s].kind;
-    // Home ground: the realm holding the city where it began, and failing
-    // that the realm where it still has most of what it has left. Both are
-    // tried, in that order, because a school whose birthplace has changed
-    // hands is not thereby immortal.
     let mut grounds: Vec<usize> = Vec::new();
     if let Some(g) = w.cities[w.schools[s].home_city].polity {
         if w.polities[g].alive() {
@@ -684,7 +709,7 @@ fn absorb(w: &mut World, s: usize, waned: i32) {
         }
     }
     if grounds.is_empty() {
-        return;
+        return None;
     }
     let mine = w.schools[s].total_influence();
     let mut best: Option<(usize, f32)> = None;
@@ -706,11 +731,35 @@ fn absorb(w: &mut World, s: usize, waned: i32) {
             best = Some((t, total));
         }
     }
-    let into = match best {
-        Some((t, _)) => t,
-        None => return,
+    best.map(|(t, _)| t)
+}
+
+/// Take a waning school into a larger school of its own kind, if one holds
+/// its home ground.
+///
+/// Schools are founded far more often than they die, so without this the
+/// world ends up with a hundred half-forgotten orders nobody follows. A
+/// faith that has faded everywhere while a bigger faith owns the city that
+/// raised it does not linger for centuries: its remaining followers are
+/// counted among the larger one, which is what the influence merge says.
+fn absorb(w: &mut World, s: usize, waned: i32) {
+    let Some(into) = absorb_target(w, s) else {
+        return;
     };
-    let home = grounds[0];
+    // Home ground: the realm holding the city where it began, and failing
+    // that a realm where it still has followers. `absorb_target` would have
+    // returned nothing if it had neither.
+    let home = match w.cities[w.schools[s].home_city].polity {
+        Some(g) if w.polities[g].alive() => g,
+        _ => match w.schools[s]
+            .influence
+            .keys()
+            .find(|&&g| w.polities[g].alive())
+        {
+            Some(&g) => g,
+            None => return,
+        },
+    };
     let moved: Vec<(usize, f32)> = w.schools[s]
         .influence
         .iter()
@@ -720,7 +769,7 @@ fn absorb(w: &mut World, s: usize, waned: i32) {
         let e = w.schools[into].influence.entry(p).or_insert(0.0);
         *e = (*e + v * 0.5).min(1.0);
     }
-    for p in 0..w.polities.len() {
+    for p in w.alive_polities.clone() {
         if w.polities[p].school == Some(s) {
             w.polities[p].school = Some(into);
             w.schools[into].state_of.push(p);
@@ -740,7 +789,7 @@ fn absorb(w: &mut World, s: usize, waned: i32) {
 
 /// A realm whose state school has died out has no state school.
 fn drop_dead_state_schools(w: &mut World) {
-    for p in 0..w.polities.len() {
+    for p in w.alive_polities.clone() {
         if let Some(s) = w.polities[p].school {
             if !w.schools[s].alive() {
                 w.polities[p].school = None;

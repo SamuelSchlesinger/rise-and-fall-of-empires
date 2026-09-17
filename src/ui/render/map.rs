@@ -250,6 +250,32 @@ impl Ui {
             _ => None,
         };
         let max_pop = 8.0f32;
+        // The roads, rasterised once for the frame and only when they are
+        // being drawn. A route is a pair of cities, not a path, so the line
+        // between them has to be walked; the high bit records whether
+        // anything is moving along it and the low bits how much, so that one
+        // byte per cell carries both.
+        let roads: Vec<u8> = if self.layer == Layer::Trade {
+            let mut v = vec![0u8; self.world.cells.len()];
+            for r in &self.world.routes {
+                let (ca, cb) = (self.world.cities[r.a].cell, self.world.cities[r.b].cell);
+                if self.world.cities[r.a].destroyed.is_some()
+                    || self.world.cities[r.b].destroyed.is_some()
+                {
+                    continue;
+                }
+                let weight = ((r.value * 6.0) as u32).min(0x7f) as u8;
+                for cell in crate::ui::cells_between(&self.world.terrain, ca, cb) {
+                    let slot = &mut v[cell];
+                    let carried = (*slot & 0x7f).saturating_add(weight).min(0x7f);
+                    let open = (*slot & 0x80 != 0) || r.open;
+                    *slot = carried | if open { 0x80 } else { 0 };
+                }
+            }
+            v
+        } else {
+            Vec::new()
+        };
         let z = self.zoom;
         for sy in pady..mh {
             let y0 = oy + (sy - pady) * z;
@@ -411,6 +437,200 @@ impl Ui {
                         fg = flat.scale(1.4);
                         ch = g;
                     }
+                    // What the ground yields. `World::goods` has existed
+                    // since trade was built and was never drawn, so the only
+                    // way to learn that a stretch of country was salt land
+                    // was to open every city on it one at a time.
+                    Layer::Goods => {
+                        if !water {
+                            match self.world.goods.get(i).copied().flatten() {
+                                Some(g) => {
+                                    let (c, glyph) = good_style(g, self.ascii);
+                                    bg = bg.mix(c, 0.32);
+                                    fg = c;
+                                    ch = glyph;
+                                    attr |= BOLD;
+                                }
+                                // Ground that yields nothing worth carrying
+                                // recedes, so the productive land reads as
+                                // pattern rather than noise.
+                                None => {
+                                    bg = bg.scale(0.45);
+                                    fg = bg.scale(1.5);
+                                }
+                            }
+                        }
+                    }
+                    // What trade is worth and where it moves. The roads are
+                    // the point: a realm's wealth is mostly a fact about
+                    // what passes through it.
+                    Layer::Trade => {
+                        if !water {
+                            let dev = cs.owner.map(|p| self.world.polities[p].dev).unwrap_or(0.0);
+                            let warm = Rgb(30, 28, 34)
+                                .mix(Rgb(230, 200, 120), (dev / 2.5).clamp(0.0, 1.0));
+                            bg = bg.mix(warm, 0.7);
+                            fg = bg.scale(1.3);
+                            // The ground gives up its own glyph: on a layer
+                            // about what moves, the network should be the
+                            // only pattern on the screen. Cities are drawn
+                            // after this and keep theirs.
+                            ch = ' ';
+                        }
+                        if let Some(&carried) = roads.get(i) {
+                            if carried > 0 {
+                                // Brighter where more is carried; a road
+                                // closed by war is drawn but dark, which is
+                                // what makes a blockade legible.
+                                let lit = (carried & 0x7f) as f32 / 40.0;
+                                let open = carried & 0x80 != 0;
+                                let road = if open {
+                                    Rgb(255, 228, 150)
+                                } else {
+                                    Rgb(120, 70, 70)
+                                };
+                                bg = bg.mix(road, (0.25 + lit * 0.5).min(0.8));
+                                fg = road;
+                                // A busy road reads as a line, a quiet one
+                                // as a track.
+                                ch = match (open, lit > 0.5, self.ascii) {
+                                    (true, true, false) => '━',
+                                    (true, false, false) => '·',
+                                    (false, _, false) => '×',
+                                    (true, true, true) => '=',
+                                    (true, false, true) => '-',
+                                    (false, _, true) => 'x',
+                                };
+                                attr |= BOLD;
+                            }
+                        }
+                    }
+                    // What the land can feed: fertility, this century's
+                    // weather and what its people know, multiplied. The one
+                    // number that decides where anybody can live, and the
+                    // only place the drifting climate field becomes visible.
+                    Layer::Harvest => {
+                        if !water {
+                            let cap = (self.world.cell_capacity(i) / 6.0).clamp(0.0, 1.0);
+                            let heat = Rgb(48, 30, 24)
+                                .mix(Rgb(120, 170, 70), cap.sqrt())
+                                .mix(Rgb(230, 240, 160), (cap - 0.65).max(0.0) * 2.4);
+                            bg = bg.mix(heat, 0.85);
+                            fg = bg.scale(1.3);
+                        }
+                    }
+                    // What the ground remembers. Knowledge belongs to the
+                    // land rather than the state, so this is the layer where
+                    // a dark age looks like one: the bright core around old
+                    // cities dims when the people who kept it leave.
+                    Layer::Knowledge => {
+                        if !water {
+                            let y = self.world.cell_yield.get(i).copied().unwrap_or(1.0);
+                            let k = ((y - 1.0) / 1.4).clamp(0.0, 1.0);
+                            let lit = Rgb(26, 28, 44)
+                                .mix(Rgb(90, 150, 230), k.sqrt())
+                                .mix(Rgb(235, 245, 255), (k - 0.7).max(0.0) * 3.0);
+                            bg = bg.mix(lit, 0.85);
+                            fg = bg.scale(1.3);
+                        }
+                    }
+                    // The motion layers. All four are signed or one-sided
+                    // running totals rather than levels, so the question
+                    // they answer is "what has been happening here", which
+                    // no snapshot of the world can answer at all.
+                    Layer::Settling => {
+                        if !water {
+                            let f = self.world.flows.settled.get(i).copied().unwrap_or(0.0);
+                            // Scaled against the cell's own carrying
+                            // capacity: a hundred people arriving on rich
+                            // ground is nothing and on the tundra it is a
+                            // migration.
+                            let scale = self.world.cell_capacity(i).max(0.4);
+                            let k = (f / scale).clamp(-1.0, 1.0);
+                            let tint = if k >= 0.0 {
+                                Rgb(60, 200, 120)
+                            } else {
+                                Rgb(210, 90, 70)
+                            };
+                            bg = Rgb(24, 24, 30).mix(tint, k.abs().sqrt());
+                            fg = bg.scale(1.4);
+                            if k.abs() > 0.25 {
+                                ch = if k > 0.0 {
+                                    if self.ascii {
+                                        '+'
+                                    } else {
+                                        '▲'
+                                    }
+                                } else if self.ascii {
+                                    '-'
+                                } else {
+                                    '▼'
+                                };
+                                attr |= BOLD;
+                            }
+                        }
+                    }
+                    Layer::Fighting => {
+                        let f = self.world.flows.fought.get(i).copied().unwrap_or(0.0);
+                        if f > 0.02 {
+                            let k = (f / 3.0).clamp(0.0, 1.0);
+                            bg = bg.mix(Rgb(200, 40, 40), 0.25 + k * 0.6);
+                            fg = Rgb(255, 220, 190);
+                            ch = if self.ascii { 'X' } else { '✕' };
+                            attr |= BOLD;
+                        } else if !water {
+                            bg = bg.scale(0.4);
+                            fg = bg.scale(1.5);
+                            ch = ' ';
+                        }
+                    }
+                    Layer::Frontier => {
+                        if !water {
+                            let churn = self.world.flows.changed.get(i).copied().unwrap_or(0.0);
+                            // How long this ground has been held, beside how
+                            // often it has changed hands lately. Old ground
+                            // is calm blue, new ground is hot.
+                            let held = (self.world.year - cs.since).max(0) as f32;
+                            let fresh = (1.0 - held / 120.0).clamp(0.0, 1.0);
+                            let k = (churn * 0.4 + fresh).clamp(0.0, 1.0);
+                            bg = Rgb(28, 34, 54)
+                                .mix(Rgb(120, 130, 180), 1.0 - k)
+                                .mix(Rgb(255, 150, 60), k);
+                            fg = bg.scale(1.35);
+                            if churn > 1.5 {
+                                ch = if self.ascii { '!' } else { '◆' };
+                                attr |= BOLD;
+                            }
+                        }
+                    }
+                    Layer::Drift => {
+                        if !water {
+                            let d = self.world.climate_drift(i);
+                            let k = (d / 0.25).clamp(-1.0, 1.0);
+                            let tint = if k >= 0.0 {
+                                // Wetting: the margins open up.
+                                Rgb(70, 170, 220)
+                            } else {
+                                Rgb(220, 150, 60)
+                            };
+                            bg = Rgb(26, 26, 30).mix(tint, k.abs().sqrt());
+                            fg = bg.scale(1.4);
+                            if k.abs() > 0.35 {
+                                ch = if k > 0.0 {
+                                    if self.ascii {
+                                        '~'
+                                    } else {
+                                        '≈'
+                                    }
+                                } else if self.ascii {
+                                    ':'
+                                } else {
+                                    '∴'
+                                };
+                                attr |= BOLD;
+                            }
+                        }
+                    }
                     Layer::Terrain => {}
                 }
                 if cs.plague > 0 && self.layer != Layer::Biomes {
@@ -469,7 +689,30 @@ impl Ui {
                     attr = BOLD;
                 }
                 if has_cursor {
-                    attr |= REVERSE;
+                    // Reverse video is not a cursor. It swaps the cell's own
+                    // two colours, and on a shaded map those are often
+                    // nearly the same: deep water is drawn in (5, 17, 41) on
+                    // (4, 13, 31), eighteen apart out of seven hundred and
+                    // sixty-five, and better than a quarter of the map is
+                    // within a fifth of that. Swapping them changes nothing
+                    // a player can see, so the cursor simply disappeared
+                    // over open sea and over any flat stretch of country.
+                    //
+                    // So the pair is forced apart instead of exchanged:
+                    // white behind a dark map and near-black behind a light
+                    // one, with the glyph in the other. No terrain colour
+                    // can hide that, and because both are ordinary colours
+                    // the themes re-map them along with everything else.
+                    let dark = Rgb(14, 14, 18);
+                    let light = Rgb(255, 255, 255);
+                    let (behind, front) = if bg.luma() > 0.45 {
+                        (dark, light)
+                    } else {
+                        (light, dark)
+                    };
+                    bg = behind;
+                    fg = front;
+                    attr |= BOLD;
                 }
                 self.screen.put_attr(mx + sx, my + sy, ch, fg, bg, attr);
             }

@@ -252,8 +252,7 @@ impl Ui {
 
         // What each block below would use if the sidebar were endless, so
         // the rows can be shared out by need instead of by reserve.
-        let story_items: Vec<(String, Ref, Rgb)> = self
-            .stories()
+        let story_items: Vec<(String, Ref, Rgb)> = super::super::stories(&self.world)
             .into_iter()
             .map(|(text, r)| {
                 let c = detail::ref_color(&self.world, r);
@@ -428,15 +427,228 @@ impl Ui {
                 here.push((w.terrain.features[f].display(), dim));
             }
         }
-        here.push((
-            format!(
-                "mana {:.0}%  fertility {:.0}%",
-                w.terrain.mana[i] * 100.0,
-                w.terrain.fertility[i] * 100.0
-            ),
-            dim,
-        ));
+        // The particulars answer the layer being read. This block used to
+        // say mana and fertility whatever was on the screen, which meant the
+        // trade map could tell a reader where the roads were and nothing at
+        // all about what moved along them.
+        here.extend(self.here_particulars(i, dim));
         here
+    }
+
+    /// The numbers under the cursor that bear on the layer being read.
+    fn here_particulars(&self, i: usize, dim: Rgb) -> Vec<(String, Rgb)> {
+        let w = &self.world;
+        let land = w.terrain.is_land(i);
+        let mut out: Vec<(String, Rgb)> = Vec::new();
+        match self.layer {
+            Layer::Goods => {
+                match w.goods.get(i).copied().flatten() {
+                    Some(g) => {
+                        let (c, _) = crate::ui::good_style(g, self.ascii);
+                        out.push((format!("yields {}", g.name()), c));
+                    }
+                    None if land => out.push(("yields nothing worth carrying".into(), dim)),
+                    None => {}
+                }
+                // Who can actually sell it: a good with no city in reach is
+                // a fact about the map and not about anybody's economy.
+                if let Some((city, d)) = self.nearest_living_city(i) {
+                    out.push((format!("{} is {} away", w.cities[city].name, d), dim));
+                }
+            }
+            Layer::Trade => {
+                if let Some(c) = w.cells[i].city.filter(|&c| w.cities[c].destroyed.is_none()) {
+                    let partners = w.trade_partners(c);
+                    out.push((
+                        format!(
+                            "{:.1} a year over {}",
+                            w.city_trade(c),
+                            crate::sim::prose::count(partners.len() as i64, "road")
+                        ),
+                        Rgb(230, 200, 120),
+                    ));
+                    let shut = w
+                        .routes
+                        .iter()
+                        .filter(|r| !r.open && (r.a == c || r.b == c))
+                        .count();
+                    if shut > 0 {
+                        out.push((
+                            format!(
+                                "{} closed by war",
+                                crate::sim::prose::count(shut as i64, "road")
+                            ),
+                            Rgb(220, 120, 110),
+                        ));
+                    }
+                }
+                if let Some(p) = w.cells[i].owner {
+                    out.push((
+                        format!(
+                            "{} keeps {:.0} in its treasury, development {:.2}",
+                            w.polities[p].short, w.polities[p].treasury, w.polities[p].dev
+                        ),
+                        dim,
+                    ));
+                }
+            }
+            Layer::Harvest => {
+                if land {
+                    // The three factors, then their product, because the
+                    // interest is in which of them is the binding one.
+                    out.push((
+                        format!(
+                            "fertility {:.0}%  weather {:+.0}%  known {:+.0}%",
+                            w.terrain.fertility[i] * 100.0,
+                            (w.climate_mult(i) - 1.0) * 100.0,
+                            (w.cell_yield.get(i).copied().unwrap_or(1.0) - 1.0) * 100.0
+                        ),
+                        dim,
+                    ));
+                    out.push((
+                        format!(
+                            "feeds {:.1}, holding {:.1}",
+                            w.cell_capacity(i),
+                            w.cells[i].pop
+                        ),
+                        dim,
+                    ));
+                }
+            }
+            Layer::Knowledge => {
+                if land {
+                    let y = w.cell_yield.get(i).copied().unwrap_or(1.0);
+                    out.push((
+                        format!("harvests {:+.0}% for what is known here", (y - 1.0) * 100.0),
+                        dim,
+                    ));
+                    out.push((
+                        format!(
+                            "{} known on this ground",
+                            crate::sim::prose::count(
+                                w.known.get(i).copied().unwrap_or(0).count_ones() as i64,
+                                "thing"
+                            )
+                        ),
+                        dim,
+                    ));
+                }
+            }
+            // The motion layers report a rate and how it compares with what
+            // is there, because "forty people left" means one thing in a
+            // village and another in a province.
+            Layer::Settling => {
+                if land {
+                    let f = w.flows.settled.get(i).copied().unwrap_or(0.0);
+                    let word = if f > 0.01 {
+                        "filling up"
+                    } else if f < -0.01 {
+                        "emptying out"
+                    } else {
+                        "settled"
+                    };
+                    out.push((
+                        format!(
+                            "{} ({:+.2} against {:.1} living here)",
+                            word, f, w.cells[i].pop
+                        ),
+                        if f < -0.01 { Rgb(210, 120, 100) } else { dim },
+                    ));
+                }
+            }
+            Layer::Fighting => {
+                let f = w.flows.fought.get(i).copied().unwrap_or(0.0);
+                if f > 0.02 {
+                    out.push((
+                        format!("fought over ({:.1} of a lifetime's worth)", f),
+                        Rgb(220, 120, 110),
+                    ));
+                } else if land {
+                    out.push(("no fighting in living memory".into(), dim));
+                }
+                if let Some(p) = w.cells[i].owner {
+                    let at = w.polities[p]
+                        .wars
+                        .iter()
+                        .filter(|&&x| w.wars[x].alive())
+                        .count();
+                    if at > 0 {
+                        out.push((
+                            format!(
+                                "{} is in {}",
+                                w.polities[p].short,
+                                crate::sim::prose::count(at as i64, "war")
+                            ),
+                            dim,
+                        ));
+                    }
+                }
+            }
+            Layer::Frontier => {
+                if land {
+                    match w.cells[i].owner {
+                        Some(p) => out.push((
+                            format!(
+                                "{} has held this since {}",
+                                w.polities[p].short, w.cells[i].since
+                            ),
+                            dim,
+                        )),
+                        None => out.push(("held by nobody".into(), dim)),
+                    }
+                    let churn = w.flows.changed.get(i).copied().unwrap_or(0.0);
+                    if churn > 0.5 {
+                        out.push((
+                            format!("changed hands {:.1} times in living memory", churn),
+                            Rgb(255, 170, 90),
+                        ));
+                    }
+                }
+            }
+            Layer::Drift => {
+                if land {
+                    let d = w.climate_drift(i);
+                    let word = if d > 0.02 {
+                        "wetter than a century ago"
+                    } else if d < -0.02 {
+                        "drier than a century ago"
+                    } else {
+                        "the same as a century ago"
+                    };
+                    out.push((format!("{} ({:+.0}% on harvests)", word, d * 100.0), dim));
+                    out.push((
+                        format!(
+                            "feeds {:.1} now, holding {:.1}",
+                            w.cell_capacity(i),
+                            w.cells[i].pop
+                        ),
+                        dim,
+                    ));
+                }
+            }
+            _ => out.push((
+                format!(
+                    "mana {:.0}%  fertility {:.0}%",
+                    w.terrain.mana[i] * 100.0,
+                    w.terrain.fertility[i] * 100.0
+                ),
+                dim,
+            )),
+        }
+        out
+    }
+
+    /// The nearest standing city, and how far off it is.
+    ///
+    /// Bounded: it walks the living cities, of which there are a couple of
+    /// thousand at most, rather than searching outward over the map.
+    fn nearest_living_city(&self, i: usize) -> Option<(usize, usize)> {
+        let w = &self.world;
+        w.cities
+            .iter()
+            .filter(|c| c.destroyed.is_none())
+            .map(|c| (c.id, w.terrain.dist(i, c.cell)))
+            .min_by_key(|&(id, d)| (d, id))
     }
 }
 

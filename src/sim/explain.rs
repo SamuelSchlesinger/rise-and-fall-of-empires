@@ -45,6 +45,150 @@ fn war_years(w: &World, p: usize) -> i32 {
         .max(1)
 }
 
+/// Where a realm's money comes from and where it goes, largest first.
+///
+/// The mirror of the income arithmetic in `politics::economy`, in the same
+/// shape as [`stability_factors`]: a list of named pulls whose weights sum
+/// to what the treasury gains this year. That sum is the point — a reader
+/// can check the parts against the whole, so a realm that is quietly going
+/// broke says which of its costs is doing it.
+///
+/// Stability had an explanation from the beginning and money never did,
+/// which left the two economic entries in the stability list — "the
+/// treasury is full", "the cities are prosperous" — as the only visible
+/// economics in the game, both of them effects with no stated cause.
+pub fn income_factors(w: &World, p: usize) -> Vec<Factor> {
+    let mut out: Vec<Factor> = Vec::new();
+    if p >= w.polities.len() || !w.polities[p].alive() {
+        return out;
+    }
+    let tn = &w.tuning;
+    let pol = &w.polities[p];
+    // The sources are what each place is assessed for, and what never
+    // arrives is a line of its own below. The other way round — netting the
+    // loss off each source — hides the thing the reader wants to know,
+    // which is whether the realm is poor or merely badly run.
+    let tech = w.tech_income_mult(p);
+    // Cities, each one's own line when it is worth a line, because the
+    // interesting case is a realm living off one port.
+    let mut from_cities: Vec<(f32, usize)> = pol
+        .cities
+        .iter()
+        .map(|&c| {
+            (
+                w.cities[c].pop * w.cities[c].prosperity * tn.city_income_factor * tech,
+                c,
+            )
+        })
+        .collect();
+    from_cities.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let named = from_cities.len().min(3);
+    for &(v, c) in from_cities.iter().take(named) {
+        push(&mut out, v, format!("taxes from {}", w.cities[c].name));
+    }
+    let rest: f32 = from_cities.iter().skip(named).map(|x| x.0).sum();
+    push(
+        &mut out,
+        rest,
+        format!(
+            "taxes from {}",
+            crate::sim::prose::count((from_cities.len() - named) as i64, "smaller town")
+        ),
+    );
+    // The land itself, which is what a realm has instead of cities.
+    push(
+        &mut out,
+        pol.cells as f32 * tn.cell_income_factor * (1.0 + pol.dev) * tech,
+        format!("{} lands under tax", pol.cells),
+    );
+    // What the crown takes from what passes through.
+    let tolls = w.realm_trade(p) * tn.trade_toll_factor * tech;
+    push(
+        &mut out,
+        tolls,
+        "tolls on the roads and the harbours".to_string(),
+    );
+    // What never arrives. Stated as its own loss rather than folded
+    // silently into the sources above, because the reader's question is
+    // whether the realm is poor or merely badly run.
+    let gross: f32 = out.iter().map(|f| f.weight).sum();
+    let skim = crate::sim::corruption_share(tn, pol.decadence, pol.sprawl);
+    if skim > 0.0 {
+        let lost = gross * skim;
+        let why = if pol.decadence * tn.corruption_decadence_weight
+            > (pol.sprawl - 1.0).max(0.0) * tn.corruption_sprawl_weight
+        {
+            "taken by the court before it arrives"
+        } else {
+            "lost on the long road to the capital"
+        };
+        push(&mut out, -lost, format!("{:.0}% {}", skim * 100.0, why));
+    }
+    // And what it all costs.
+    push(
+        &mut out,
+        -(pol.army * tn.army_upkeep_factor),
+        format!("keeping {:.0} under arms", pol.army),
+    );
+    push(
+        &mut out,
+        -(pol.cells as f32 * tn.cell_upkeep_factor),
+        "governors, garrisons and roads".to_string(),
+    );
+    // What the court will spend of what is already in hand. Not a cost of
+    // government but of splendour, and the reason a treasury has no ceiling.
+    let spend = crate::sim::court_spending(tn, pol.treasury);
+    push(
+        &mut out,
+        -spend,
+        "the court's own expenses and splendour".to_string(),
+    );
+    // Gains largest first, then the costs, rather than everything ranked by
+    // size together: a page shows the first handful of a block, and the two
+    // costs otherwise sank below the small revenues of a large realm.
+    // Nothing is dropped here — see [`income_shown`], which is where the
+    // trimming belongs, because a total that depended on how many lines fit
+    // would not be a total.
+    let (mut gains, mut costs): (Vec<Factor>, Vec<Factor>) =
+        out.into_iter().partition(|f| f.weight > 0.0);
+    gains.sort_by(|a, b| b.weight.total_cmp(&a.weight));
+    costs.sort_by(|a, b| a.weight.total_cmp(&b.weight));
+    gains.extend(costs);
+    gains
+}
+
+/// [`income_factors`] trimmed to fit a page, without changing what it sums
+/// to.
+///
+/// At most `gains` revenue lines survive; the rest are folded into one, and
+/// every cost is kept. So the figures a reader sees still add up to the
+/// figure printed under them, which is the only reason to show them as a
+/// column at all.
+pub fn income_shown(w: &World, p: usize, gains: usize) -> Vec<Factor> {
+    let all = income_factors(w, p);
+    let (revenue, costs): (Vec<Factor>, Vec<Factor>) =
+        all.into_iter().partition(|f| f.weight > 0.0);
+    let folded: f32 = revenue.iter().skip(gains).map(|f| f.weight).sum();
+    let dropped = revenue.len().saturating_sub(gains);
+    let mut out: Vec<Factor> = revenue.into_iter().take(gains).collect();
+    if dropped > 0 {
+        out.push(Factor {
+            text: format!(
+                "{} besides",
+                crate::sim::prose::count(dropped as i64, "smaller source")
+            ),
+            weight: folded,
+        });
+    }
+    out.extend(costs);
+    out
+}
+
+/// What the treasury will gain this year, as [`income_factors`] totals it.
+pub fn income_total(w: &World, p: usize) -> f32 {
+    income_factors(w, p).iter().map(|f| f.weight).sum()
+}
+
 /// Everything pulling a realm's stability up or down, strongest first.
 /// `stability_base` plus the weights is the value stability is drifting
 /// towards, which is what `politics::economy` computes each year.
@@ -182,10 +326,15 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
         "old custom binds the people to the throne".into(),
     );
 
-    // The treasury.
+    // The treasury. Through the shared curve, not a ratio of its own: this
+    // was a second copy of the old one, dividing by a ceiling of six hundred
+    // that no longer exists, and when the ceiling went it went on dividing —
+    // so a realm sitting on three thousand was told its full treasury was
+    // worth a hundred and four points of stability, five times more than
+    // anything can be worth.
     push(
         &mut out,
-        (pol.treasury / 600.0).max(-0.2) * 0.2,
+        crate::sim::treasury_confidence(&w.tuning, pol.treasury) * 0.2,
         if pol.treasury >= 0.0 {
             "the treasury is full".into()
         } else {

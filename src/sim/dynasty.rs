@@ -270,7 +270,12 @@ fn reigning(w: &mut World) {
 fn mortality(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
-    w.forget_the_dead();
+    // No sweep here. The list is swept once a year, in `recompute`, and
+    // that is load-bearing: between one sweep and the next it holds
+    // everybody who has died *this* year as well as the living, which is
+    // what lets `stories::tick_legends` find the general who fell in battle
+    // eight phases ago. Sweeping here as an optimisation cost him his
+    // epithet. The loop below guards on `alive()` anyway.
     for i in w.alive_persons.clone() {
         let per = &w.persons[i];
         if !per.alive() {
@@ -347,7 +352,12 @@ fn child_deaths(w: &mut World) {
 /// a title the chronicle hands out twice a century is worth reading where
 /// one it hands out twice a decade is not.
 fn score(w: &mut World) {
-    let living: Vec<usize> = w.alive_persons.clone();
+    let living: Vec<usize> = w
+        .alive_persons
+        .iter()
+        .copied()
+        .filter(|&i| w.persons[i].alive())
+        .collect();
     let mut scores: Vec<f32> = Vec::with_capacity(living.len());
     for &r in &living {
         let g = greatness(w, r);

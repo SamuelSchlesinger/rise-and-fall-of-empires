@@ -28,6 +28,7 @@ use super::chronicle::{EventKind, Ref};
 use super::prose;
 use super::World;
 use crate::geo::{Biome, Terrain};
+use std::collections::BTreeMap;
 
 /// What a stretch of country is worth sending somewhere else.
 ///
@@ -186,7 +187,7 @@ const HINTERLAND: i32 = 4;
 /// How often the routes are worked out again. Cities are founded and fall
 /// slowly, so this does not need to be yearly — and it is the one sweep in
 /// this module that costs anything.
-const REFRESH: i32 = 20;
+pub const REFRESH: i32 = 20;
 
 /// What a city can offer: the goods of its own hinterland, as a bitset.
 fn hinterland(w: &World, city: usize) -> u16 {
@@ -216,6 +217,21 @@ fn hinterland(w: &World, city: usize) -> u16 {
 /// route only pays for something dear — which is why spice travels further
 /// than grain, and why the cities that grow rich are the ones in between.
 pub fn refresh(w: &mut World) {
+    let tn = w.tuning;
+    // What the roads that already exist have been doing, so that rebuilding
+    // the network does not make them forget it. Every twentieth year this
+    // function replaced the whole list with fresh routes marked open as of
+    // this year — which meant a road shut by a war came back open until
+    // `open_and_close` corrected it later the same tick, and, worse, that
+    // `since` was reset for every road in the world. `since` is what stops
+    // the chronicle reporting the same two cities every three years, so
+    // resetting it silenced the reports for a decade after every rebuild,
+    // and it is what the Roads page shows, where it read as though every
+    // road in the world had been laid in the same year.
+    let mut history: BTreeMap<(usize, usize), (bool, i32)> = BTreeMap::new();
+    for r in &w.routes {
+        history.insert((r.a.min(r.b), r.a.max(r.b)), (r.open, r.since));
+    }
     let live: Vec<usize> = (0..w.cities.len())
         .filter(|&c| w.cities[c].destroyed.is_none())
         .collect();
@@ -251,17 +267,45 @@ pub fn refresh(w: &mut World) {
             let trade = worth(a_offers).min(worth(b_offers));
             // Distance is dear, and dearer by land.
             let far = d as f32 / if by_sea { SEA_RANGE } else { LAND_RANGE } as f32;
-            let value = trade * (1.0 - far * 0.7).max(0.1) * if by_sea { 1.2 } else { 1.0 };
+            // A road is worth what the two ends can buy from each other, and
+            // the ends were not being weighed at all: a route's value came
+            // from the goods on the ground and the distance between them,
+            // both of which are fixed for ever, so the whole trade of a
+            // world was a constant while its cities grew. Trade's share of
+            // a realm's income fell from a quarter in the second century to
+            // a fortieth by the twenty-eighth, purely by being left behind.
+            //
+            // This is the other half of a gravity model, whose distance term
+            // was already here. Bounded at both ends, because a term that
+            // grows with the square of a city is exactly the kind of thing
+            // that has to be stopped from running away.
+            let mass = ((w.cities[a].pop * w.cities[b].pop).sqrt() / tn.trade_mass_ref.max(0.01))
+                .clamp(0.2, 8.0);
+            // What the two ends know about carrying goods, taken from the
+            // better of them: a road is a thing two places share, and the
+            // more advanced partner is the one who organises the trade.
+            let craft = [w.cities[a].polity, w.cities[b].polity]
+                .into_iter()
+                .flatten()
+                .filter(|&q| w.polities[q].alive())
+                .map(|q| w.tech_trade_mult(q))
+                .fold(1.0f32, f32::max);
+            let value =
+                trade * mass * craft * (1.0 - far * 0.7).max(0.1) * if by_sea { 1.2 } else { 1.0 };
             if value < 0.35 {
                 continue;
             }
+            let (open, since) = history
+                .get(&(a.min(b), a.max(b)))
+                .copied()
+                .unwrap_or((true, w.year));
             routes.push(Route {
                 a,
                 b,
                 value,
                 by_sea,
-                open: true,
-                since: w.year,
+                open,
+                since,
             });
         }
     }
@@ -294,6 +338,44 @@ pub fn tick(w: &mut World) {
         refresh(w);
     }
     open_and_close(w);
+    reckon(w);
+}
+
+/// Total up what trade is worth, once, for everybody who will ask.
+///
+/// `city_trade` and `trade_between` used to walk the whole route list on
+/// every call, and `economy` asks once per realm while `diplomacy` asks once
+/// per pair of neighbours. On a large map that is a thousand routes times a
+/// thousand cities times every year — the cost of a year climbed from half a
+/// millisecond to sixteen by year eighteen hundred, and kept climbing.
+///
+/// Reckoned here instead: one pass over the routes, and every later question
+/// is a lookup.
+///
+/// Also called at load. `economy` reads these totals in an earlier phase
+/// than the one that fills them, so a world reloaded without them governs
+/// its first year on no trade at all and diverges from the one that wrote
+/// the file.
+pub fn reckon(w: &mut World) {
+    w.city_takings.clear();
+    w.city_takings.resize(w.cities.len(), 0.0);
+    w.pair_trade.clear();
+    for r in &w.routes {
+        if !r.open {
+            continue;
+        }
+        if let Some(slot) = w.city_takings.get_mut(r.a) {
+            *slot += r.value;
+        }
+        if let Some(slot) = w.city_takings.get_mut(r.b) {
+            *slot += r.value;
+        }
+        if let (Some(pa), Some(pb)) = (w.cities[r.a].polity, w.cities[r.b].polity) {
+            if pa != pb {
+                *w.pair_trade.entry((pa.min(pb), pa.max(pb))).or_insert(0.0) += r.value;
+            }
+        }
+    }
 }
 
 /// Decide which routes are running, and tell the world when a great one
@@ -336,13 +418,9 @@ fn open_and_close(w: &mut World) {
 }
 
 impl World {
-    /// What trade is worth to a city this year.
+    /// What trade is worth to a city this year. A lookup; see `reckon`.
     pub fn city_trade(&self, city: usize) -> f32 {
-        self.routes
-            .iter()
-            .filter(|r| r.open && (r.a == city || r.b == city))
-            .map(|r| r.value)
-            .sum()
+        self.city_takings.get(city).copied().unwrap_or(0.0)
     }
 
     /// What trade is worth to a realm: the tolls on every road that touches
@@ -371,15 +449,10 @@ impl World {
     /// is what makes two realms unwilling to fight, and it has to be actual
     /// trade rather than two cultures that both like the idea of it.
     pub fn trade_between(&self, p: usize, q: usize) -> f32 {
-        self.routes
-            .iter()
-            .filter(|r| r.open)
-            .filter(|r| {
-                let (pa, pb) = (self.cities[r.a].polity, self.cities[r.b].polity);
-                (pa == Some(p) && pb == Some(q)) || (pa == Some(q) && pb == Some(p))
-            })
-            .map(|r| r.value)
-            .sum()
+        self.pair_trade
+            .get(&(p.min(q), p.max(q)))
+            .copied()
+            .unwrap_or(0.0)
     }
 
     /// The goods a city's own country produces, named.
