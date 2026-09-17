@@ -409,6 +409,24 @@ pub fn legend_parts(layer: Layer, ascii: bool) -> Vec<String> {
             ),
             "the map being redrawn".into(),
         ],
+        // Keyed on what is selected, because the layer means two different
+        // things and a key that described only one of them would be wrong
+        // half the time.
+        Layer::Relations => {
+            let m = |uni: char, a: char| if ascii { a } else { uni };
+            vec![
+                "how every realm stands towards the one selected".into(),
+                format!("{} at war", m('\u{2715}', 'X')),
+                format!("{} sworn friend", m('\u{2713}', '+')),
+                format!("{} married in", m('\u{2740}', 'm')),
+                format!("{} declared rival", m('\u{2260}', '!')),
+                format!("{} pays tribute to it", m('\u{25bc}', 'v')),
+                format!("{} it pays tribute to", m('\u{25b2}', '^')),
+                format!("{} the realm itself, or the hegemon", m('\u{25c6}', '@')),
+                "grey is nobody's business; amber is a quarrel brewing".into(),
+                "with nothing selected, each realm's own standing".into(),
+            ]
+        }
         Layer::Drift => vec![
             format!(
                 "{} the weather has turned wetter",

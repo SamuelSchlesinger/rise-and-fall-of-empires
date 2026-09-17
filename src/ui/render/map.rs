@@ -92,6 +92,94 @@ pub(crate) fn border_glyph(bits: u8, ascii: bool) -> Option<char> {
 /// The neutral fill the political and culture layers put under their
 /// colours, in place of the terrain glyph: land held by somebody, land held
 /// by nobody, and open water.
+impl super::super::Ui {
+    /// How a realm stands, and the glyph that says which: either towards
+    /// `from` when one is selected, or its own posture in the world when
+    /// none is.
+    ///
+    /// The colours are the ones used everywhere else for these ideas — red
+    /// for war, green for a sworn friend, violet for a marriage, blue for a
+    /// tributary tie — so the layer needs learning once.
+    fn relation_style(&self, from: Option<usize>, p: usize) -> (Rgb, Option<char>) {
+        let w = &self.world;
+        let ascii = self.ascii;
+        let g = |uni: char, a: char| Some(if ascii { a } else { uni });
+        let war = Rgb(200, 60, 55);
+        let ally = Rgb(70, 190, 110);
+        let wed = Rgb(180, 110, 210);
+        let sworn_off = Rgb(205, 140, 60);
+        let bound = Rgb(80, 130, 215);
+        let calm = Rgb(95, 100, 110);
+        let gold = Rgb(225, 190, 90);
+        match from {
+            // The world as one realm sees it.
+            Some(me) => {
+                // Gold alone for the realm being asked about. A glyph over
+                // every cell it holds is five hundred marks on a screen, and
+                // the political layer already says "this is the one you
+                // picked" with brightness and nothing else.
+                if me == p {
+                    return (gold, None);
+                }
+                if w.war_between(me, p).is_some() {
+                    return (war, g('\u{2715}', 'X'));
+                }
+                if w.polities[p].overlord == Some(me) {
+                    return (bound, g('\u{25bc}', 'v'));
+                }
+                if w.polities[me].overlord == Some(p) {
+                    return (bound, g('\u{25b2}', '^'));
+                }
+                match crate::sim::dynasty::stance_of(w, me, p) {
+                    crate::sim::Stance::Allied => (ally, g('\u{2713}', '+')),
+                    crate::sim::Stance::Married => (wed, g('\u{2740}', 'm')),
+                    crate::sim::Stance::Rival => (sworn_off, g('\u{2260}', '!')),
+                    crate::sim::Stance::Neutral => {
+                        // Tension shades the neutrals, so the realms most
+                        // likely to become the next war stand out from the
+                        // ones that never think about each other.
+                        let t = w.polities[me].tension.get(&p).copied().unwrap_or(0.0);
+                        if t >= 0.35 {
+                            (calm.mix(sworn_off, t.min(1.0)), None)
+                        } else {
+                            (calm, None)
+                        }
+                    }
+                }
+            }
+            // Nothing selected: each realm's own standing in the world.
+            None => {
+                if crate::sim::war::hegemon(w) == Some(p) {
+                    return (gold, g('\u{25c6}', '@'));
+                }
+                if w.polities[p].at_war() {
+                    return (war, g('\u{2715}', 'X'));
+                }
+                if w.polities[p].overlord.is_some() {
+                    return (bound, g('\u{25bc}', 'v'));
+                }
+                let stances = &w.polities[p].stance;
+                if stances.values().any(|&s| s == crate::sim::Stance::Allied) {
+                    return (ally, g('\u{2713}', '+'));
+                }
+                if stances.values().any(|&s| s == crate::sim::Stance::Married) {
+                    return (wed, g('\u{2740}', 'm'));
+                }
+                let hottest = w.polities[p]
+                    .tension
+                    .values()
+                    .copied()
+                    .fold(0.0f32, f32::max);
+                if hottest >= 0.35 {
+                    (calm.mix(sworn_off, hottest.min(1.0)), None)
+                } else {
+                    (calm, None)
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn field_glyph(ascii: bool, held: bool) -> char {
     match (held, ascii) {
         (false, _) => ' ',
@@ -233,7 +321,12 @@ impl Ui {
         let tw = self.world.terrain.w;
         let th = self.world.terrain.h;
         let borders = match self.layer {
-            Layer::Political => Some(self.owner_grid(true)),
+            // Relations needs the owner grid for the same reason political
+            // does: it colours realms, so it has to know which realm each
+            // cell belongs to. Leaving it out of this list was a silent
+            // failure — every cell read as unheld and the whole layer drew
+            // in one grey.
+            Layer::Political | Layer::Relations => Some(self.owner_grid(true)),
             Layer::Culture => Some(self.owner_grid(false)),
             _ => None,
         };
@@ -628,6 +721,33 @@ impl Ui {
                                     '∴'
                                 };
                                 attr |= BOLD;
+                            }
+                        }
+                    }
+                    // Who is bound to whom. With a realm selected this is
+                    // the diplomatic world *from there* — the question a
+                    // reader actually has is never "what are all the
+                    // alliances" but "who would come in against me". With
+                    // nothing selected it falls back to each realm's own
+                    // posture, so the layer says something before anything
+                    // is picked.
+                    Layer::Relations => {
+                        if !water {
+                            let holder = borders
+                                .as_ref()
+                                .and_then(|(g, gw)| g[(sy + 1) * gw + sx + 1]);
+                            ch = field_glyph(self.ascii, holder.is_some());
+                            match holder {
+                                Some(p) => {
+                                    let (tint, mark) = self.relation_style(sel_polity, p);
+                                    bg = bg.mix(tint, 0.6);
+                                    fg = bg.mix(Rgb(255, 255, 255), 0.5);
+                                    if let Some(g) = mark {
+                                        ch = g;
+                                        attr |= BOLD;
+                                    }
+                                }
+                                None => bg = bg.scale(0.6),
                             }
                         }
                     }

@@ -605,6 +605,68 @@ impl Ui {
                     }
                 }
             }
+            Layer::Relations => {
+                if let Some(p) = w.cells[i].owner {
+                    let pol = &w.polities[p];
+                    out.push((w.polities[p].short.clone(), pol.color));
+                    let wars = pol.wars.iter().filter(|&&x| w.wars[x].alive()).count();
+                    let allies = pol
+                        .stance
+                        .values()
+                        .filter(|&&s| s == crate::sim::Stance::Allied)
+                        .count();
+                    let subjects = w
+                        .alive_polities
+                        .iter()
+                        .filter(|&&q| w.polities[q].overlord == Some(p))
+                        .count();
+                    let mut said: Vec<String> = Vec::new();
+                    if wars > 0 {
+                        said.push(crate::sim::prose::count(wars as i64, "war"));
+                    }
+                    if allies > 0 {
+                        said.push(format!(
+                            "{} sworn",
+                            crate::sim::prose::count(allies as i64, "friend")
+                        ));
+                    }
+                    if subjects > 0 {
+                        said.push(format!(
+                            "{} paying tribute",
+                            crate::sim::prose::count(subjects as i64, "realm")
+                        ));
+                    }
+                    if let Some(over) = pol.overlord {
+                        said.push(format!("pays tribute to {}", w.polities[over].short));
+                    }
+                    out.push((
+                        if said.is_empty() {
+                            "no wars, no friends, no subjects".to_string()
+                        } else {
+                            said.join(", ")
+                        },
+                        dim,
+                    ));
+                    // Whoever it is angriest with, since that is the next
+                    // war if there is going to be one.
+                    if let Some((&q, &t)) = pol
+                        .tension
+                        .iter()
+                        .max_by(|a, b| a.1.total_cmp(b.1).then(b.0.cmp(a.0)))
+                    {
+                        if t >= 0.2 && w.polities[q].alive() {
+                            out.push((
+                                format!(
+                                    "most angry with {} ({:.0}%)",
+                                    w.polities[q].short,
+                                    t * 100.0
+                                ),
+                                Rgb(220, 160, 90),
+                            ));
+                        }
+                    }
+                }
+            }
             Layer::Drift => {
                 if land {
                     let d = w.climate_drift(i);

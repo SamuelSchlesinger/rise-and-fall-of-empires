@@ -2322,3 +2322,81 @@ fn w_clone(w: &mut World) -> World {
     let bytes = ser::save(w);
     ser::load(&bytes).expect("a fresh save must load")
 }
+
+/// The relations layer must draw every kind of tie there is.
+///
+/// The political layer says who owns what and nothing about who is sworn to
+/// whom, which left the whole of diplomacy — tension, stances, tributaries,
+/// hegemony — readable one realm page at a time and nowhere else, though it
+/// is among the largest systems here.
+///
+/// Each tie is set up deliberately rather than waited for, because a world
+/// that happens to contain a marriage and a tributary and a declared rival
+/// all at once, all bordering the realm the test picked, is not a world a
+/// test can rely on turning up.
+#[test]
+fn the_relations_layer_draws_every_kind_of_tie() {
+    use crate::sim::chronicle::Ref;
+    use crate::sim::{dynasty, Stance};
+    use crate::ui::Layer;
+    let mut w = World::new(83, 140, 70, Detail::Medium);
+    run(&mut w, 600);
+
+    // The largest realm, and four neighbours to stand in each relation to
+    // it. Neighbours, so that they are on screen beside it.
+    let mut realms = w.alive_polities.clone();
+    realms.sort_by_key(|&p| std::cmp::Reverse(w.polities[p].cells));
+    let me = realms[0];
+    let neighbours: Vec<usize> = w.polities[me]
+        .neighbors
+        .iter()
+        .map(|&(q, _)| q)
+        .filter(|&q| w.polities[q].alive())
+        .collect();
+    assert!(
+        neighbours.len() >= 4,
+        "the largest realm has only {} living neighbours to relate to",
+        neighbours.len()
+    );
+
+    dynasty::set_stance(&mut w, me, neighbours[0], Stance::Allied);
+    dynasty::set_stance(&mut w, me, neighbours[1], Stance::Married);
+    dynasty::set_stance(&mut w, me, neighbours[2], Stance::Rival);
+    w.polities[neighbours[3]].overlord = Some(me);
+    // And a war, which has its own machinery rather than a field to set.
+    w.wars_start(
+        me,
+        neighbours[0],
+        crate::sim::WarKind::Conquest,
+        "a test".into(),
+    );
+    w.recompute();
+
+    let capital = w.capital_cell(me).expect("the largest realm has a capital");
+    // A screen big enough for the whole map, so that a tie is missing from
+    // the frame only if it is not drawn — not because the realm holding it
+    // happened to lie beyond the viewport.
+    let mut ui = crate::ui::for_test_at(w, 190, 90, Layer::Relations, capital);
+    ui.selected = Some(Ref::Polity(me));
+
+    // War wins over a sworn friendship, deliberately: what a reader needs to
+    // know about somebody they are fighting is that they are fighting them.
+    for (mark, what) in [
+        ('\u{2715}', "at war"),
+        ('\u{2740}', "married in"),
+        ('\u{2260}', "a declared rival"),
+        ('\u{25bc}', "paying tribute"),
+    ] {
+        assert!(
+            ui.frame_shows(mark),
+            "nothing on the relations layer shows {}",
+            what
+        );
+    }
+    // And the realm being asked about carries no glyph of its own: five
+    // hundred marks over its own territory is noise, not information.
+    assert!(
+        !ui.frame_shows('\u{25c6}'),
+        "the selected realm is marked on every cell it holds"
+    );
+}

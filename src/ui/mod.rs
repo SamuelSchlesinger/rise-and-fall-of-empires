@@ -246,6 +246,13 @@ pub enum Layer {
     Frontier,
     /// Where the weather has turned since living memory.
     Drift,
+    /// Who is bound to whom, and who is angry with whom.
+    ///
+    /// The political layer says who owns what and nothing about who is
+    /// sworn to whom, which left the whole of diplomacy — tension,
+    /// stances, tributaries, hegemony — readable one realm page at a time
+    /// and nowhere else, though it is among the largest systems here.
+    Relations,
 }
 
 impl Layer {
@@ -265,9 +272,10 @@ impl Layer {
             Layer::Fighting => "fighting",
             Layer::Frontier => "frontier",
             Layer::Drift => "drift",
+            Layer::Relations => "relations",
         }
     }
-    pub fn all() -> [Layer; 14] {
+    pub fn all() -> [Layer; 15] {
         [
             Layer::Political,
             Layer::Terrain,
@@ -283,6 +291,7 @@ impl Layer {
             Layer::Fighting,
             Layer::Frontier,
             Layer::Drift,
+            Layer::Relations,
         ]
     }
 
@@ -295,7 +304,7 @@ impl Layer {
     /// are variations on one question.
     pub fn family(self) -> LayerFamily {
         match self {
-            Layer::Political => LayerFamily::Power,
+            Layer::Political | Layer::Relations => LayerFamily::Power,
             Layer::Culture | Layer::Magic => LayerFamily::People,
             Layer::Terrain | Layer::Biomes => LayerFamily::Land,
             Layer::Population | Layer::Goods | Layer::Trade | Layer::Harvest | Layer::Knowledge => {
@@ -360,6 +369,9 @@ impl Layer {
                 || (s == "battles" && *l == Layer::Fighting)
                 || (s == "climate" && *l == Layer::Drift)
                 || (s == "weather" && *l == Layer::Drift)
+                || (s == "diplomacy" && *l == Layer::Relations)
+                || (s == "alliances" && *l == Layer::Relations)
+                || (s == "tension" && *l == Layer::Relations)
         })
     }
 }

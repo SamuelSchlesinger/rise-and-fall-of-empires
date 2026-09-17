@@ -38,6 +38,16 @@ Understanding a world, and reaching into it.
   families (power, peoples, land, living, motion) and `\` steps the maps
   within one.
 
+- **A relations layer.** The political layer says who owns what and nothing
+  about who is sworn to whom, so the whole of diplomacy — tension, stances,
+  tributaries, hegemony — was readable one realm page at a time and nowhere
+  else, though it is among the largest systems here. With a realm selected
+  the layer shows the diplomatic world *from there*: who it is fighting, who
+  is sworn to it, who has married in, who pays it tribute and whom it pays,
+  with the neutrals shaded by how angry they are, since those are the next
+  war if there is going to be one. With nothing selected, each realm's own
+  standing. `:layer relations`, or `diplomacy`, `alliances`, `tension`.
+
 - **A world remembers its own motion.** Four signed fields, one value per
   cell, each a decaying running total of something that happened rather than
   something that is. A window over the last N years would have meant N
