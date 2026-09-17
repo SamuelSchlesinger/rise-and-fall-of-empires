@@ -453,6 +453,11 @@ pub fn form_polities(w: &mut World) {
 
 /// What a point of trade adds to a city's prosperity.
 const TRADE_TO_PROSPERITY: f32 = 0.035;
+/// The prosperity a city can approach but not reach.
+const PROSPERITY_MAX: f32 = 2.5;
+/// Below this a city's prosperity is whatever its advantages add up to;
+/// above it, each further advantage is worth less than the last.
+const PROSPERITY_KNEE: f32 = 1.5;
 /// The most prosperity a city can owe to the traffic through it, approached
 /// but never reached.
 const TRADE_PROSPERITY_MAX: f32 = 0.9;
@@ -825,8 +830,19 @@ pub fn economy(w: &mut World) {
             // leave it. An explanation that is a percent out is worse than
             // none, because a reader checks the parts against the whole.
             income += city.pop * city.prosperity * tn.city_income_factor;
+            // The target is bent towards its ceiling rather than the value
+            // being clipped against it. Everything that makes a city rich —
+            // development, wonders, what passes through, what its realm
+            // knows — was added up and the sum then clamped, so by the
+            // twenty-first century the *median* city in the world sat at
+            // exactly the maximum and more than half of them had their
+            // income decided by population alone. Prosperity had stopped
+            // distinguishing anything, which also made the saturating trade
+            // term pointless for the cities it mattered most to: their
+            // target was already over the cap.
+            let target = super::soft_ceiling(target, PROSPERITY_KNEE, PROSPERITY_MAX);
             city.prosperity += (target - city.prosperity) * tn.prosperity_adjust_rate;
-            city.prosperity = city.prosperity.clamp(0.05, 2.5);
+            city.prosperity = city.prosperity.clamp(0.05, PROSPERITY_MAX);
             city.walls += (dev * 0.8 - city.walls) * 0.03;
             prosp_sum += city.prosperity;
         }

@@ -2208,3 +2208,72 @@ fn a_world_can_be_written_out() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A quantity built by adding up advantages must not pile against its
+/// ceiling.
+///
+/// This simulation made the same mistake in four places: sum everything
+/// that makes a thing prosperous, or rich, or well-positioned, and then
+/// clamp the sum. A clamp is invisible until enough things reach it and
+/// then it silently destroys the difference between them. Realms tied at
+/// exactly six hundred in the treasury; more than half the cities in the
+/// world at exactly two and a half in prosperity, with the *median* city at
+/// the maximum, so prosperity had stopped distinguishing anything and city
+/// income was decided by population alone.
+///
+/// `sim::soft_ceiling` is the shape that fixes it: below a knee nothing
+/// changes, above it the remaining room is approached and never reached. So
+/// the sum can go on growing and the result can go on answering to it.
+#[test]
+fn prosperity_does_not_pile_against_its_ceiling() {
+    use crate::sim::soft_ceiling;
+
+    // The curve itself: unchanged below the knee, bounded above it, and
+    // always increasing, since a city that gains an advantage must not lose
+    // prosperity for it.
+    assert_eq!(soft_ceiling(0.5, 1.5, 2.5), 0.5);
+    assert_eq!(soft_ceiling(1.5, 1.5, 2.5), 1.5);
+    let mut last = 1.5f32;
+    for v in [1.6f32, 2.0, 3.0, 8.0] {
+        let got = soft_ceiling(v, 1.5, 2.5);
+        assert!(got > last, "{} mapped to {} after {}", v, got, last);
+        assert!(got < 2.5, "{} mapped to {}, over the ceiling", v, got);
+        last = got;
+    }
+    // A sum hundreds of times the room available touches the ceiling,
+    // because the exponential underflows, and must never pass it.
+    assert!(soft_ceiling(500.0, 1.5, 2.5) <= 2.5);
+    assert!(soft_ceiling(f32::MAX, 1.5, 2.5) <= 2.5);
+    // A degenerate ceiling must not produce nonsense.
+    assert_eq!(soft_ceiling(3.0, 2.0, 1.0), 3.0);
+
+    // And in the world: cities must not collect at the top.
+    let pinned = |w: &World| -> (f32, f32) {
+        let live: Vec<f32> = (0..w.cities.len())
+            .filter(|&i| w.cities[i].destroyed.is_none())
+            .map(|i| w.cities[i].prosperity)
+            .collect();
+        let n = live.len().max(1);
+        let at_top = live.iter().filter(|&&v| v >= 2.49).count();
+        let mut sorted = live;
+        sorted.sort_by(f32::total_cmp);
+        (
+            at_top as f32 / n as f32,
+            sorted.get(n / 2).copied().unwrap_or(0.0),
+        )
+    };
+    let mut w = World::new(73, 160, 64, Detail::Medium);
+    run(&mut w, 1800);
+    let (share, median) = pinned(&w);
+    assert!(
+        share < 0.25,
+        "{:.0}% of cities sit at the top of the prosperity range",
+        share * 100.0
+    );
+    assert!(
+        median < 2.45,
+        "the median city has prosperity {:.2}, which is the maximum: the \
+         measure has stopped telling cities apart",
+        median
+    );
+}

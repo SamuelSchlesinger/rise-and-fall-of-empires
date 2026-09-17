@@ -112,6 +112,21 @@ Understanding a world, and reaching into it.
 
 - **A world carries only so many traditions.** *World-changing.* See below.
 
+- **Prosperity is bent towards its ceiling rather than clipped against it.**
+  *World-changing.* Everything that makes a city rich was added up and the
+  sum then clamped, so by the twenty-first century the *median* city in the
+  world sat at exactly the maximum: more than half of them had their income
+  decided by population alone, and prosperity had stopped telling cities
+  apart. It also made the saturating trade term pointless for the cities it
+  mattered most to, since their target was already over the cap. The
+  pile-up at the top falls from 56% of cities to 7%.
+
+  That is the fourth place this simulation had made the same mistake — sum
+  every advantage a thing has, then clamp the sum — after the treasury, the
+  confidence a treasury buys, and the prosperity a city draws from its
+  traffic. There is one shape for it now, `sim::soft_ceiling`, and a test
+  that holds prosperity to it.
+
 - The prosperity a city draws from its traffic saturates rather than
   stopping at a hard ceiling, so the difference between a good position on
   the roads and a commanding one no longer disappears.
@@ -150,6 +165,12 @@ Understanding a world, and reaching into it.
 
 - Sacking a city was the one way into a treasury that did not enforce the
   ceiling the other three did.
+
+- Prosperity is no longer printed as a percentage. It runs to two and a
+  half and is not a share of anything, so the city page read "194%
+  prosperity", which invites a reader to wonder 194% of what. It is an index
+  now, with "ordinary is 100" said beside it. And a city sacked once is
+  sacked "once" rather than "1 times".
 
 - A sentence may begin with a figure. "26% of the world's settled land now
   lay under the Lafulannic Kingdom" is good English and the prose check

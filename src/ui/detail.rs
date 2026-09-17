@@ -793,7 +793,7 @@ pub fn list_rows(w: &World, tab: usize) -> (Vec<(String, Ref)>, usize) {
                         / pol.cities.len() as f32
                 };
                 let row = format!(
-                    "{:<34}{:>8.0}  {:>+7.1}  {:>5.2}  {:>6.1}  {:>6.0}%",
+                    "{:<34}{:>8.0}  {:>+7.1}  {:>5.2}  {:>6.1}  {:>7.0}",
                     clip(&pol.name, 33),
                     pol.treasury,
                     explain::income_total(w, p),
@@ -1599,7 +1599,11 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
     ));
     out.push(line(
         format!(
-            "    Fortunes  {} ({:.0}% prosperity)   walls {}   sacked {} times",
+            // An index where a hundred is an ordinary town, not a share of
+            // anything: prosperity runs to two and a half, so printing it
+            // with a percent sign produced "194% prosperity", which invites
+            // a reader to wonder 194% of what.
+            "    Fortunes  {} (prosperity {:.0}, ordinary is 100)   walls {}   sacked {}",
             if city.prosperity > 0.8 {
                 "thriving"
             } else if city.prosperity > 0.45 {
@@ -1617,7 +1621,7 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
             } else {
                 "thin"
             },
-            city.times_sacked
+            crate::sim::prose::count(city.times_sacked as i64, "time")
         ),
         FG,
         0,

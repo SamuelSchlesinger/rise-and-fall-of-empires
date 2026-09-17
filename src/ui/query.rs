@@ -101,9 +101,11 @@ pub fn matches(w: &World, r: Ref, text: &str, terms: &[Term]) -> bool {
 
 /// The named quantities of whatever this row points at.
 ///
-/// Percentages are given as percentages — `stability<30`, not `0.3` — on the
-/// grounds that the interface prints them that way everywhere else, and a
-/// filter that disagreed with the column beside it would be a trap.
+/// Everything is scaled the way the interface prints it — `stability<30`
+/// rather than `0.3`, `prosperity>150` rather than `1.5` — because a filter
+/// that disagreed with the column beside it would be a trap. Prosperity is
+/// an index where a hundred is an ordinary town rather than a share of
+/// anything, and it runs past two hundred.
 pub fn value_of(w: &World, r: Ref, field: &str) -> Option<f32> {
     match r {
         Ref::Polity(p) if p < w.polities.len() => {

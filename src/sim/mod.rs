@@ -1046,6 +1046,30 @@ pub fn wealth_reach(tn: &tuning::Tuning, treasury: f32) -> f32 {
     t / (t + tn.court_reserve.max(1.0))
 }
 
+/// Bend a sum towards a ceiling instead of clipping it against one.
+///
+/// Below `knee` the value is returned unchanged, so nothing about the
+/// ordinary case moves. Above it the remaining room is approached
+/// asymptotically, so the sum can go on growing and the result can go on
+/// answering to it. It never exceeds `max`, and reaches it only where the
+/// exponential underflows — around a sum some hundreds of times the room
+/// available, which no quantity here comes near.
+///
+/// This is the same shape as [`treasury_confidence`] and the trade term in
+/// `politics::economy`, and it is the answer to a mistake this simulation
+/// made in four separate places: a quantity built by adding up every
+/// advantage a thing has, and then clamped. The clamp is invisible until
+/// enough things reach it, and then it silently destroys the difference
+/// between them — a row of realms tied at exactly six hundred, half the
+/// cities in the world at exactly two and a half.
+pub fn soft_ceiling(v: f32, knee: f32, max: f32) -> f32 {
+    if v <= knee || max <= knee {
+        return v;
+    }
+    let room = max - knee;
+    knee + room * (1.0 - (-(v - knee) / room).exp())
+}
+
 /// How much confidence a crown's money buys, in `[-0.2, 1]`.
 ///
 /// Saturating rather than a ratio against a ceiling, so that there is a
