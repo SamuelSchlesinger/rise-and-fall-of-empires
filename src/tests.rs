@@ -1722,28 +1722,43 @@ fn the_income_breakdown_adds_up() {
 /// `time_each_century`.
 #[test]
 fn living_schools_answer_to_the_size_of_the_world() {
-    let mut w = World::new(19, 200, 80, Detail::Medium);
-    w.tuning.school_schism_chance = 0.9;
-    w.tuning.school_schism_min_age = 5;
-    w.tuning.school_schism_min_adherents = 2;
-    run(&mut w, 1400);
-    let living = w.schools.iter().filter(|s| s.alive()).count();
-    let realms = w.alive_polities.len().max(1);
-    let room = (realms as f64 * w.tuning.schools_per_realm).max(1.0);
-    assert!(living > 0, "no school survived at all");
-    assert!(
-        (living as f64) < room * 3.0,
-        "{} living schools against {} realms: the schisms are compounding",
-        living,
-        realms
-    );
-    // And they must actually be retired, not merely stop being founded.
-    assert!(
-        w.schools.len() > living * 4,
-        "{} schools ever against {} alive: almost nothing is being retired",
-        w.schools.len(),
-        living
-    );
+    // A tradition can start two ways — a schism from an existing one, or a
+    // teaching founded where the ley runs strong — and the brake has to
+    // cover both. It first covered only schism, which held while the world
+    // had a few hundred cities and failed the moment it had fifteen
+    // hundred: schools climbed to six hundred against two hundred and
+    // seventy realms, the martyrs came back with them, and a large map went
+    // from three milliseconds a year to eighteen. So each door is turned up
+    // in turn, and then both together.
+    for (schism, founding) in [(0.9, 1.0), (0.006, 4000.0), (0.9, 4000.0)] {
+        let mut w = World::new(19, 200, 80, Detail::Medium);
+        w.tuning.school_schism_chance = schism;
+        w.tuning.school_schism_min_age = 5;
+        w.tuning.school_schism_min_adherents = 2;
+        w.tuning.school_found_mana_rate *= founding;
+        w.tuning.school_found_open_rate *= founding;
+        run(&mut w, 1400);
+        let living = w.schools.iter().filter(|s| s.alive()).count();
+        let realms = w.alive_polities.len().max(1);
+        let room = (realms as f64 * w.tuning.schools_per_realm).max(1.0);
+        assert!(living > 0, "no school survived at all");
+        assert!(
+            (living as f64) < room * 3.0,
+            "with schism {} and founding x{}: {} living schools against {} \
+             realms, so the traditions are compounding",
+            schism,
+            founding,
+            living,
+            realms
+        );
+        // And they must actually be retired, not merely stop being founded.
+        assert!(
+            w.schools.len() > living * 4,
+            "{} schools ever against {} alive: almost nothing is being retired",
+            w.schools.len(),
+            living
+        );
+    }
 }
 
 /// A teaching that has been fading for generations, with no larger cousin to

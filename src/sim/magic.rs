@@ -345,9 +345,29 @@ fn footholds(w: &World) -> Vec<u32> {
 
 /// Schools founded this year, where mana runs high or a people is given
 /// to mysticism and no other school has the ground already.
+/// How hard it is for a new tradition to find any ground at all.
+///
+/// A claim on followers somebody else already has: the more traditions are
+/// competing for them, the less likely a new one is to take. See
+/// [`crate::sim::tuning::Tuning::schools_per_realm`].
+///
+/// This brakes *both* ways a tradition can start. It first braked only
+/// schism, which held while the world had a few hundred cities and failed
+/// the moment it had fifteen hundred: schools founded from mana alone
+/// climbed to six hundred against two hundred and seventy realms, and since
+/// every school rolls against every realm it touches, the martyrs and the
+/// work came back with them. A brake on one of two doors is not a brake.
+fn crowding(w: &World) -> f64 {
+    let living = w.schools.iter().filter(|x| x.alive()).count() as f64;
+    let room = (w.alive_polities.len() as f64 * w.tuning.schools_per_realm).max(1.0);
+    let over = living / room;
+    1.0 / (1.0 + over * over * over)
+}
+
 fn found_schools(w: &mut World, rooted: &[u32]) {
     let rng = w.rng.clone();
     let tn = w.tuning;
+    let crowding = crowding(w);
     let ncity = w.cities.len();
     for c in 0..ncity {
         if w.cities[c].destroyed.is_some() {
@@ -359,10 +379,11 @@ fn found_schools(w: &mut World, rooted: &[u32]) {
         let vals = w.cultures[culture].values;
         let polity = w.cities[c].polity;
         let existing = polity.map(|p| rooted[p] as usize).unwrap_or(0);
-        let base = tn.school_found_mana_rate
+        let base = (tn.school_found_mana_rate
             * (mana as f64 - 0.25).max(0.0)
             * (0.5 + vals.mysticism as f64 * 2.0)
-            + tn.school_found_open_rate * (0.5 + vals.openness as f64);
+            + tn.school_found_open_rate * (0.5 + vals.openness as f64))
+            * crowding;
         // A realm with an established doctrine is poor soil: a new teaching
         // has the temples, the schools and the crown against it from the
         // first day. Without this every realm ends up with a school of its
@@ -406,16 +427,7 @@ fn tick_schools(w: &mut World) {
     let rng = w.rng.clone();
     let tn = w.tuning;
     let nschool = w.schools.len();
-    // How crowded the ground already is, counted once for the year. A
-    // schism is a claim on followers somebody else has, and the more
-    // traditions are already competing for them the less likely a new one is
-    // to find any: see `Tuning::schools_per_realm`.
-    let crowding = {
-        let living = w.schools.iter().filter(|x| x.alive()).count() as f64;
-        let room = (w.alive_polities.len() as f64 * tn.schools_per_realm).max(1.0);
-        let over = living / room;
-        1.0 / (1.0 + over * over * over)
-    };
+    let crowding = crowding(w);
     for s in 0..nschool {
         if !w.schools[s].alive() {
             continue;
