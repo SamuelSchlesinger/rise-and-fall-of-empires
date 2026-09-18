@@ -1044,6 +1044,23 @@ fn the_weather_turns_over_centuries() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Probes
+// ---------------------------------------------------------------------------
+//
+// The `#[ignore]` tests below are instruments, not checks: they print and
+// assert nothing, and `cargo test` skips them. They are kept because every
+// scaling fault this game has had was found by one of them and none was
+// found by reading the code — the schools that compounded, the martyrs that
+// piled up, the treasury with no drain, the prosperity that pinned at its
+// ceiling, and the brake that covered only one of two doors. A checked
+// invariant tells you when something has broken; these tell you what shape
+// it broke in, which is the part that takes the time.
+//
+// Run one with, for example:
+//
+//     C=100 cargo test --release time_each_century -- --ignored --nocapture
+
 /// Print the cost of a year, century by century, with the counts that
 /// explain it. Not a check — a probe, for when the game feels slow.
 ///
@@ -2273,6 +2290,7 @@ fn a_world_can_be_written_out() {
         ("chronicle", "## Years"),
         ("timeline", "# The rise and fall of"),
         ("series", "year,people,realms"),
+        ("house", "# "),
         ("map", "<!doctype html>"),
         ("realms", "name,lands,people"),
         ("wealth", "treasury"),
@@ -2765,7 +2783,10 @@ fn a_fallen_realm_is_given_an_epitaph() {
     let fallen: Vec<usize> = (0..w.polities.len())
         .filter(|&p| w.polities[p].fell.is_some())
         .collect();
-    assert!(fallen.len() > 20, "a 700 year world should have buried some realms");
+    assert!(
+        fallen.len() > 20,
+        "a 700 year world should have buried some realms"
+    );
     for &p in &fallen {
         let said = explain::epitaph(&w, p).expect("a fallen realm has an epitaph");
         assert!(said.starts_with("It stood for "), "{:?}", said);

@@ -34,6 +34,7 @@ impl Ui {
             "map" => self.map_html(),
             "timeline" => self.timeline_markdown(),
             "series" => self.series_csv(),
+            "house" | "tree" => self.house_markdown(),
             "realms" | "wealth" | "cities" | "roads" | "persons" | "wars" | "houses" => {
                 match self.table_csv(kind) {
                     Some(csv) => csv,
@@ -41,7 +42,7 @@ impl Ui {
                 }
             }
             _ => {
-                return "usage: :export chronicle|map|timeline|series|realms|wealth|cities|roads|persons|wars|houses [PATH]"
+                return "usage: :export chronicle|map|timeline|series|house|realms|wealth|cities|roads|persons|wars|houses [PATH]"
                     .into()
             }
         };
@@ -52,7 +53,7 @@ impl Ui {
         } else {
             let ext = match kind {
                 "map" => "html",
-                "chronicle" | "history" | "timeline" => "md",
+                "chronicle" | "history" | "timeline" | "house" | "tree" => "md",
                 _ => "csv",
             };
             // Named for the seed and the year, because those two identify a
@@ -98,6 +99,36 @@ impl Ui {
             }
             out.push_str(&format!("- **{}** — {}\n", e.year, e.text));
         }
+        out
+    }
+
+    /// A ruling family's tree, as Markdown.
+    ///
+    /// The selected house, or the longest-lived one if nothing is selected —
+    /// so `:export house` alone gives the dynasty a world is most likely to
+    /// be remembered by. The page itself does the drawing; this only wraps
+    /// it, so the file and the screen cannot disagree.
+    fn house_markdown(&self) -> String {
+        use crate::sim::chronicle::Ref;
+        let house = match self.selected {
+            Some(Ref::House(h)) => Some(h),
+            Some(Ref::Person(i)) => self.world.persons[i].house,
+            Some(Ref::Polity(p)) => self.world.polities[p].house,
+            _ => None,
+        }
+        .or_else(|| {
+            (0..self.world.houses.len()).max_by_key(|&h| self.world.houses[h].span(self.world.year))
+        });
+        let Some(h) = house else {
+            return "no house to write out".into();
+        };
+        let mut out = format!("# {}\n\n", self.world.houses[h].name);
+        out.push_str("```\n");
+        for l in detail::detail_lines(&self.world, Ref::House(h), 96, false) {
+            out.push_str(l.text.trim_end());
+            out.push('\n');
+        }
+        out.push_str("```\n");
         out
     }
 

@@ -2609,7 +2609,7 @@ pub const HELP: &[&str] = &[
     "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
     "             :fate 3  :q  :wq  :q!",
-    "             :export chronicle|map|timeline|series|realms|wealth|cities|roads|persons|wars",
+    "             :export chronicle|map|timeline|series|house|realms|wealth|cities|roads|persons|wars",
     "             (Markdown for the history, HTML for the map, CSV for a table)",
     "",
     "Browsing     e lists (realms, cities, peoples, schools, persons, wars, places, relics,",
