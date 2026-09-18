@@ -10,7 +10,7 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
-## [Unreleased]
+## [0.4.0] - 2026-09-17
 
 Understanding a world, and reaching into it.
 
@@ -115,6 +115,17 @@ Understanding a world, and reaching into it.
   which left the two economic entries in that block as the only visible
   economics in the game, both of them effects with no stated cause.
 
+- **Why a city is rich.** Prosperity became the most interesting number in
+  the game once trade fed it and a city's income came to depend on it, and
+  it was the only number of that importance with nothing said about where it
+  came from. The city page carries the same Why block the realm page gives
+  for stability and for money, and names both figures when the ceiling is
+  bending one into the other: "its advantages add to 405, which settles at
+  242". The first thing it says about a great city is that seventeen wonders
+  are worth a hundred and thirty-six points to it — which is a fact about
+  the world nothing had shown before, and the reason a wonder's price
+  changed below.
+
 - **A list can be asked a question.** The filter matched the text of a
   rendered row; a term is now a word to look for *or* a comparison against a
   named quantity — `lands>200`, `income<0`, `prosperity>=150`. Each page
@@ -144,9 +155,17 @@ Understanding a world, and reaching into it.
   a dark age on purpose, because knowledge belongs to the ground and ground
   that empties of people forgets.
 
+  The heading of the block describing the selection says what `x` would
+  reach — "x befalls the town" — because the menu offers a different six for
+  each kind of thing, and pressing it without knowing which was selected was
+  a guess.
+
 - **`:export`** writes a world out for somebody who does not have the game:
-  the chronicle as Markdown grouped by century, the map as HTML, or any list
-  page as CSV with a column for every quantity its filter advertises.
+  the chronicle as Markdown grouped by century, a ruling family's tree drawn
+  the way its page draws it, the map as HTML, or any list page as CSV with a
+  column for every quantity its filter advertises. `:export house` with
+  nothing selected takes the longest-lived line, which is the dynasty a
+  world is most likely to be remembered by.
 
 ### Changed
 
@@ -224,6 +243,21 @@ Understanding a world, and reaching into it.
   stopping at a hard ceiling, so the difference between a good position on
   the roads and a commanding one no longer disappears.
 
+- **A wonder costs what a realm can afford, and need not stand in the
+  capital.** *World-changing.* A monument cost a hundred whoever raised it,
+  so a crown sitting on twelve thousand bought one inside the noise of a
+  single year's court spending while a realm on a hundred and thirty was
+  very nearly bankrupted by the same wonder and, having fallen below the
+  threshold, could not build another until it recovered: the reward worth
+  far more to the poorer realm and the cost nothing at all to the richer
+  one. It is a share of the treasury now whenever that is more than the flat
+  price, and never more than the realm actually holds. And it was only ever
+  raised where the crown sat, so the second city of an empire could not have
+  one however large or old it grew — the realm's greatest city gets it now,
+  weighed down by what it already holds, so a capital that has been
+  collecting them for five hundred years eventually gives way to the port
+  that has none.
+
 - A city is taxed on the year's opening prosperity and its towns grow after
   the assessment rather than before it. *World-changing*, and what makes the
   Money block checkable against the treasury it describes.
@@ -243,6 +277,21 @@ Understanding a world, and reaching into it.
   from two milliseconds a year to unbounded. Schism now answers to how
   crowded the ground is, and a tradition that has been fading for
   generations with nothing to be folded into is forgotten.
+
+- **A chronicle index was being used as a name for an event.** Entity
+  vectors here are append-only, so an index is a stable name — except the
+  chronicle's, since `compact` removes events and shifts every later one.
+  The "while you were away" note guarded against a mark past the end of the
+  vector, which is the wrong half of the problem: compaction takes an eighth
+  at a time, so the common case is a mark that still lands *inside* the
+  chronicle, seven thousand entries too early. A two-minute absence was
+  reported as a thousand notable things across nine hundred years. The mark
+  is a year now, which is a fact about an event that compaction cannot
+  shift. Follow mode carried the same watermark and needed no mark at all —
+  it runs once a tick, so "logged this year" is exactly "logged since I last
+  looked" — and a compaction used to leave that watermark above the new
+  length, after which the map silently stopped jumping to whatever had just
+  happened.
 
 - **The stability breakdown had drifted from the simulation.** Its treasury
   term was a second copy of the old ratio, and went on dividing by a ceiling
@@ -914,6 +963,7 @@ The first release. Everything below is the work that led to it.
 - Person traits and a school's following line up in columns; the headless
   summary says "1 school", not "1 schools".
 
+[0.4.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.4.0
 [0.3.1]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.3.1
 [0.3.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.3.0
 [0.2.0]: https://github.com/SamuelSchlesinger/rise-and-fall-of-empires/releases/tag/v0.2.0
