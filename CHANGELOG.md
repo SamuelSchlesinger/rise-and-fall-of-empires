@@ -44,6 +44,12 @@ Understanding a world, and reaching into it.
   knew when a road changed state — it is what stops the chronicle reporting
   the same two cities every three years — and the map had no way to show it.
 
+- **An epitaph for a fallen realm.** Its page could say when it ended and
+  not why, though the world records everything needed: how long it stood,
+  how far past its height it was when it went, and what the chronicle
+  remembers of its last twenty years — whether it came apart, was taken, or
+  simply stopped.
+
 - **A memory layer and a settled layer.** Memory shows where in the world
   history actually happened, from every event the chronicle still holds,
   with great events counting for more than small ones — and it is named for

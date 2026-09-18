@@ -189,6 +189,64 @@ pub fn income_total(w: &World, p: usize) -> f32 {
     income_factors(w, p).iter().map(|f| f.weight).sum()
 }
 
+/// Why a realm is no longer there, in one sentence.
+///
+/// A fallen realm's page could say when it ended and not why, though the
+/// world records everything needed to say it: how far past its peak it was,
+/// how long it had been shrinking, what it was overextended by, whether it
+/// was at war, and what its last recorded moments were. A reader who has
+/// just watched a five-hundred-year empire vanish deserves better than a
+/// year.
+pub fn epitaph(w: &World, p: usize) -> Option<String> {
+    let pol = w.polities.get(p)?;
+    let fell = pol.fell?;
+    let lasted = fell - pol.founded;
+    // What the chronicle remembers of its last years, which is the best
+    // evidence there is for how it went.
+    let last: Vec<&str> = w
+        .chronicle
+        .for_ref(crate::sim::chronicle::Ref::Polity(p))
+        .iter()
+        .rev()
+        .filter_map(|&i| w.chronicle.events.get(i))
+        .filter(|e| e.year >= fell - 20)
+        .map(|e| e.text.as_str())
+        .collect();
+    let violent = last.iter().any(|t| {
+        t.contains("sack") || t.contains("Battle") || t.contains("conquer") || t.contains("took")
+    });
+    let split = last
+        .iter()
+        .any(|t| t.contains("came apart") || t.contains("broke") || t.contains("proclaim"));
+    let shrank = pol.peak_cells > 0 && pol.peak_year < fell - 50;
+    let how = if split {
+        "It came apart rather than being conquered"
+    } else if violent {
+        "It was taken"
+    } else if shrank {
+        "It had been shrinking for a long while before the end"
+    } else {
+        "It simply stopped"
+    };
+    let years = crate::sim::prose::years(lasted.max(0) as i64);
+    let decline = (fell - pol.peak_year).max(0);
+    let arc = if pol.peak_cells > 0 && decline > 0 {
+        format!(
+            ", and spent the last {} of them past its height of {} lands",
+            crate::sim::prose::years(decline as i64),
+            pol.peak_cells
+        )
+    } else if pol.peak_cells > 0 {
+        format!(
+            ", and was at its greatest of {} lands at the end",
+            pol.peak_cells
+        )
+    } else {
+        String::new()
+    };
+    Some(format!("It stood for {}{}. {}.", years, arc, how))
+}
+
 /// Everything making a city rich or poor, strongest first.
 ///
 /// Prosperity became the most interesting number in the game when trade

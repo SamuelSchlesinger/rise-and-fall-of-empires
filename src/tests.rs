@@ -2749,3 +2749,38 @@ fn rarity_is_worth_something() {
         lift(priced_common, flat_common)
     );
 }
+
+/// Every fallen realm gets an epitaph, and a standing one gets none.
+///
+/// A realm's page could say when it ended and not why, though the world
+/// records everything needed to say it: how long it stood, how far past its
+/// height it was, and what the chronicle remembers of its last years. A
+/// reader who has just watched a five-hundred-year empire vanish deserves
+/// better than a date.
+#[test]
+fn a_fallen_realm_is_given_an_epitaph() {
+    use crate::sim::explain;
+    let mut w = world(97);
+    run(&mut w, 700);
+    let fallen: Vec<usize> = (0..w.polities.len())
+        .filter(|&p| w.polities[p].fell.is_some())
+        .collect();
+    assert!(fallen.len() > 20, "a 700 year world should have buried some realms");
+    for &p in &fallen {
+        let said = explain::epitaph(&w, p).expect("a fallen realm has an epitaph");
+        assert!(said.starts_with("It stood for "), "{:?}", said);
+        assert!(said.ends_with('.'), "{:?}", said);
+        // No sentence may say a realm stood for a negative or absurd span,
+        // and none may run past what a page can hold.
+        assert!(!said.contains("-"), "{:?}", said);
+        assert!(said.len() < 240, "{} characters: {:?}", said.len(), said);
+    }
+    // And the living are not eulogised.
+    for &p in &w.alive_polities {
+        assert!(
+            explain::epitaph(&w, p).is_none(),
+            "realm {} is still standing and has an epitaph",
+            p
+        );
+    }
+}

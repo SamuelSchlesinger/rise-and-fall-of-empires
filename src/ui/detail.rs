@@ -1299,6 +1299,14 @@ fn realm_page(
             stability_color(pol.stability),
             0,
         ));
+        // A fallen realm gets an epitaph instead of a Why block: nothing
+        // pulls on the stability of something that is not there.
+        if let Some(said) = explain::epitaph(w, p) {
+            for l in term::wrap(&said, w2) {
+                out.push(line(l, DIMC, DIM));
+            }
+            out.push(line("", FG, 0));
+        }
         // Why it stands where it does: the same weights the
         // simulation uses each year, ranked and in plain words.
         let factors = explain::stability_factors(w, p);
