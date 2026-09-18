@@ -368,6 +368,46 @@ impl Terrain {
     pub fn xy(&self, i: usize) -> (usize, usize) {
         (i % self.w, i / self.w)
     }
+    /// The cells a straight line from `a` to `b` passes through, ends
+    /// included.
+    ///
+    /// Bresenham, because a trade route is stored as a pair of cities and has to
+    /// be drawn as a path. Deliberately ignorant of terrain: the line a reader
+    /// wants is the one joining the two towns, not the road a caravan would
+    /// actually pick through the hills, and a sea route has no road at all.
+    pub fn cells_between(&self, a: usize, b: usize) -> Vec<usize> {
+        let t = self;
+        let (x0, y0) = t.xy(a);
+        let (x1, y1) = t.xy(b);
+        let (mut x, mut y) = (x0 as i64, y0 as i64);
+        let (x1, y1) = (x1 as i64, y1 as i64);
+        let (dx, dy) = ((x1 - x).abs(), -(y1 - y).abs());
+        let (sx, sy) = (if x < x1 { 1 } else { -1 }, if y < y1 { 1 } else { -1 });
+        let mut err = dx + dy;
+        // A line can be no longer than the map's diagonal; the bound is a guard
+        // against a malformed save rather than an expected case.
+        let mut out = Vec::with_capacity((dx.max(-dy) as usize) + 1);
+        let limit = t.w + t.h + 2;
+        for _ in 0..limit {
+            if x >= 0 && y >= 0 && (x as usize) < t.w && (y as usize) < t.h {
+                out.push(t.idx(x as usize, y as usize));
+            }
+            if x == x1 && y == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+        out
+    }
+
     /// How many cells the map has.
     pub fn n(&self) -> usize {
         self.w * self.h

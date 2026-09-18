@@ -58,12 +58,20 @@ pub struct Flows {
     pub fought: Vec<f32>,
     /// Where ground has changed hands.
     pub changed: Vec<f32>,
+    /// Where the carrying trade has been won and lost: positive along a
+    /// road that has opened, negative along one a war has shut.
+    pub carried: Vec<f32>,
 }
 
 impl Flows {
     /// Make room for a map of `n` cells, keeping whatever is already there.
     pub fn fit(&mut self, n: usize) {
-        for v in [&mut self.settled, &mut self.fought, &mut self.changed] {
+        for v in [
+            &mut self.settled,
+            &mut self.fought,
+            &mut self.changed,
+            &mut self.carried,
+        ] {
             if v.len() != n {
                 v.resize(n, 0.0);
             }
@@ -96,6 +104,23 @@ impl World {
         }
         if let Some(v) = self.flows.fought.get_mut(cell) {
             *v += weight;
+        }
+    }
+
+    /// Note that a road worth `value` has opened along `path`, or closed if
+    /// the value is negative.
+    ///
+    /// Along the whole line rather than at its two ends, because what a
+    /// reader wants to see is the corridor that has gone quiet, not two
+    /// dots a thousand miles apart.
+    pub fn note_carried(&mut self, path: &[usize], value: f32) {
+        if self.flows.carried.len() != self.cells.len() {
+            self.flows.fit(self.cells.len());
+        }
+        for &c in path {
+            if let Some(v) = self.flows.carried.get_mut(c) {
+                *v += value;
+            }
         }
     }
 
@@ -134,6 +159,7 @@ pub fn tick(w: &mut World) {
         &mut w.flows.settled,
         &mut w.flows.fought,
         &mut w.flows.changed,
+        &mut w.flows.carried,
     ] {
         for x in v.iter_mut() {
             *x *= k;

@@ -373,7 +373,7 @@ impl Ui {
                     continue;
                 }
                 let weight = ((r.value * 6.0) as u32).min(0x7f) as u8;
-                for cell in crate::ui::cells_between(&self.world.terrain, ca, cb) {
+                for cell in self.world.terrain.cells_between(ca, cb) {
                     let slot = &mut v[cell];
                     let carried = (*slot & 0x7f).saturating_add(weight).min(0x7f);
                     let open = (*slot & 0x80 != 0) || r.open;
@@ -803,6 +803,38 @@ impl Ui {
                                 fg = bg.scale(1.5);
                                 ch = ' ';
                             }
+                        }
+                    }
+                    // Where the carrying trade has just been won or lost.
+                    // Gold where a road has opened, dark red where a war has
+                    // shut one — the corridor, not its two ends.
+                    Layer::Carrying => {
+                        let f = self.world.flows.carried.get(i).copied().unwrap_or(0.0);
+                        if f.abs() > 0.02 {
+                            let k = (f.abs() / 3.0).clamp(0.0, 1.0);
+                            let tint = if f > 0.0 {
+                                Rgb(240, 205, 110)
+                            } else {
+                                Rgb(190, 70, 60)
+                            };
+                            bg = bg.mix(tint, 0.25 + k * 0.6);
+                            fg = bg.mix(Rgb(255, 255, 255), 0.5);
+                            ch = if f > 0.0 {
+                                if self.ascii {
+                                    '+'
+                                } else {
+                                    '\u{25b8}'
+                                }
+                            } else if self.ascii {
+                                'x'
+                            } else {
+                                '\u{00d7}'
+                            };
+                            attr |= BOLD;
+                        } else if !water {
+                            bg = bg.scale(0.4);
+                            fg = bg.scale(1.5);
+                            ch = ' ';
                         }
                     }
                     Layer::Terrain => {}

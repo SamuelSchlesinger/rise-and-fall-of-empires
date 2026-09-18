@@ -2561,3 +2561,54 @@ fn a_wonder_costs_what_a_realm_can_afford() {
         "every wonder in the world stands in a capital"
     );
 }
+
+/// A war that shuts a road marks the whole corridor, not its two ends.
+///
+/// The trade network already knew when a road opened and closed — it is
+/// what stops the chronicle reporting the same two cities every three years
+/// — and the map had no way to show it. A reader watching a war spread
+/// should be able to see the corridor go quiet.
+#[test]
+fn shutting_a_road_marks_the_road() {
+    let mut w = world(67);
+    run(&mut w, 400);
+    // An open road between two realms that are not yet fighting.
+    let (route, a, b) = w
+        .routes
+        .iter()
+        .find_map(|r| {
+            let (pa, pb) = (w.cities[r.a].polity?, w.cities[r.b].polity?);
+            (r.open
+                && pa != pb
+                && w.polities[pa].alive()
+                && w.polities[pb].alive()
+                && w.war_between(pa, pb).is_none())
+            .then_some((*r, pa, pb))
+        })
+        .expect("a 400 year world has an open road between two realms at peace");
+    let path = w
+        .terrain
+        .cells_between(w.cities[route.a].cell, w.cities[route.b].cell);
+    assert!(path.len() > 2, "the two towns are the same place");
+
+    let before: f32 = path.iter().map(|&c| w.flows.carried[c]).sum();
+    w.wars_start(a, b, crate::sim::WarKind::Conquest, "a test".into());
+    w.tick();
+    let after: f32 = path.iter().map(|&c| w.flows.carried[c]).sum();
+    assert!(
+        after < before,
+        "a war shut the road and the map says nothing: {:.3} to {:.3}",
+        before,
+        after
+    );
+    // Along the middle of it, not only at the two towns.
+    let middle = path[path.len() / 2];
+    assert!(
+        w.flows.carried[middle] < 0.0,
+        "only the ends of the road were marked"
+    );
+    // And it fades, rather than staying dark for ever.
+    let deep = w.flows.carried[middle];
+    run(&mut w, 120);
+    assert!(w.flows.carried[middle] > deep, "the mark never faded");
+}

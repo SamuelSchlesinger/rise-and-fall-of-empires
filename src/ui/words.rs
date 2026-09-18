@@ -438,6 +438,18 @@ pub fn legend_parts(layer: Layer, ascii: bool) -> Vec<String> {
             "dark earth is newly taken, pale is long settled".into(),
             "empty country is left bare".into(),
         ],
+        Layer::Carrying => vec![
+            format!(
+                "{} a road newly opened",
+                if ascii { '+' } else { '\u{25b8}' }
+            ),
+            format!(
+                "{} a road a war has shut",
+                if ascii { 'x' } else { '\u{00d7}' }
+            ),
+            "the corridor, not just the two towns".into(),
+            "fades over a lifetime".into(),
+        ],
         Layer::Drift => vec![
             format!(
                 "{} the weather has turned wetter",

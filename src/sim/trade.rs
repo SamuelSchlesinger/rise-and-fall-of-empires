@@ -400,6 +400,12 @@ fn open_and_close(w: &mut World) {
         let held = w.year - r.since;
         w.routes[i].open = open;
         w.routes[i].since = w.year;
+        // So the map can show where the carrying trade has just been won or
+        // lost, along the whole corridor rather than at its two ends.
+        let path = w
+            .terrain
+            .cells_between(w.cities[r.a].cell, w.cities[r.b].cell);
+        w.note_carried(&path, if open { r.value } else { -r.value });
         // Only the great roads are worth a line, and only when the change
         // has any weight to it: a road that shuts for two years while a
         // border skirmish plays out is not news, and saying so every time

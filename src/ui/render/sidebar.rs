@@ -626,6 +626,19 @@ impl Ui {
                     }
                 }
             }
+            Layer::Carrying => {
+                let f = w.flows.carried.get(i).copied().unwrap_or(0.0);
+                out.push((
+                    if f > 0.02 {
+                        format!("the caravans have found this way ({:+.1})", f)
+                    } else if f < -0.02 {
+                        format!("a road through here has shut ({:+.1})", f)
+                    } else {
+                        "nothing has changed along here lately".to_string()
+                    },
+                    if f < -0.02 { Rgb(220, 120, 110) } else { dim },
+                ));
+            }
             Layer::Memory => {
                 let n = w
                     .chronicle

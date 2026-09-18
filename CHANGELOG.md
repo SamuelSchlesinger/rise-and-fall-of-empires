@@ -38,6 +38,12 @@ Understanding a world, and reaching into it.
   families (power, peoples, land, living, motion) and `\` steps the maps
   within one.
 
+- **A carrying layer**, showing where the trade has just been won and lost:
+  gold along a road newly opened, dark red along one a war has shut, and the
+  whole corridor rather than the two towns at its ends. The network already
+  knew when a road changed state — it is what stops the chronicle reporting
+  the same two cities every three years — and the map had no way to show it.
+
 - **A memory layer and a settled layer.** Memory shows where in the world
   history actually happened, from every event the chronicle still holds,
   with great events counting for more than small ones — and it is named for
