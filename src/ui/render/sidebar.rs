@@ -346,8 +346,29 @@ impl Ui {
             let stop = y + share.selected;
             self.screen.hline(x0 + 1, y, width - 1, Rgb(60, 60, 70), bg);
             y += 1;
+            // What `x` would act on. The footer says "x intervene" and can
+            // say no more — it is a fixed pair of strings — but the Hand of
+            // Fate offers a different six for a realm, a town, a person and
+            // a stretch of country, so pressing it without knowing which is
+            // selected is a guess.
+            //
+            // Kept short and clipped to the sidebar. The first attempt at
+            // this wrote "x befalls the realm" into a heading drawn
+            // straight into a column thirty-three wide, and the tail simply
+            // ran off the edge; the second put it in the block below, where
+            // it was the first line trimmed when a realm had a lot to say.
+            let head = match self
+                .selected
+                .filter(|&r| detail::fate_reaches(&self.world, r))
+            {
+                Some(Ref::Polity(_)) => "Selected | r recap | x realm",
+                Some(Ref::City(_)) => "Selected | r recap | x town",
+                Some(Ref::Person(_)) => "Selected | r recap | x person",
+                Some(Ref::Feature(_)) => "Selected | r recap | x land",
+                _ => "Selected | r recap",
+            };
             self.screen
-                .text_attr(x, y, "Selected | r recap", accent, bg, BOLD);
+                .text_clip(x, y, head, tx, Style::attr(accent, bg, BOLD));
             y += 1;
             for (l, c) in block_rows(&sel_items, tx, stop - y, ascii) {
                 self.screen.text_clip(x, y, &l, tx, Style::new(c, bg));

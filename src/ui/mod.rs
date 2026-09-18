@@ -1595,6 +1595,37 @@ mod tests {
         w
     }
 
+    /// The sidebar says what the Hand of Fate would act on.
+    ///
+    /// `x` reaches a realm, a town, a person or a stretch of country, and
+    /// offers a different six for each — so pressing it without knowing
+    /// which is selected is a guess. The footer cannot say: it is a fixed
+    /// pair of strings. The block that describes the selection can.
+    #[test]
+    fn the_sidebar_says_what_the_hand_of_fate_would_touch() {
+        let w = world();
+        let city = (0..w.cities.len())
+            .find(|&c| w.cities[c].destroyed.is_none())
+            .expect("a 150 year world has a city");
+        let realm = *w
+            .alive_polities
+            .first()
+            .expect("a 150 year world has a realm");
+        for (sel, want) in [(Ref::City(city), "x town"), (Ref::Polity(realm), "x realm")] {
+            let mut ui = Ui::new(world(), false, false, 160, 45);
+            ui.paused = true;
+            ui.selected = Some(sel);
+            ui.compose();
+            let out = text(&ui);
+            assert!(
+                out.contains(want),
+                "with {:?} selected the sidebar does not say {:?}",
+                sel,
+                want
+            );
+        }
+    }
+
     /// Leaving the map and coming back must report only what happened
     /// while the viewer was gone.
     ///
