@@ -33,6 +33,7 @@ impl Ui {
             "chronicle" | "history" => self.chronicle_markdown(),
             "map" => self.map_html(),
             "timeline" => self.timeline_markdown(),
+            "series" => self.series_csv(),
             "realms" | "wealth" | "cities" | "roads" | "persons" | "wars" | "houses" => {
                 match self.table_csv(kind) {
                     Some(csv) => csv,
@@ -40,7 +41,7 @@ impl Ui {
                 }
             }
             _ => {
-                return "usage: :export chronicle|map|timeline|realms|wealth|cities|roads|persons|wars|houses [PATH]"
+                return "usage: :export chronicle|map|timeline|series|realms|wealth|cities|roads|persons|wars|houses [PATH]"
                     .into()
             }
         };
@@ -96,6 +97,29 @@ impl Ui {
                 out.push_str(&format!("\n## Years {}–{}\n\n", c.max(0), c + 99));
             }
             out.push_str(&format!("- **{}** — {}\n", e.year, e.text));
+        }
+        out
+    }
+
+    /// The world's own record of itself, as CSV: one row per decade, one
+    /// column per series.
+    ///
+    /// The columns come from `history::SERIES`, the same table the chart
+    /// page draws from, so a column cannot appear on one and not the other.
+    fn series_csv(&self) -> String {
+        use crate::sim::history::SERIES;
+        let mut out = String::from("year");
+        for (name, _) in SERIES {
+            out.push(',');
+            out.push_str(name);
+        }
+        out.push('\n');
+        for s in &self.world.history.samples {
+            out.push_str(&s.year.to_string());
+            for (_, read) in SERIES {
+                out.push_str(&format!(",{:.4}", read(s)));
+            }
+            out.push('\n');
         }
         out
     }

@@ -358,7 +358,14 @@ impl Ui {
         self.screen
             .fill(Rect::new(0, 0, sw, sh), ' ', Style::new(fg, bg));
         let width = sw.saturating_sub(6).max(30);
-        let lines = recap::lines(&self.world, self.recap_years, self.recap_scope, width, sh);
+        let lines = recap::lines(
+            &self.world,
+            self.recap_years,
+            self.recap_scope,
+            width,
+            sh,
+            self.ascii,
+        );
         let max_scroll = lines.len().saturating_sub(sh.saturating_sub(1));
         if self.recap_scroll > max_scroll {
             self.recap_scroll = max_scroll;

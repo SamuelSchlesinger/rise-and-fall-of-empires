@@ -10,6 +10,7 @@ pub mod events;
 pub mod explain;
 pub mod flows;
 pub mod genesis;
+pub mod history;
 pub mod magic;
 pub mod people;
 pub mod politics;
@@ -1209,6 +1210,8 @@ pub struct World {
     /// `diplomacy` asks per pair of neighbours.
     pub city_takings: Vec<f32>,
     pub pair_trade: BTreeMap<(usize, usize), f32>,
+    /// What the world was, decade by decade: see [`history`].
+    pub history: history::History,
     /// What the world has been doing lately, as distinct from what it is:
     /// see [`flows`].
     pub flows: flows::Flows,
@@ -1291,6 +1294,7 @@ impl World {
             routes: Vec::new(),
             city_takings: Vec::new(),
             pair_trade: BTreeMap::new(),
+            history: history::History::default(),
             flows: flows::Flows::default(),
             war_names: BTreeMap::new(),
             cell_yield: Vec::new(),
@@ -1380,6 +1384,7 @@ impl World {
             routes: Vec::new(),
             city_takings: Vec::new(),
             pair_trade: BTreeMap::new(),
+            history: history::History::default(),
             flows: flows::Flows::default(),
             war_names: BTreeMap::new(),
             cell_yield: Vec::new(),
@@ -2263,6 +2268,7 @@ impl World {
         if self.year % 10 == 0 {
             self.stats.pop_history.push(self.stats.pop);
         }
+        history::tick(self);
         self.ticks_ms = self.ticks_ms * 0.9 + t0.elapsed().as_secs_f64() * 1000.0 * 0.1;
     }
 

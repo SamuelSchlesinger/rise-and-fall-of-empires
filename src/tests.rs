@@ -2165,6 +2165,7 @@ fn a_world_can_be_written_out() {
     for (kind, must_contain) in [
         ("chronicle", "## Years"),
         ("timeline", "# The rise and fall of"),
+        ("series", "year,people,realms"),
         ("map", "<!doctype html>"),
         ("realms", "name,lands,people"),
         ("wealth", "treasury"),

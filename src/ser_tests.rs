@@ -118,6 +118,61 @@ fn a_realms_peak_cities_survive_a_round_trip() {
     assert_eq!(ver, 3);
 }
 
+/// A world's record of itself survives a round trip, and a world that never
+/// had one still loads.
+///
+/// The series is the one thing in a save that cannot be rebuilt: every other
+/// derived field is recomputed on load, and a peak can at worst be
+/// re-earned, but no amount of running a world forward recovers what its
+/// population was in the eighth century. It also carries the count of
+/// chronicle entries compaction has thrown away — the chronicle itself is
+/// rebuilt through `Chronicle::default` on load, so the count comes back as
+/// nothing unless something else holds it.
+#[test]
+fn a_worlds_record_of_itself_survives_a_round_trip() {
+    let mut w = small_world(120);
+    assert!(
+        w.history.samples.len() >= 10,
+        "120 years should be a dozen samples, not {}",
+        w.history.samples.len()
+    );
+    let before: Vec<(i32, f32)> = w.history.samples.iter().map(|s| (s.year, s.pop)).collect();
+    let forgotten = w.chronicle.dropped;
+
+    let bytes = ser::save(&mut w);
+    let cs = chunks(&bytes);
+    let (_, ver, _, _) = *cs
+        .iter()
+        .find(|c| &c.0 == b"hist")
+        .expect("the history chunk is written");
+    // A tripwire, like the realm record's: adding a field to a sample means
+    // bumping the version in the `sections!` table, and this fails until it
+    // has been.
+    assert_eq!(ver, 1);
+
+    let loaded = ser::load(&bytes).expect("a fresh save must load");
+    let after: Vec<(i32, f32)> = loaded
+        .history
+        .samples
+        .iter()
+        .map(|s| (s.year, s.pop))
+        .collect();
+    assert_eq!(before, after, "the world forgot what it had been");
+    assert_eq!(
+        loaded.chronicle.dropped, forgotten,
+        "the count of forgotten history was itself forgotten"
+    );
+
+    // And a file written before there was any such chunk still loads, with
+    // an empty record rather than an error.
+    let (at, end) = find(&bytes, b"hist");
+    let mut v = bytes[..at].to_vec();
+    v.extend_from_slice(&bytes[end..]);
+    let without = reseal(v);
+    let old = ser::load(&without).expect("a world without a history still loads");
+    assert!(old.history.samples.is_empty());
+}
+
 #[test]
 fn header_is_what_we_say_it_is() {
     let mut w = small_world(5);
@@ -135,7 +190,7 @@ fn header_is_what_we_say_it_is() {
     // count is the length of the `sections!` table, so adding a section
     // means updating this line — which is the point of asserting it.
     let cs = chunks(&bytes);
-    assert_eq!(cs.len(), 21);
+    assert_eq!(cs.len(), 22);
     assert_eq!(cs.last().unwrap().3, bytes.len());
     assert!(cs.iter().any(|c| &c.0 == b"terr"));
     assert!(cs.iter().any(|c| &c.0 == b"chrn"));

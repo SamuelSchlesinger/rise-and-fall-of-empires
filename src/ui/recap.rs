@@ -19,6 +19,128 @@ fn line(text: impl Into<String>, fg: Rgb, attr: u8) -> Line {
     }
 }
 
+/// A number short enough for a chart's margin.
+///
+/// The series share no units — people run to millions, decadence to one —
+/// so the same column has to hold both without either becoming unreadable.
+fn compact(v: f32) -> String {
+    let a = v.abs();
+    if a >= 1.0e6 {
+        format!("{:.1}M", v / 1.0e6)
+    } else if a >= 1.0e3 {
+        format!("{:.1}k", v / 1.0e3)
+    } else if a >= 10.0 {
+        format!("{:.0}", v)
+    } else {
+        format!("{:.2}", v)
+    }
+}
+
+/// The ramp a sparkline is drawn with, lowest first.
+///
+/// Both halves are needed, not one. The frame's ascii sweep would turn the
+/// block elements into `'?'` — they have no arms in `ascii_glyph`, and the
+/// test that forbids Unicode in ascii mode would still pass, because a
+/// question mark is ASCII. A chart of question marks is not a chart.
+fn ramp(ascii: bool) -> [char; 8] {
+    if ascii {
+        ['_', '.', '.', '-', '-', '=', '=', '#']
+    } else {
+        [
+            '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
+            '\u{2588}',
+        ]
+    }
+}
+
+/// One series as a row of blocks, scaled to its own range.
+///
+/// Each series gets its own scale because they share no units: a chart that
+/// put population and the number of wars on one axis would be a flat line
+/// and a flat line. The floor is zero rather than the minimum, so a series
+/// that never varies reads as a steady band and not as noise.
+fn spark(values: &[f32], width: usize, ascii: bool) -> String {
+    if values.is_empty() || width == 0 {
+        return String::new();
+    }
+    let top = values.iter().copied().fold(0.0f32, f32::max);
+    let steps = ramp(ascii);
+    // More samples than columns is the normal case in a long world, so each
+    // column is the largest sample it covers: a chart of a world's history
+    // should not lose the peak of a plague to averaging.
+    (0..width)
+        .map(|i| {
+            let from = i * values.len() / width;
+            let to = (((i + 1) * values.len()) / width)
+                .max(from + 1)
+                .min(values.len());
+            let v = values[from..to].iter().copied().fold(0.0f32, f32::max);
+            if top <= 0.0 {
+                return steps[0];
+            }
+            let k = ((v / top) * (steps.len() - 1) as f32).round() as usize;
+            steps[k.min(steps.len() - 1)]
+        })
+        .collect()
+}
+
+/// How the world has gone, series by series, as a block of sparklines.
+///
+/// Empty until a world has been measured a few times — there is nothing
+/// useful to draw from two points — and empty for a world loaded from a file
+/// written before it kept a record of itself.
+pub fn world_over_time(w: &World, width: usize, ascii: bool) -> Vec<Line> {
+    use crate::sim::history::SERIES;
+    let mut out: Vec<Line> = Vec::new();
+    let Some((from, to)) = w.history.span() else {
+        return out;
+    };
+    if w.history.samples.len() < 4 {
+        return out;
+    }
+    // Label, chart, and the current value with its peak. The chart takes
+    // whatever is left over, and never less than a stub.
+    let label_w = 13usize;
+    // Exactly what the format below spends after the chart: two spaces, a
+    // nine-wide figure, two spaces, "peak " and a seven-wide figure. Guess
+    // it short and the peak is clipped in half by the page's own width.
+    let tail_w = 2 + 9 + 2 + 5 + 7;
+    let chart_w = width.saturating_sub(label_w + tail_w).max(8);
+    out.push(line(
+        format!("THE WORLD FROM YEAR {} TO {}", from, to),
+        ACCENT,
+        BOLD,
+    ));
+    for (name, read) in SERIES {
+        let values: Vec<f32> = w.history.samples.iter().map(read).collect();
+        let now = values.last().copied().unwrap_or(0.0);
+        let peak = values.iter().copied().fold(0.0f32, f32::max);
+        out.push(line(
+            format!(
+                "{:<label$}{}  {:>9}  peak {:>7}",
+                name,
+                spark(&values, chart_w, ascii),
+                compact(now),
+                compact(peak),
+                label = label_w,
+            ),
+            FG,
+            0,
+        ));
+    }
+    out.push(line(
+        format!(
+            "each line is scaled to itself, one column per {} years",
+            (w.history.samples.len() * crate::sim::history::SAMPLE_EVERY as usize)
+                .div_euclid(chart_w.max(1))
+                .max(crate::sim::history::SAMPLE_EVERY as usize)
+        ),
+        DIMC,
+        DIM,
+    ));
+    out
+}
+
 /// A section heading in the left column and its sentences on the right.
 struct Section {
     label: &'static str,
@@ -48,7 +170,14 @@ fn touches(w: &World, e: usize, p: usize) -> bool {
 /// The height is what the digest spends: it fills the page it is given and
 /// says "there was more" when it runs out, rather than stopping at a fixed
 /// thirty lines and leaving the bottom third of a tall terminal blank.
-pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize, height: usize) -> Vec<Line> {
+pub fn lines(
+    w: &World,
+    years: i32,
+    only: Option<usize>,
+    width: usize,
+    height: usize,
+    ascii: bool,
+) -> Vec<Line> {
     let since = (w.year - years.max(1)).max(0);
     let mut out: Vec<Line> = Vec::new();
     let title = match only {
@@ -69,6 +198,18 @@ pub fn lines(w: &World, years: i32, only: Option<usize>, width: usize, height: u
         DIM,
     ));
     out.push(line("", FG, 0));
+
+    // How the world has gone, before what it has been doing lately. Only
+    // for the world as a whole: the series are world totals, and a realm's
+    // digest asking after the world's population would be answering a
+    // question nobody put.
+    if only.is_none() {
+        let chart = world_over_time(w, width, ascii);
+        if !chart.is_empty() {
+            out.extend(chart);
+            out.push(line("", FG, 0));
+        }
+    }
 
     let mine = |p: usize| only.map(|q| q == p).unwrap_or(true);
     let mut sections: Vec<Section> = Vec::new();
@@ -575,6 +716,79 @@ fn count(n: usize, noun: &str) -> String {
 }
 
 #[cfg(test)]
+mod chart_tests {
+    use super::*;
+    use crate::sim::Detail;
+
+    /// A sparkline must be the width it was asked for, keep the peak, and
+    /// draw something for a series that never moves.
+    #[test]
+    fn a_sparkline_fits_and_keeps_its_peak() {
+        let steps = ramp(false);
+        // More samples than columns is the normal case in a long world, and
+        // a spike must survive the squeeze: a plague that halved a
+        // population should not be averaged away.
+        let mut values = vec![1.0f32; 200];
+        values[137] = 100.0;
+        let s = spark(&values, 40, false);
+        assert_eq!(s.chars().count(), 40);
+        assert!(
+            s.contains(steps[7]),
+            "the peak was lost when 200 samples were squeezed into 40 columns"
+        );
+        // Fewer samples than columns is fine too.
+        assert_eq!(spark(&[1.0, 2.0, 3.0], 30, false).chars().count(), 30);
+        // A flat series reads as a band, not as noise, and a series of
+        // nothing at all does not divide by zero.
+        let flat = spark(&[4.0; 20], 12, false);
+        assert_eq!(flat.chars().count(), 12);
+        assert!(flat.chars().all(|c| c == steps[7]));
+        assert_eq!(spark(&[0.0; 20], 12, false).chars().count(), 12);
+        assert_eq!(spark(&[], 12, false), "");
+        assert_eq!(spark(&[1.0], 0, false), "");
+        // And the ascii ramp is ascii, because the frame's sweep would turn
+        // the block elements into question marks and still pass the test
+        // that forbids Unicode.
+        assert!(ramp(true).iter().all(char::is_ascii));
+        assert!(spark(&[1.0, 5.0, 3.0], 20, true).is_ascii());
+    }
+
+    /// The world's record of itself is drawn once there is enough of it,
+    /// and says nothing at all before that.
+    #[test]
+    fn the_world_over_time_waits_until_it_has_something_to_say() {
+        let mut w = crate::sim::World::new(29, 60, 30, Detail::Medium);
+        assert!(
+            world_over_time(&w, 100, false).is_empty(),
+            "a world with no history drew a chart of it"
+        );
+        for _ in 0..600 {
+            w.tick();
+        }
+        let lines = world_over_time(&w, 100, false);
+        // A heading, every series, and the note about the scale.
+        assert_eq!(lines.len(), crate::sim::history::SERIES.len() + 2);
+        for (name, _) in crate::sim::history::SERIES {
+            assert!(
+                lines.iter().any(|l| l.text.starts_with(name)),
+                "no row for {}",
+                name
+            );
+        }
+        // Every row fits the width it was given, or the page would spill
+        // into the margin and the peak would be clipped in half.
+        for l in &lines {
+            assert!(
+                l.text.chars().count() <= 100,
+                "a {} row is {} wide against a page of 100",
+                l.text.split_whitespace().next().unwrap_or(""),
+                l.text.chars().count()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::sim::Detail;
@@ -594,7 +808,7 @@ mod tests {
             w.tick();
         }
         for years in [10, 50, 100, 1000] {
-            let ls = lines(&w, years, None, 100, 44);
+            let ls = lines(&w, years, None, 100, 44, false);
             assert!(ls.len() <= 44, "{} lines for {} years", ls.len(), years);
             for l in &ls {
                 assert!(l.text.chars().count() <= 100, "{}", l.text);
@@ -602,7 +816,7 @@ mod tests {
         }
         // And for one realm.
         if let Some(&p) = w.living_polities().first() {
-            let ls = lines(&w, 100, Some(p), 100, 44);
+            let ls = lines(&w, 100, Some(p), 100, 44, false);
             assert!(!ls.is_empty());
             assert!(ls[0].text.contains("THE LAST 100 YEARS"));
         }
@@ -611,7 +825,7 @@ mod tests {
     #[test]
     fn an_empty_world_still_says_something() {
         let w = World::new(3, 40, 20, Detail::Low);
-        let ls = lines(&w, 50, None, 80, 24);
+        let ls = lines(&w, 50, None, 80, 24, false);
         assert!(ls.len() >= 3);
     }
 }

@@ -1489,6 +1489,37 @@ fn stats<S: Io>(s: &mut S, w: &mut World) {
     vec_f64(s, &mut w.stats.pop_history);
 }
 
+/// A world's own record of itself, decade by decade.
+///
+/// Its own chunk rather than more fields on `stat`, and the reason is the
+/// asymmetry in `read_chunk`: a build that meets a *newer* version of a
+/// section it knows drops the whole section, because records are
+/// positional. Bumping `stat` would have cost an older binary `peak_pop`
+/// and `pop_history` as well as the new series; a tag it has never heard of
+/// costs it nothing at all.
+fn history<S: Io>(s: &mut S, w: &mut World) {
+    seq(
+        s,
+        &mut w.history.samples,
+        crate::sim::history::Sample::default,
+        |s, x| {
+            s.i32(&mut x.year);
+            s.f32(&mut x.pop);
+            s.f32(&mut x.realms);
+            s.f32(&mut x.cities);
+            s.f32(&mut x.wars);
+            s.f32(&mut x.schools);
+            s.f32(&mut x.trade);
+            s.f32(&mut x.dev);
+            s.f32(&mut x.stability);
+            s.f32(&mut x.treasury);
+            s.f32(&mut x.income);
+            s.f32(&mut x.decadence);
+        },
+    );
+    s.usize(&mut w.history.forgotten);
+}
+
 fn counters<S: Io>(s: &mut S, w: &mut World) {
     s.u32(&mut w.century_wars);
     s.u32(&mut w.century_schools);
@@ -1570,6 +1601,7 @@ sections! {
     T_STAT = b"stat", 1, stats;
     T_CTRS = b"ctrs", 1, counters;
     T_BFNM = b"bfnm", 1, battlefields;
+    T_HIST = b"hist", 1, history;
 }
 
 /// The version-1 body: the same sections, positional, with no chunk frames.
@@ -1730,6 +1762,10 @@ pub fn load(bytes: &[u8]) -> Result<World, SaveError> {
     // rebuilt rather than stored — but it has to be rebuilt *here*, because
     // the tick only works it out on an epoch boundary and a world loaded
     // between two boundaries would otherwise run on no weather at all.
+    // `Chronicle::from_events` rebuilds through `default()`, so the count of
+    // events compaction has thrown away comes back as nothing. It is carried
+    // in the history chunk and put back here.
+    w.chronicle.dropped = w.history.forgotten;
     crate::sim::climate::rebuild(&mut w);
     // Likewise the year's trade totals, which `economy` reads in an earlier
     // phase than the one that works them out.

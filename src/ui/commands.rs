@@ -305,7 +305,9 @@ impl Ui {
             }
             "guide" => self.open_guide(),
             "tutorial" => self.start_tutorial(),
-            "recap" | "digest" | "lately" => {
+            // `:chart` is the recap, which is where the world's own record
+            // of itself is drawn.
+            "recap" | "digest" | "lately" | "chart" | "charts" => {
                 let years = arg.parse::<i32>().ok();
                 self.open_recap(years);
             }

@@ -48,6 +48,28 @@ Understanding a world, and reaching into it.
   war if there is going to be one. With nothing selected, each realm's own
   standing. `:layer relations`, or `diplomacy`, `alliances`, `tension`.
 
+- **The world keeps a record of itself**, and the recap draws it. Eleven
+  series sampled every ten years — population, realms, cities, wars,
+  schools, trade, development, stability, treasury, income, decadence — as
+  sparklines, each scaled to itself because they share no units. `:chart`,
+  or `:recap`. `:export series` writes them as CSV.
+
+  It is stored in a save chunk of its own rather than added to the existing
+  one, because a build that meets a newer version of a section it knows
+  drops that whole section: bumping `stat` would have cost an older binary
+  `peak_pop` and `pop_history` too, while a tag it has never heard of costs
+  it nothing. `src/sim/flows.rs` argues against keeping history and is right
+  about what it describes — a per-cell window is megabytes — but a sample is
+  one *world*, eleven numbers a decade, about eight kilobytes for the
+  longest game anybody will play, and unlike a flow field it cannot heal: no
+  amount of running forward recovers what the population was in the eighth
+  century.
+
+  The count of chronicle entries compaction has thrown away rides in the
+  same chunk. The chronicle is rebuilt from its events on load, through
+  `Chronicle::default`, so a world that had forgotten half a million events
+  came back claiming to have forgotten none.
+
 - **A rise-and-fall timeline**, which is the view the game is named for and
   the one it could not draw. Every realm as a bar from its founding to its
   fall across the whole of history, the great ones first, with successor
