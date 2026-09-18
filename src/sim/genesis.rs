@@ -29,6 +29,14 @@ pub fn populate(w: &mut World) {
         start: 0,
         name: "the Dawn Age".to_string(),
         description: prose::dawn_age(&world_name),
+        // No figures: the world had not begun, so this age is not counted
+        // when later centuries are judged against the usual run of them.
+        wars: 0,
+        schools: 0,
+        born: 0,
+        realms: 0,
+        fell: 0,
+        wonders: 0,
     });
     w.log(
         3,

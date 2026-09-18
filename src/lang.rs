@@ -138,12 +138,46 @@ fn ends_with_vowel(s: &str) -> bool {
     matches!(s.chars().last(), Some('a' | 'e' | 'i' | 'o' | 'u' | 'y'))
 }
 
+/// Letter pairs these languages write for one sound.
+///
+/// The cluster rule has to know about them or it cannot tell a name from a
+/// pile-up: `ngo` is three letters and one consonant, while `lmn` is three
+/// letters and three consonants and nobody can say it. Counting letters
+/// meant the rule had to be loose enough to let every digraph through,
+/// which let `nnnd`, `xngolm` and `quthnusuwh` through with them.
+const DIGRAPHS: &[&str] = &[
+    "mb", "mp", "nd", "nt", "ng", "nk", "nn", "zh", "sh", "ch", "th", "kh", "gh", "ph", "wh", "hr",
+    "hl", "hn", "dh", "bh", "ts", "dz", "ll", "rr", "ss", "tt", "qu", "tr", "dr", "pr", "br", "gr",
+    "kr", "fr", "st", "sp", "sk", "sl", "sn", "sm", "cl", "pl", "bl", "gl", "fl", "kl",
+];
+
+/// Whether the last two letters written are one sound.
+fn is_digraph(out: &[char]) -> bool {
+    if out.len() < 2 {
+        return false;
+    }
+    // Lower-cased, because `smooth` is handed already-capitalised names: an
+    // initial "I" that does not match "aeiou" is read as a consonant, and
+    // that is how the Iia became the Iiish.
+    let pair: String = out[out.len() - 2..]
+        .iter()
+        .map(char::to_ascii_lowercase)
+        .collect();
+    DIGRAPHS.contains(&pair.as_str())
+}
+
 /// Smooth out unpronounceable clusters: no triple letters, no doubled
-/// consonant at the start, and no run of more than three consonants.
+/// consonant at the start, and no run of more than two consonant *sounds*.
 fn tidy(w: &str, lang: &Language, rng: &Rng) -> String {
     let is_v = |c: char| "aeiouy'".contains(c);
     let mut out: Vec<char> = Vec::with_capacity(w.len() + 2);
+    // Sounds since the last vowel, where a digraph is one sound.
     let mut run = 0usize;
+    // Whether the consonant just written could still take a second letter.
+    // Without this a digraph chains: in "zastthstead" every letter pairs
+    // with the one before it — st, tt, th, hs, st — and the run counter is
+    // never allowed to advance at all.
+    let mut pair_open = false;
     for c in w.chars() {
         let n = out.len();
         if n >= 2 && out[n - 1] == c && out[n - 2] == c {
@@ -154,18 +188,108 @@ fn tidy(w: &str, lang: &Language, rng: &Rng) -> String {
         }
         if is_v(c) {
             run = 0;
-        } else {
-            run += 1;
-            if run > 3 {
-                let v = &lang.vowels[rng.weighted(&lang.vowel_w)];
-                out.extend(v.chars());
-                run = 1;
+            pair_open = false;
+            out.push(c);
+            continue;
+        }
+        // A letter that completes a digraph joins the sound before it
+        // rather than starting one of its own.
+        if pair_open {
+            let mut probe = out.clone();
+            probe.push(c);
+            if is_digraph(&probe) {
+                out.push(c);
+                pair_open = false;
+                continue;
             }
         }
+        run += 1;
+        if run > 2 {
+            let v = &lang.vowels[rng.weighted(&lang.vowel_w)];
+            out.extend(v.chars());
+            run = 1;
+        }
         out.push(c);
+        pair_open = true;
     }
     out.into_iter().collect()
 }
+
+/// Make a glued-together word sayable without needing the language's own
+/// vowels or a random number.
+///
+/// [`tidy`] runs while a word is being coined, syllable by syllable, and
+/// can afford to insert a vowel from the language's own stock. A suffix, a
+/// demonym ending or the second half of a compound is glued on afterwards
+/// — often in `adjective` and `demonym`, which have no access to the RNG
+/// and must be a pure function of their input or two callers will disagree
+/// about what a people is called. So this one drops rather than inserts:
+/// no letter three times running, and no run of more than two consonant
+/// sounds, counting a digraph as one.
+fn smooth(w: &str) -> String {
+    let is_v = |c: char| "aeiouy'-".contains(c.to_ascii_lowercase());
+    let same = |a: char, b: char| a.eq_ignore_ascii_case(&b);
+    let mut out: Vec<char> = Vec::with_capacity(w.len());
+    let mut run = 0usize;
+    let mut pair_open = false;
+    for c in w.chars() {
+        let n = out.len();
+        if n >= 2 && same(out[n - 1], c) && same(out[n - 2], c) {
+            continue;
+        }
+        if is_v(c) {
+            run = 0;
+            pair_open = false;
+            out.push(c);
+            continue;
+        }
+        if pair_open {
+            let mut probe = out.clone();
+            probe.push(c);
+            if is_digraph(&probe) {
+                out.push(c);
+                pair_open = false;
+                continue;
+            }
+        }
+        if run >= 2 {
+            // The pile-up is broken by leaving this sound out, which keeps
+            // the word shorter as well as sayable.
+            continue;
+        }
+        run += 1;
+        out.push(c);
+        pair_open = true;
+    }
+    out.into_iter().collect()
+}
+
+/// Cut a word back to at most `max` characters, at a vowel boundary where
+/// there is one, so that the result still reads as a word of the same
+/// language rather than a word with its end bitten off.
+fn shorten(w: &str, max: usize) -> String {
+    let chars: Vec<char> = w.chars().collect();
+    if chars.len() <= max {
+        return w.to_string();
+    }
+    // Back off to the last vowel inside the limit, then keep the one
+    // consonant after it if there is one: "Loulnyuxngolmu" -> "Loulnyux".
+    let is_v = |c: char| "aeiouy".contains(c);
+    let mut cut = max;
+    while cut > 3 && !is_v(chars[cut - 1]) {
+        cut -= 1;
+    }
+    while cut > 3 && is_v(chars[cut - 1]) && cut > max.saturating_sub(2) {
+        cut -= 1;
+    }
+    let cut = cut.max(3).min(chars.len());
+    chars[..cut].iter().collect()
+}
+
+/// The longest a coined name may be before it stops being a name and starts
+/// being a keyboard. Twelve is about the length of Constantinople, which is
+/// as long as anybody has ever needed.
+const NAME_MAX: usize = 12;
 
 const AWKWARD: &[&str] = &[
     "ass", "arse", "sex", "cum", "fag", "tit", "cock", "dick", "shit", "fuck", "poo", "pee", "nig",
@@ -173,9 +297,25 @@ const AWKWARD: &[&str] = &[
     "nazi", "rape",
 ];
 
+/// Short English words a coined name must not collide with.
+///
+/// The phonology is free to produce "The", and did: a khan of Lorker was
+/// named The, and every sentence about him read like a capitalisation bug —
+/// "Khan The Bloodhand of Lorker died in the bath". The same goes for a
+/// person called And, a town called Of, or a people called the Its.
+const RESERVED: &[&str] = &[
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "as", "by", "for", "but", "not",
+    "no", "so", "if", "is", "it", "its", "be", "he", "she", "her", "his", "him", "we", "us", "you",
+    "was", "are", "had", "has", "who", "why", "how", "all", "any", "one", "two", "up", "out", "do",
+    "my", "me", "that", "this", "with", "from", "they", "them", "then", "than", "there", "their",
+];
+
 /// Whether a coined word reads badly enough to be worth rolling again.
 pub(crate) fn awkward(w: &str) -> bool {
     let l = w.to_lowercase();
+    if RESERVED.contains(&l.as_str()) {
+        return true;
+    }
     AWKWARD
         .iter()
         .any(|a| l == *a || (a.len() >= 4 && l.contains(a)))
@@ -490,22 +630,39 @@ impl Language {
         if rng.chance(self.compound_chance) {
             let second = self.word(rng, 1 + rng.below(2));
             if self.hyphen {
-                return format!("{}-{}", capitalize(&base), capitalize(&second));
+                // A hyphen is a place to draw breath, so a hyphenated name
+                // may run longer than a solid one — but not much longer,
+                // and the two halves together still have to fit a sidebar.
+                return format!(
+                    "{}-{}",
+                    capitalize(&shorten(&smooth(&base), 8)),
+                    capitalize(&shorten(&smooth(&second), 7))
+                );
             }
-            return capitalize(&format!("{}{}", base, second));
+            // The join is where the pile-ups came from: two words that were
+            // each pronounceable were glued without the cluster rule ever
+            // seeing the seam, and without anything capping the total. That
+            // is how a realm came to be called Loulnyuxngolmungon, and its
+            // people the Loulnyuxngolmungonians.
+            let joined = smooth(&tidy(
+                &format!("{}{}", shorten(&base, 8), second),
+                self,
+                rng,
+            ));
+            return capitalize(&shorten(&joined, NAME_MAX));
         }
         if rng.chance(self.place_suffix_chance) && !self.place_suffixes.is_empty() {
             let suf = rng.pick(&self.place_suffixes);
-            let mut b = base.clone();
+            let mut b = shorten(&base, NAME_MAX - suf.chars().count().min(4));
             // A trailing vowel always goes before a vowel-initial suffix, and
             // sometimes before a consonant.
             let vowel_suffix = suf.starts_with(|c: char| "aeiou".contains(c));
             if ends_with_vowel(&b) && (vowel_suffix || rng.chance(0.3)) {
                 b.pop();
             }
-            return capitalize(&format!("{}{}", b, suf));
+            return capitalize(&shorten(&smooth(&format!("{}{}", b, suf)), NAME_MAX));
         }
-        capitalize(&base)
+        capitalize(&shorten(&base, NAME_MAX))
     }
 
     /// A person's given name.
@@ -516,26 +673,94 @@ impl Language {
     /// Adjective form, e.g. "Velen" -> "Velenish".
     pub fn adjective(&self, base: &str) -> String {
         let suf = self.adj_suffixes[base.len() % self.adj_suffixes.len()].as_str();
-        let mut b = base.to_string();
+        let mut b = shorten(base, NAME_MAX.saturating_sub(suf.chars().count().min(4)));
         if ends_with_vowel(&b) && suf.starts_with(|c: char| "aeiou".contains(c)) {
             b.pop();
         }
-        format!("{}{}", b, suf)
+        smooth(&format!("{}{}", b, suf))
     }
 
     /// Plural demonym, e.g. "Velen" -> "Velenites".
     pub fn demonym(&self, base: &str) -> String {
         let suf = self.demonym_suffixes[(base.len() + 1) % self.demonym_suffixes.len()].as_str();
-        let mut b = base.to_string();
+        let mut b = shorten(base, NAME_MAX.saturating_sub(suf.chars().count().min(4)));
         if suf == "s" {
+            // Through the smoother like every other ending. This one path
+            // returned early and unsmoothed, so a people of Chinluthhr
+            // became the Chinluthhrs.
             if b.ends_with('s') || b.ends_with("sh") || b.ends_with('x') {
-                return format!("{}es", b);
+                return smooth(&format!("{}es", b));
             }
-            return format!("{}s", b);
+            return smooth(&format!("{}s", b));
         }
         if ends_with_vowel(&b) && suf.starts_with(|c: char| "aeiou".contains(c)) {
             b.pop();
         }
-        format!("{}{}", b, suf)
+        smooth(&format!("{}{}", b, suf))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every name in the world has to be one a reader can hold in their
+    /// head, because a name they cannot say is a realm they cannot care
+    /// about.
+    ///
+    /// The generator used to coin realms called Loulnyuxngolmungon and
+    /// peoples called the Loulnyuxngolmungonians: `place` checked the length
+    /// of the first element of a compound and then glued a second one on
+    /// without a length check or a cluster check, and `demonym` then added
+    /// a suffix to the result. Three separate rules, each of which believed
+    /// somebody else was measuring.
+    #[test]
+    fn coined_names_are_pronounceable_and_short() {
+        let rng = Rng::new(9);
+        let mut worst = String::new();
+        let mut checked = 0usize;
+        for _ in 0..60 {
+            let lang = Language::generate(&rng);
+            for _ in 0..80 {
+                for name in [lang.place(&rng), lang.person(&rng), lang.name(&rng)] {
+                    let base = name.clone();
+                    for n in [base.clone(), lang.adjective(&base), lang.demonym(&base)] {
+                        checked += 1;
+                        let letters: Vec<char> = n.to_lowercase().chars().collect();
+                        assert!(
+                            letters.len() <= 16,
+                            "{:?} is {} characters long",
+                            n,
+                            letters.len()
+                        );
+                        if letters.len() > worst.chars().count() {
+                            worst = n.clone();
+                        }
+                        // No letter written three times running.
+                        for w in letters.windows(3) {
+                            assert!(
+                                !(w[0] == w[1] && w[1] == w[2]),
+                                "{:?} has a trebled letter (from base {:?})",
+                                n,
+                                base
+                            );
+                        }
+                        // No run of five consonant letters: two sounds is
+                        // the limit and the longest digraph is two letters,
+                        // so four letters is the most a legal run can be.
+                        let mut run = 0usize;
+                        for c in &letters {
+                            if "aeiouy'-".contains(*c) {
+                                run = 0;
+                            } else {
+                                run += 1;
+                                assert!(run < 5, "{:?} has a consonant pile-up", n);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 10_000, "only {} names checked", checked);
     }
 }

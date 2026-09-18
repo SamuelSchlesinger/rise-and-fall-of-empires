@@ -439,6 +439,9 @@ pub fn notables(w: &mut World) {
                     None,
                 );
                 w.polities[p].dev = (w.polities[p].dev + 0.04).min(3.0);
+                // A reformer is the other way a court is cleaned, and the
+                // only one that does not require the dynasty to fall first.
+                w.polities[p].decadence = (w.polities[p].decadence - 0.12).max(0.0);
                 let text = prose::reformer(w, p, ph, &Pick::rolled(&rng));
                 w.log(
                     1,
@@ -493,6 +496,7 @@ pub fn notables(w: &mut World) {
                     if w.polities[p].kind.has_dynasty() {
                         let house = w.new_house(dyn_name, culture, Some(i));
                         w.seat_house(p, house);
+                        crate::sim::dynasty::seed_house_kin(w, p, house, i);
                         w.house_accession(i);
                         if let Some(oh) = old_house {
                             w.close_house_if_spent(oh);
@@ -557,6 +561,7 @@ pub fn wonders(w: &mut World) {
         w.polities[p].prestige += 20.0;
         w.polities[p].dev = (w.polities[p].dev + 0.05).min(3.0);
         w.cities[cap].wonders.push(name.clone());
+        w.century_wonders += 1;
         w.cities[cap].prosperity += 0.1;
         let ruler = w.ruler_title(p);
         let text = prose::wonder_built(w, p, &name, &ruler, &Pick::rolled(&rng));
@@ -621,23 +626,98 @@ pub fn eras(w: &mut World) {
     let schools = w.century_schools;
     let born = w.century_polities_born;
     let realms = living.len().max(4) as u32;
-    // What counts as a warlike or a quiet century is relative to how many
-    // realms there are to quarrel: forty wars among sixty realms is a quiet
-    // age, and among ten realms it is carnage.
-    let warlike = wars > realms * 2 && wars > 30;
-    let peaceful = wars * 2 < realms;
+    // Everything a century might be named for, measured per realm, because
+    // the same absolute count means quite different things in a world of
+    // ten realms and a world of two hundred.
+    let per = |n: u32| n as f32 / realms as f32;
+    // And then measured against what this world has come to expect of
+    // itself. `schools >= 7` was a constant, so once a world was large
+    // enough to found seven schools in a century it founded seven in every
+    // century, and that one test --- which sits near the bottom of the
+    // chain and should almost never win --- named forty-seven centuries out
+    // of fifty-nine. Nothing here may use a constant again.
+    //
+    // Nor a plain ratio against the usual. Falls and finished wonders are
+    // far more volatile from century to century than wars or schools are,
+    // so "half again the usual" is a commonplace for one and an
+    // once-a-millennium event for another, and judging them all by the same
+    // multiple simply hands every century to whichever measure jumps about
+    // most. What is wanted is how far out of the ordinary a figure is *for
+    // that figure*, which is its distance from the median in units of the
+    // median deviation --- robust, because a world's history has outliers
+    // in it by construction.
+    let deviation = |now: f32, field: fn(&crate::sim::Era) -> f32, fallback: bool| -> f32 {
+        let mut past: Vec<f32> = w
+            .eras
+            .iter()
+            .filter(|e| e.realms > 0)
+            .map(field)
+            .filter(|v| v.is_finite())
+            .collect();
+        // Before a world has a past there is no ordinary to be unusual
+        // against, and the old fixed tests stand in.
+        if past.len() < 4 {
+            return if fallback { 2.0 } else { 0.0 };
+        }
+        past.sort_by(f32::total_cmp);
+        let median = past[past.len() / 2];
+        let mut spread: Vec<f32> = past.iter().map(|v| (v - median).abs()).collect();
+        spread.sort_by(f32::total_cmp);
+        let mad = spread[spread.len() / 2];
+        if mad <= f32::EPSILON {
+            // A figure that has never varied. Any movement at all is news.
+            return if now > median { 2.0 } else { 0.0 };
+        }
+        (now - median) / mad
+    };
+
+    let war_rate = per(wars);
+    let school_rate = per(schools);
+    let born_rate = per(born);
+    let quiet_rate = 1.0 / war_rate.max(0.0001);
+    let fall_rate = per(w.century_polities_fell);
+    let wonder_rate = per(w.century_wonders);
+
+    // The century takes its name from whichever of these it was furthest
+    // out of the ordinary in, provided it was out of the ordinary at all.
+    // Roughly a third of centuries clear this bar on nothing and are called
+    // ordinary, which is about the right proportion: most centuries are.
+    const REMARKABLE: f32 = 1.4;
+    let odds = deviation;
+    let war_odds = odds(
+        war_rate,
+        |e| e.wars as f32 / e.realms as f32,
+        wars > realms * 2 && wars > 30,
+    );
+    let school_odds = odds(
+        school_rate,
+        |e| e.schools as f32 / e.realms as f32,
+        schools >= 7,
+    );
+    let born_odds = odds(
+        born_rate,
+        |e| e.born as f32 / e.realms as f32,
+        born * 2 > realms && born >= 8,
+    );
+    let quiet_odds = odds(
+        quiet_rate,
+        |e| e.realms as f32 / (e.wars as f32).max(0.0001),
+        wars * 2 < realms,
+    );
+    let fall_odds = odds(fall_rate, |e| e.fell as f32 / e.realms as f32, false);
+    let wonder_odds = odds(wonder_rate, |e| e.wonders as f32 / e.realms as f32, false);
+    // Peace is only worth the name if the world was also getting on with
+    // living; a quiet century of famine is a different thing.
+    let quiet_odds = if pop_change > 0.05 { quiet_odds } else { 0.0 };
+
     // One realm holding better than a third of the world's land names the
-    // age. The tests of what a century was about are tried in order, and a
-    // crop of new schools of thought is the weakest of them: a century that
-    // was also a century of war, of collapse or of new crowns is named for
-    // those instead, and it takes a good many schools to speak for a
-    // hundred years on its own.
+    // age outright, whatever else happened in it.
     let hegemon = biggest.filter(|&p| share > 0.35 && w.polities[p].kind == PolityKind::Empire);
     // The weightiest thing the world worked out this century, if it worked
     // out anything that mattered. An age named for a hegemon or a war is an
-    // age named for an arrangement of the same pieces; an age named for iron
-    // or for writing is the century in which the pieces changed. So this is
-    // tried first, and only the heaviest innovations qualify.
+    // age named for an arrangement of the same pieces; an age named for
+    // iron or for writing is the century in which the pieces changed. So
+    // this is tried first, and only the heaviest innovations qualify.
     let landmark = (0..w.techs.len())
         .filter(|&t| {
             let first = w.tech_first_year[t];
@@ -649,6 +729,7 @@ pub fn eras(w: &mut World) {
                 .size()
                 .total_cmp(&w.techs[b].effect.size())
         });
+
     let pick = Pick::rolled(&rng);
     let flavour = Pick::stable(w.year, (wars + schools + born) as usize);
     let (names, desc) = if let Some(t) = landmark {
@@ -666,31 +747,54 @@ pub fn eras(w: &mut World) {
             family(prose::ERA_NAMES_DYING),
             prose::era_of_dying(pop_change < -0.3, &flavour),
         )
-    } else if warlike {
-        (
-            family(prose::ERA_NAMES_WAR),
-            prose::era_of_war(wars, &flavour),
-        )
-    } else if born * 2 > realms && born >= 8 {
-        (
-            family(prose::ERA_NAMES_CROWNS),
-            prose::era_of_crowns(born, &flavour),
-        )
-    } else if schools >= 7 {
-        (
-            family(prose::ERA_NAMES_SCHOOLS),
-            prose::era_of_schools(schools, &flavour),
-        )
-    } else if peaceful && pop_change > 0.05 {
-        (
-            family(prose::ERA_NAMES_PEACE),
-            prose::era_of_peace(&flavour),
-        )
     } else {
-        (
-            family(prose::ERA_NAMES_ORDINARY),
-            prose::era_ordinary(&flavour),
-        )
+        // The most unusual thing about the century, whatever it was.
+        let best = [
+            war_odds,
+            born_odds,
+            school_odds,
+            quiet_odds,
+            fall_odds,
+            wonder_odds,
+        ]
+        .into_iter()
+        .fold(0.0f32, f32::max);
+        if best < REMARKABLE {
+            (
+                family(prose::ERA_NAMES_ORDINARY),
+                prose::era_ordinary(&flavour),
+            )
+        } else if best == war_odds {
+            (
+                family(prose::ERA_NAMES_WAR),
+                prose::era_of_war(wars, &flavour),
+            )
+        } else if best == born_odds {
+            (
+                family(prose::ERA_NAMES_CROWNS),
+                prose::era_of_crowns(born, &flavour),
+            )
+        } else if best == fall_odds {
+            (
+                family(prose::ERA_NAMES_FALL),
+                prose::era_of_fall(w.century_polities_fell, &flavour),
+            )
+        } else if best == wonder_odds {
+            (
+                family(prose::ERA_NAMES_BUILDING),
+                prose::era_of_wonders(w.century_wonders, &flavour),
+            )
+        } else if best == school_odds {
+            (
+                family(prose::ERA_NAMES_SCHOOLS),
+                prose::era_of_schools(schools, &flavour),
+            )
+        } else {
+            (
+                family(prose::ERA_NAMES_PEACE),
+                prose::era_of_peace(&flavour),
+            )
+        }
     };
     let name = unique_era_name(w, &names, &pick);
     let text = prose::era_named(&name, &desc);
@@ -699,9 +803,17 @@ pub fn eras(w: &mut World) {
         start: w.year - 100,
         name,
         description: desc,
+        wars,
+        schools,
+        born,
+        realms,
+        fell: w.century_polities_fell,
+        wonders: w.century_wonders,
     });
     w.century_wars = 0;
     w.century_schools = 0;
     w.century_polities_born = 0;
+    w.century_polities_fell = 0;
+    w.century_wonders = 0;
     w.century_pop_start = w.stats.pop;
 }

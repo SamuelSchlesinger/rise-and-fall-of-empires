@@ -510,6 +510,15 @@ pub struct Tuning {
     pub marriage_chance: f64,
     /// Yearly chance a married ruler of childbearing age has a child.
     pub birth_chance: f64,
+    /// Yearly chance an unwed cadet of a ruling house finds a match. Lower
+    /// than a ruler's: a younger brother is a worse catch than a king.
+    pub cadet_marriage_chance: f64,
+    /// Yearly chance a married cadet has a child.
+    pub cadet_birth_chance: f64,
+    /// How many of a house may be alive at once before it stops branching.
+    /// This is what keeps a thousand-year dynasty from filling the world
+    /// with idle cousins.
+    pub house_living_cap: usize,
     /// Smallest realm a faith will crown an emperor of.
     pub coronation_min_cells: usize,
     /// Yearly chance a qualifying ruler is crowned by their faith.
@@ -579,6 +588,20 @@ pub struct Tuning {
     /// Chance that emptied ground forgets what it knew, which is what makes
     /// a dark age possible and a rediscovery worth reading.
     pub tech_forget_chance: f64,
+    /// What a watcher bound to nobody draws from the world at large each
+    /// year. Deliberately poorer than a covenant, and deliberately not
+    /// nothing: somebody who wants to watch and occasionally nudge should
+    /// still be playing a game. Set it very high to restore the original
+    /// sandbox, where every act was free and unlimited.
+    pub fate_trickle: f32,
+    /// What a covenant draws at full strength each year, before the bound
+    /// people's share of the world is counted.
+    pub fate_covenant: f32,
+
+    /// Chance per year that a realm's own administration carries something
+    /// it knows in one province to a province that does not. This is what
+    /// makes an empire worth having to anybody but its emperor.
+    pub tech_state_chance: f64,
 
     // -- housekeeping ------------------------------------------------------
     /// How many events the chronicle keeps before the oldest small ones are
@@ -788,7 +811,10 @@ impl Default for Tuning {
             artifact_fall_pass_chance: 0.7,
             tyrant_chance: 0.06,
             marriage_chance: 0.22,
-            birth_chance: 0.16,
+            birth_chance: 0.26,
+            cadet_marriage_chance: 0.14,
+            cadet_birth_chance: 0.11,
+            house_living_cap: 18,
             coronation_min_cells: 60,
             coronation_chance: 0.05,
             child_death_chance: 0.012,
@@ -812,6 +838,9 @@ impl Default for Tuning {
             tech_spread_chance: 0.02,
             tech_trade_chance: 0.05,
             tech_forget_chance: 0.03,
+            tech_state_chance: 0.010,
+            fate_trickle: 0.45,
+            fate_covenant: 2.6,
             chronicle_cap: 60_000,
         }
     }
@@ -1034,6 +1063,9 @@ impl Tuning {
             "tyrant_chance" => self.tyrant_chance = v,
             "marriage_chance" => self.marriage_chance = v,
             "birth_chance" => self.birth_chance = v,
+            "cadet_marriage_chance" => self.cadet_marriage_chance = v,
+            "cadet_birth_chance" => self.cadet_birth_chance = v,
+            "house_living_cap" => self.house_living_cap = v.max(0.0) as usize,
             "coronation_min_cells" => self.coronation_min_cells = v.max(0.0) as usize,
             "coronation_chance" => self.coronation_chance = v,
             "child_death_chance" => self.child_death_chance = v,
@@ -1057,6 +1089,9 @@ impl Tuning {
             "tech_spread_chance" => self.tech_spread_chance = v,
             "tech_trade_chance" => self.tech_trade_chance = v,
             "tech_forget_chance" => self.tech_forget_chance = v,
+            "tech_state_chance" => self.tech_state_chance = v,
+            "fate_trickle" => self.fate_trickle = v as f32,
+            "fate_covenant" => self.fate_covenant = v as f32,
             "chronicle_cap" => self.chronicle_cap = v.max(0.0) as usize,
             _ => return Err(UnknownField(name.to_string())),
         }

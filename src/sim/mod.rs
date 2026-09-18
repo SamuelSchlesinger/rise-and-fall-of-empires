@@ -8,6 +8,7 @@ pub mod climate;
 pub mod dynasty;
 pub mod events;
 pub mod explain;
+pub mod fate;
 pub mod flows;
 pub mod genesis;
 pub mod history;
@@ -953,6 +954,20 @@ pub struct Era {
     pub start: i32,
     pub name: String,
     pub description: String,
+    /// What the century was actually made of.
+    ///
+    /// Kept so that a later century can be judged against the world's own
+    /// past rather than against a constant. A fixed threshold --- "seven
+    /// new schools of thought names an age" --- means something quite
+    /// different in a world of ten realms and a world of two hundred, and
+    /// the consequence was that forty-seven of one world's fifty-nine
+    /// centuries were named for doctrine.
+    pub wars: u32,
+    pub schools: u32,
+    pub born: u32,
+    pub realms: u32,
+    pub fell: u32,
+    pub wonders: u32,
 }
 
 /// A pestilence running its course through some realms.
@@ -1163,9 +1178,19 @@ pub struct World {
     pub prophecies: Vec<Prophecy>,
     pub chronicle: Chronicle,
     pub stats: Stats,
+    /// The watcher: what they are bound to, and what they can spend.
+    pub fate: fate::Fate,
+    /// Set while an intervention is being worked, so that every event it
+    /// logs is stamped as the watcher's doing. Transient: never saved, and
+    /// false everywhere except inside `hand_of_fate_on`.
+    pub fate_mark: bool,
     pub century_wars: u32,
     pub century_schools: u32,
     pub century_polities_born: u32,
+    /// Realms that ended this century, and great works finished in it: two
+    /// more things a century can be named for.
+    pub century_polities_fell: u32,
+    pub century_wonders: u32,
     pub century_pop_start: f64,
     pub battlefield_names: BTreeMap<usize, String>,
     pub ticks_ms: f64,
@@ -1276,6 +1301,8 @@ impl World {
         World {
             seed: 0,
             rng: Rng::new(0),
+            fate: fate::Fate::default(),
+            fate_mark: false,
             year: 0,
             detail: Detail::Medium,
             tuning: Tuning::default(),
@@ -1315,6 +1342,8 @@ impl World {
             century_wars: 0,
             century_schools: 0,
             century_polities_born: 0,
+            century_polities_fell: 0,
+            century_wonders: 0,
             century_pop_start: 0.0,
             battlefield_names: BTreeMap::new(),
             ticks_ms: 0.0,
@@ -1366,6 +1395,8 @@ impl World {
         let mut world = World {
             seed,
             rng,
+            fate: fate::Fate::default(),
+            fate_mark: false,
             year: 0,
             detail,
             tuning: Tuning::default(),
@@ -1405,6 +1436,8 @@ impl World {
             century_wars: 0,
             century_schools: 0,
             century_polities_born: 0,
+            century_polities_fell: 0,
+            century_wonders: 0,
             century_pop_start: 0.0,
             battlefield_names: BTreeMap::new(),
             ticks_ms: 0.0,
@@ -1446,6 +1479,7 @@ impl World {
             refs: refs.to_vec(),
             loc,
             text,
+            by_fate: self.fate_mark,
         };
         Some(self.chronicle.push(ev))
     }
@@ -1733,10 +1767,29 @@ impl World {
     // not. The pair is what lets the chronicle still know four centuries
     // later which ruler took the land.
 
-    /// Land won or lost, credited to the realm and to whoever rules it.
+    /// Whoever should be credited with what a realm does this year.
+    ///
+    /// Normally the ruler. But a realm whose ruler is a child is not being
+    /// run by the child, and crediting the throne regardless produced the
+    /// single least believable line in the whole chronicle: an emperor
+    /// acclaimed for conquering at seven lands a year at the age of three.
+    /// Where the crown is on an infant the credit goes to whichever general
+    /// is serving, and where there is none it goes nowhere --- which is
+    /// honest, because in that case nobody knows who did it.
+    fn doer(&self, p: usize) -> Option<usize> {
+        let r = self.polities[p].ruler?;
+        if self.persons[r].age(self.year) >= dynasty::MAJORITY {
+            return Some(r);
+        }
+        self.polities[p].generals.iter().copied().find(|&g| {
+            self.persons[g].alive() && self.persons[g].age(self.year) >= dynasty::MAJORITY
+        })
+    }
+
+    /// Land won or lost, credited to the realm and to whoever ran it.
     pub fn credit_land(&mut self, p: usize, delta: i32) {
         self.polities[p].reign_gained += delta;
-        if let Some(r) = self.polities[p].ruler {
+        if let Some(r) = self.doer(p) {
             self.persons[r].gained += delta;
         }
     }
@@ -1745,7 +1798,7 @@ impl World {
     /// the total as well, so `taken` is always a subset of `gained`.
     pub fn credit_conquest(&mut self, p: usize, delta: i32) {
         self.credit_land(p, delta);
-        if let Some(r) = self.polities[p].ruler {
+        if let Some(r) = self.doer(p) {
             self.persons[r].taken += delta;
         }
     }
@@ -2260,6 +2313,11 @@ impl World {
         phase!(22, stories::tick_prophecies(self));
         phase!(23, stories::tick_legends(self));
         phase!(24, self.recompute());
+        // After `recompute`, because what a covenant is worth is a people's
+        // share of the world and both halves of that fraction are numbers
+        // `recompute` has just finished settling. Run before it, the share
+        // compared this year's culture against last year's world.
+        fate::tick(self);
         phase!(25, events::eras(self));
         // Last, so that what the flow layers draw includes the year just
         // finished rather than lagging it by one.

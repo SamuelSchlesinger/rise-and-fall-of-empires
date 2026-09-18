@@ -648,6 +648,106 @@ fn a_cramped_world_survives_a_long_run() {
     assert_eq!(back.polities.len(), w.polities.len());
 }
 
+/// A dynasty is a tree, not a thread.
+///
+/// Succession used to consult the dead ruler's own children and nothing
+/// else. Nobody but the reigning ruler married, so nobody but the reigning
+/// ruler bred, so a king who died childless ended his house however many
+/// brothers survived him — and the chronicle became a column of
+/// "the old ruler left no clear heir". A world of twelve centuries should
+/// hold at least one house that ruled across twenty reigns, and crowns
+/// should pass sideways to kin far more often than they are seized by
+/// strangers.
+#[test]
+fn a_house_outlives_its_founder_many_times_over() {
+    let mut w = world(7);
+    run(&mut w, 1200);
+    let longest = (0..w.houses.len())
+        .map(|h| w.houses[h].seniors.len())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        longest >= 20,
+        "the greatest house in twelve centuries managed {} rulers; \
+         dynasties are threads again",
+        longest
+    );
+    // Kin succession is not a curiosity: it should be the ordinary way a
+    // throne passes when the ruler leaves no grown child.
+    let kin = w
+        .chronicle
+        .events
+        .iter()
+        .filter(|e| {
+            e.text.contains("went sideways")
+                || e.text.contains("without issue, and the throne passed")
+                || e.text.contains("took the throne of")
+        })
+        .count();
+    let seized = w
+        .chronicle
+        .events
+        .iter()
+        .filter(|e| e.text.contains("left no clear heir"))
+        .count();
+    assert!(
+        kin > seized,
+        "{} thrones passed to kin against {} seized by strangers",
+        kin,
+        seized
+    );
+}
+
+/// Kinship reads the family tree the way a herald would: a brother is two
+/// steps, an uncle three, a first cousin four, and the words match.
+#[test]
+fn kinship_names_the_relation_it_measures() {
+    use crate::sim::dynasty::kinship;
+    let mut w = world(3);
+    run(&mut w, 200);
+    // Find a ruler with a sibling, by way of a shared parent.
+    let mut checked = 0;
+    for i in 0..w.persons.len() {
+        // Children who name *this* person as their parent. A child is
+        // listed by both of its parents but names only one of them, so
+        // somebody who had children by two partners lists two people who
+        // are not siblings at all --- which is exactly the relation this
+        // test exists to measure, and exactly the way to get it wrong.
+        let kids: Vec<usize> = w.persons[i]
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| w.persons[c].parent == Some(i))
+            .collect();
+        if kids.len() < 2 {
+            continue;
+        }
+        let k = kinship(&w, kids[0], kids[1]).expect("siblings are kin");
+        assert_eq!((k.up, k.down), (1, 1), "siblings are one step each way");
+        assert_eq!(k.name(crate::sim::Gender::M), "brother");
+        // And a nephew, if the elder has children of their own. A child is
+        // listed by both parents but names only one of them as `parent`,
+        // and it is that one the blood is traced through.
+        if let Some(&grand) = w.persons[kids[0]]
+            .children
+            .iter()
+            .find(|&&g| w.persons[g].parent == Some(kids[0]))
+        {
+            let k = kinship(&w, kids[1], grand).expect("an uncle knows his nephew");
+            assert_eq!((k.up, k.down), (1, 2));
+            assert_eq!(k.name(crate::sim::Gender::F), "niece");
+        }
+        checked += 1;
+        if checked >= 3 {
+            break;
+        }
+    }
+    assert!(
+        checked > 0,
+        "no siblings in two centuries of a peopled world"
+    );
+}
+
 /// A house page holds together at millennia scale: the line of succession
 /// is in order, every ruler on it belongs to the house, and nothing on the
 /// page runs past the width it was given.
@@ -2241,6 +2341,10 @@ fn every_intervention_does_something_and_breaks_nothing() {
         for choice in 0..6u8 {
             let mut w = ser::load(&bytes).expect("a fresh save must load");
             assert!(fate_reaches(&w, target), "{:?} is out of reach", target);
+            // Acts cost now, and this test is about what they *do*: fund it
+            // so a refusal for want of devotion cannot be mistaken for an
+            // intervention that quietly does nothing.
+            w.fate.power = crate::sim::fate::CEILING;
             let before = summary(&w);
             let said = hand_of_fate_on(&mut w, target, choice);
             assert!(
@@ -2270,6 +2374,463 @@ fn every_intervention_does_something_and_breaks_nothing() {
             );
         }
     }
+}
+
+/// A covenant can be lost, and losing it reads as a loss.
+///
+/// This is the whole of the stake. A people can be conquered, scattered and
+/// absorbed — the simulation was always capable of dealing that hand — and
+/// when it does, the altars go cold, the chronicle says so once, and what
+/// the watcher had drains away instead of vanishing, so that somebody who
+/// has just lost everything still has one last thing to do with it.
+#[test]
+fn a_people_lost_is_a_covenant_lost() {
+    use crate::sim::fate;
+    let mut w = world(37);
+    run(&mut w, 150);
+    let people = (0..w.cultures.len())
+        .find(|&c| w.cultures[c].extinct.is_none())
+        .expect("a peopled world");
+    fate::bind(&mut w, people);
+    run(&mut w, 60);
+    let held = w.fate.power;
+    assert!(held > 1.0, "a covenant gathered nothing to lose");
+    assert!(w.fate.forsaken.is_none());
+
+    // The world takes them.
+    w.cultures[people].extinct = Some(w.year);
+    w.cultures[people].pop = 0.0;
+    run(&mut w, 1);
+    assert_eq!(w.fate.forsaken, Some(w.year));
+    let cold = w
+        .chronicle
+        .events
+        .iter()
+        .filter(|e| e.text.contains("altars had been for"))
+        .count();
+    assert_eq!(cold, 1, "the loss was announced {} times", cold);
+
+    // It drains rather than vanishing, and it is said only once.
+    run(&mut w, 20);
+    assert!(
+        w.fate.power < held,
+        "{:.1} held against {:.1} before the loss",
+        w.fate.power,
+        held
+    );
+    assert!(w.fate.power > 0.0, "everything went at once");
+    assert_eq!(
+        w.chronicle
+            .events
+            .iter()
+            .filter(|e| e.text.contains("altars had been for"))
+            .count(),
+        1,
+        "the loss was announced again"
+    );
+    // And it reaches nothing eventually rather than going negative.
+    run(&mut w, 400);
+    assert_eq!(w.fate.power, 0.0);
+}
+
+/// The covenant pays out at a rate a player can feel.
+///
+/// Too slow and the first act is twenty minutes away; too fast and the
+/// ceiling is always full and nothing is ever a choice. At the default two
+/// years a second, a cheap act should be seconds away and the heaviest a
+/// minute or two, over the whole life of a world rather than only at its
+/// start — a people's share of the world falls as the world fills, and the
+/// square root in `fate::tick` is what stops that from starving the loop.
+#[test]
+fn a_covenant_pays_out_at_a_playable_rate() {
+    use crate::sim::fate;
+    let mut w = world(29);
+    run(&mut w, 60);
+    let people = (0..w.cultures.len())
+        .filter(|&c| w.cultures[c].extinct.is_none())
+        .max_by(|&a, &b| w.cultures[a].pop.total_cmp(&w.cultures[b].pop))
+        .expect("a peopled world");
+    fate::bind(&mut w, people);
+    let mut samples: Vec<(i32, f32)> = Vec::new();
+    for _ in 0..12 {
+        run(&mut w, 100);
+        samples.push((w.year, w.fate.income));
+        // Kept spent so the ceiling does not mask the rate.
+        w.fate.power = 0.0;
+    }
+    if std::env::var("SHOW_FATE").is_ok() {
+        for (y, inc) in &samples {
+            println!(
+                "year {:5}  {:+.2}/yr  ({:.0}s to the cheapest act)",
+                y,
+                inc,
+                10.0 / (inc * 2.0)
+            );
+        }
+    }
+    for (y, inc) in samples {
+        assert!(
+            (0.25..=3.2).contains(&inc),
+            "in year {} a covenant paid {:.2} a year, which is {} to be a game",
+            y,
+            inc,
+            if inc < 0.25 { "too slow" } else { "too fast" }
+        );
+    }
+}
+
+/// Every kind of god is one some world will offer you.
+///
+/// The aspect is derived from a people's values rather than chosen, which
+/// makes the opening question a real decision — but only if the four kinds
+/// actually turn up. A table that reads "a god of endings" for three
+/// peoples in five is one choice wearing four names.
+#[test]
+fn all_four_aspects_are_reachable_and_none_dominates() {
+    use crate::sim::fate::{aspect_of, Domain};
+    use std::collections::HashMap;
+    let mut seen: HashMap<&'static str, usize> = HashMap::new();
+    let mut total = 0usize;
+    for seed in 0..40u64 {
+        let mut w = world(seed);
+        run(&mut w, 120);
+        for c in 0..w.cultures.len() {
+            if w.cultures[c].extinct.is_some() {
+                continue;
+            }
+            *seen.entry(aspect_of(&w, c).title()).or_insert(0) += 1;
+            total += 1;
+        }
+    }
+    if std::env::var("SHOW_FATE").is_ok() {
+        let mut rows: Vec<_> = seen.iter().collect();
+        rows.sort_by_key(|&(_, n)| std::cmp::Reverse(*n));
+        for (k, n) in rows {
+            println!("{:5.1}%  {}", 100.0 * *n as f64 / total as f64, k);
+        }
+    }
+    for d in [Domain::Growth, Domain::Ruin, Domain::Craft, Domain::Strife] {
+        let n = seen.get(d.title()).copied().unwrap_or(0);
+        let share = n as f64 / total as f64;
+        assert!(
+            (0.12..=0.42).contains(&share),
+            "{:.0}% of peoples make {}, out of {} peoples",
+            share * 100.0,
+            d.title(),
+            total
+        );
+    }
+}
+
+/// An act of fate is findable afterwards.
+///
+/// Six interventions in a world of fifty thousand events are invisible
+/// unless something marks them, and an act you cannot find afterwards did
+/// not feel like an act. The mark has to survive a save, too, or a world
+/// put away and taken out again forgets everything the player ever did.
+#[test]
+fn what_the_watcher_did_is_marked_and_kept() {
+    use crate::sim::chronicle::Ref;
+    use crate::ui::detail::hand_of_fate_on;
+    let mut w = world(43);
+    run(&mut w, 250);
+    assert!(
+        w.chronicle.events.iter().all(|e| !e.by_fate),
+        "the world marked its own doing as the watcher's"
+    );
+    let city = (0..w.cities.len())
+        .find(|&c| w.cities[c].destroyed.is_none())
+        .expect("a world has cities");
+    w.fate.power = crate::sim::fate::CEILING;
+    let said = hand_of_fate_on(&mut w, Ref::City(city), 0);
+    assert!(!said.starts_with("not enough"), "{}", said);
+    let marked: Vec<&str> = w
+        .chronicle
+        .events
+        .iter()
+        .filter(|e| e.by_fate)
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(marked.len(), 1, "an act left {} marks", marked.len());
+    let text = marked[0].to_string();
+
+    // The mark must not leak into whatever the world does next.
+    run(&mut w, 40);
+    assert_eq!(
+        w.chronicle.events.iter().filter(|e| e.by_fate).count(),
+        1,
+        "the mark stayed on after the act was over"
+    );
+    // And it has to survive being put away.
+    let bytes = ser::save(&mut w);
+    let back = ser::load(&bytes).expect("loads");
+    let kept: Vec<&str> = back
+        .chronicle
+        .events
+        .iter()
+        .filter(|e| e.by_fate)
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(kept, vec![text.as_str()]);
+}
+
+/// The covenant card asks a question a new player can answer.
+///
+/// It is the first screen after the title card, so it carries the whole
+/// weight of explaining what the player is. It has to offer real peoples,
+/// number them so one keystroke chooses, and fit an eighty-column window.
+#[test]
+fn the_covenant_card_offers_a_choice_that_fits() {
+    use crate::ui::detail::{covenant_card, covenant_choices};
+    let mut w = world(23);
+    run(&mut w, 60);
+    let choices = covenant_choices(&w);
+    assert!(
+        (2..=9).contains(&choices.len()),
+        "{} peoples to choose between",
+        choices.len()
+    );
+    for &(c, _) in &choices {
+        assert!(w.cultures[c].extinct.is_none(), "a dead people was offered");
+    }
+    let card = covenant_card(&w);
+    // Every people on the card says what it would make you, so the choice
+    // is between kinds of god and not only between population figures.
+    for &(c, ref line) in &choices {
+        assert!(
+            line.contains(crate::sim::fate::aspect_of(&w, c).title()),
+            "{:?} does not say what that people makes of a watcher",
+            line
+        );
+    }
+    if std::env::var("SHOW_FATE").is_ok() {
+        for l in &card {
+            println!("|{}|", l);
+        }
+    }
+    let widest = card.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    assert!(
+        widest + 6 <= 80,
+        "the covenant card needs {} columns: {:?}",
+        widest + 6,
+        card.iter().max_by_key(|l| l.chars().count())
+    );
+    // Every offered people is numbered, and declining is always possible.
+    for n in 1..=choices.len() {
+        assert!(
+            card.iter().any(|l| l.starts_with(&format!("{}  ", n))),
+            "no line numbered {} in {:#?}",
+            n,
+            card
+        );
+    }
+    assert!(
+        card.iter().any(|l| l.starts_with("0  ")),
+        "no way to decline"
+    );
+}
+
+/// The Hand of Fate panel fits the smallest terminal the game supports.
+///
+/// The panel sizes itself to its longest line and is centred on the map, so
+/// a line a few characters too long does not wrap — it puts the left edge
+/// at zero and the right edge off the screen. Adding the covenant's balance
+/// to the top of it made that a live risk.
+#[test]
+fn the_hand_of_fate_fits_a_small_screen() {
+    use crate::sim::chronicle::Ref;
+    use crate::ui::detail::fate_menu_for;
+    let mut w = world(19);
+    run(&mut w, 200);
+    let realm = *w.alive_polities.first().expect("a world has realms");
+    let city = (0..w.cities.len())
+        .find(|&c| w.cities[c].destroyed.is_none())
+        .expect("a world has cities");
+    let person = *w.alive_persons.last().expect("a world has people");
+    for target in [Ref::Polity(realm), Ref::City(city), Ref::Person(person)] {
+        for bound in [None, Some(0usize)] {
+            w.fate.patron = bound;
+            w.fate.power = 61.0;
+            let menu = fate_menu_for(&w, target);
+            if std::env::var("SHOW_FATE").is_ok() {
+                println!("--- {:?} bound={:?}", target, bound);
+                for l in &menu {
+                    println!("|{}|", l);
+                }
+            }
+            // A title, a balance, a blank and six choices.
+            assert_eq!(menu.len(), 9, "{:?}: {:#?}", target, menu);
+            let widest = menu.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+            assert!(
+                widest + 4 <= 76,
+                "{:?} needs {} columns, which will not fit an 80-column \
+                 terminal beside a map: {:?}",
+                target,
+                widest + 4,
+                menu.iter().max_by_key(|l| l.chars().count())
+            );
+        }
+    }
+}
+
+/// The covenant is an economy, not a cheat menu.
+///
+/// The Hand of Fate used to be twenty-four free, unlimited acts: no reason
+/// to choose between them and no reason not to use all of them at once,
+/// which is not a decision and so not a game. Three things have to hold for
+/// it to be one — a price, a purse, and a refusal when the purse is empty.
+#[test]
+fn an_act_of_fate_costs_what_it_says_and_is_refused_when_it_cannot_be_paid() {
+    use crate::sim::chronicle::Ref;
+    use crate::sim::fate;
+    use crate::ui::detail::{fate_menu_for, hand_of_fate_on};
+    let mut w = world(31);
+    run(&mut w, 300);
+    let realm = *w.alive_polities.first().expect("a world has realms");
+    let target = Ref::Polity(realm);
+
+    // An empty purse buys nothing, and says so rather than failing quietly.
+    w.fate.power = 0.0;
+    let before = summary(&w);
+    let said = hand_of_fate_on(&mut w, target, 0);
+    assert!(
+        said.starts_with("not enough"),
+        "a watcher with nothing was allowed to act: {:?}",
+        said
+    );
+    assert_eq!(summary(&w), before, "a refused act still changed the world");
+    assert_eq!(w.fate.acts, 0);
+
+    // A full one buys exactly one act, at exactly the advertised price —
+    // the price for *this* watcher, which is not the abstract one: an act
+    // within your nature costs less and one outside it costs more.
+    let cost = fate::price(&w, target, 0);
+    w.fate.power = fate::CEILING;
+    let said = hand_of_fate_on(&mut w, target, 0);
+    assert!(!said.starts_with("not enough"), "{:?}", said);
+    assert!(
+        (w.fate.power - (fate::CEILING - cost)).abs() < 0.01,
+        "an act priced at {} took {}",
+        cost,
+        fate::CEILING - w.fate.power
+    );
+    assert_eq!(w.fate.acts, 1);
+    assert!((w.fate.spent - cost).abs() < 0.01);
+
+    // And the menu tells the truth about what can be afforded.
+    w.fate.power = 0.0;
+    let menu = fate_menu_for(&w, target);
+    assert!(
+        menu.iter().filter(|l| l.starts_with('\u{b7}')).count() == 6,
+        "a penniless watcher was shown affordable choices: {:#?}",
+        menu
+    );
+}
+
+/// What you are changes what you can afford.
+///
+/// Without this, "whose god will you be?" has one sane answer — whichever
+/// people is largest — and the opening question is not a question. A
+/// people's values decide the watcher's nature, and the nature decides
+/// which of the twenty-four acts are cheap.
+#[test]
+fn a_gods_nature_changes_what_an_act_costs() {
+    use crate::sim::chronicle::Ref;
+    use crate::sim::fate::{self, aspect_of, domain_of};
+    let mut w = world(17);
+    run(&mut w, 200);
+    let target = Ref::City(
+        (0..w.cities.len())
+            .find(|&c| w.cities[c].destroyed.is_none())
+            .expect("a world has cities"),
+    );
+    // Unbound, an act costs what the table says and nothing modifies it.
+    w.fate.patron = None;
+    for choice in 0..6u8 {
+        assert_eq!(
+            fate::price(&w, target, choice),
+            fate::cost_of(target, choice)
+        );
+    }
+    // Bound, at least one act is cheaper than the table and at least one is
+    // dearer, and which is which follows the watcher's nature.
+    let people = (0..w.cultures.len())
+        .find(|&c| w.cultures[c].extinct.is_none())
+        .expect("a peopled world");
+    w.fate.patron = Some(people);
+    let mine = aspect_of(&w, people);
+    let (mut cheaper, mut dearer) = (0, 0);
+    for choice in 0..6u8 {
+        let base = fate::cost_of(target, choice);
+        let paid = fate::price(&w, target, choice);
+        if domain_of(target, choice) == mine {
+            assert!(
+                paid < base,
+                "an act of your own nature cost {} of {}",
+                paid,
+                base
+            );
+            cheaper += 1;
+        } else {
+            assert!(
+                paid > base,
+                "an act outside your nature cost {} of {}",
+                paid,
+                base
+            );
+            dearer += 1;
+        }
+    }
+    assert!(
+        cheaper > 0 && dearer > 0,
+        "{} cheap, {} dear",
+        cheaper,
+        dearer
+    );
+}
+
+/// A covenant is worth making: a people's devotion outpaces what the world
+/// gives a watcher who is bound to nobody, and their extinction takes it
+/// away again.
+#[test]
+fn a_people_is_the_source_of_the_power_spent_on_them() {
+    use crate::sim::fate;
+    let mut bound = world(53);
+    let mut unbound = world(53);
+    run(&mut bound, 120);
+    run(&mut unbound, 120);
+    let people = (0..bound.cultures.len())
+        .filter(|&c| bound.cultures[c].extinct.is_none())
+        .max_by(|&a, &b| bound.cultures[a].pop.total_cmp(&bound.cultures[b].pop))
+        .expect("a peopled world");
+    fate::bind(&mut bound, people);
+    bound.fate.power = 0.0;
+    unbound.fate.power = 0.0;
+    run(&mut bound, 200);
+    run(&mut unbound, 200);
+    // Compared by rate, not by what has piled up: both reach the ceiling in
+    // a couple of centuries and the ceiling hides the difference.
+    assert!(
+        bound.fate.income > unbound.fate.income * 2.0,
+        "a covenant with the largest people in the world pays {:.2} a year \
+         against {:.2} for no covenant at all",
+        bound.fate.income,
+        unbound.fate.income
+    );
+    // And a watcher bound to nobody is poorer, not powerless: this game was
+    // a passive simulator with free interventions before it was anything
+    // else, and somebody who answers "simply watch" should still be able to
+    // reach into the world now and then.
+    assert!(
+        unbound.fate.power >= fate::cost_of(crate::sim::chronicle::Ref::City(0), 2),
+        "two centuries of watching bought {:.1}, which is not even walls",
+        unbound.fate.power
+    );
+    // The old sandbox is one line of config away.
+    let mut free = world(53);
+    free.tuning.fate_trickle = 60.0;
+    run(&mut free, 3);
+    assert!(free.fate.power >= fate::CEILING);
 }
 
 /// A world can be written out for somebody who does not have the game.
@@ -2578,11 +3139,18 @@ fn a_wonder_costs_what_a_realm_can_afford() {
     let mut seed_world = world(61);
     run(&mut seed_world, 400);
     let bytes = ser::save(&mut seed_world);
+    // A realm that can actually build: two towns, a capital, and not at
+    // war. Asking only for two towns meant the test depended on whether the
+    // realm it happened to pick was fighting that year, which is a fact
+    // about the whole simulation rather than about wonders.
     let realm = *seed_world
         .alive_polities
         .iter()
-        .find(|&&p| seed_world.polities[p].cities.len() >= 2)
-        .expect("a 400 year world has a realm with two towns");
+        .find(|&&p| {
+            let pol = &seed_world.polities[p];
+            pol.cities.len() >= 2 && pol.capital.is_some() && !pol.at_war()
+        })
+        .expect("a 400 year world has a realm at peace with two towns");
 
     // A rich realm pays a real share; a poor one pays the flat price.
     let spent = |treasury: f32| -> f32 {
@@ -2640,13 +3208,25 @@ fn a_wonder_costs_what_a_realm_can_afford() {
 /// should be able to see the corridor go quiet.
 #[test]
 fn shutting_a_road_marks_the_road() {
-    let mut w = world(67);
+    // Three worlds, not one. This test broke twice on changes made
+    // elsewhere in the simulation, both times because it was really a
+    // statement about one particular road in one particular world.
+    for seed in [67u64, 7, 23] {
+        shutting_a_road_marks_the_road_in(seed);
+    }
+}
+
+fn shutting_a_road_marks_the_road_in(seed: u64) {
+    let mut w = world(seed);
     run(&mut w, 400);
-    // An open road between two realms that are not yet fighting.
+    // The busiest open road between two realms that are not yet fighting.
+    // The busiest rather than the first: a thin road's closure is a small
+    // number against whatever else is moving through the same country, and
+    // this test is about whether the corridor is marked at all.
     let (route, a, b) = w
         .routes
         .iter()
-        .find_map(|r| {
+        .filter_map(|r| {
             let (pa, pb) = (w.cities[r.a].polity?, w.cities[r.b].polity?);
             (r.open
                 && pa != pb
@@ -2655,32 +3235,76 @@ fn shutting_a_road_marks_the_road() {
                 && w.war_between(pa, pb).is_none())
             .then_some((*r, pa, pb))
         })
-        .expect("a 400 year world has an open road between two realms at peace");
+        .max_by(|x, y| x.0.value.total_cmp(&y.0.value))
+        .unwrap_or_else(|| panic!("seed {}: no open road between two realms at peace", seed));
     let path = w
         .terrain
         .cells_between(w.cities[route.a].cell, w.cities[route.b].cell);
-    assert!(path.len() > 2, "the two towns are the same place");
+    assert!(
+        path.len() > 2,
+        "seed {}: the two towns are the same place",
+        seed
+    );
 
     let before: f32 = path.iter().map(|&c| w.flows.carried[c]).sum();
     w.wars_start(a, b, crate::sim::WarKind::Conquest, "a test".into());
-    w.tick();
+
+    // The trade phase alone, not a whole year of the world.
+    //
+    // A full tick also resolves the war, marches the armies and may take
+    // one of the two cities, any of which can leave the road open or leave
+    // it out of the network entirely --- so the old version of this test
+    // passed or failed on what else the year happened to do, and a change
+    // anywhere in the simulation could tip it either way. What is being
+    // tested here is one thing: that a road which shuts marks its whole
+    // corridor rather than its two ends.
+    crate::sim::trade::tick(&mut w);
+    assert!(
+        w.routes
+            .iter()
+            .any(|r| r.a == route.a && r.b == route.b && !r.open),
+        "seed {}: the war did not shut the road, so there is nothing to look for",
+        seed
+    );
+
     let after: f32 = path.iter().map(|&c| w.flows.carried[c]).sum();
     assert!(
         after < before,
-        "a war shut the road and the map says nothing: {:.3} to {:.3}",
+        "seed {}: a road shut and the map says nothing: {:.3} to {:.3}",
+        seed,
         before,
         after
     );
-    // Along the middle of it, not only at the two towns.
-    let middle = path[path.len() / 2];
+    // Along its length, not only at the two towns. Measured over the
+    // interior of the path rather than at one cell of it: a single midpoint
+    // may lie on another road that is still open, and then it carries that
+    // one's traffic and says nothing about this one.
+    let interior = &path[1..path.len() - 1];
+    let marked = interior
+        .iter()
+        .filter(|&&c| w.flows.carried[c] < 0.0)
+        .count();
     assert!(
-        w.flows.carried[middle] < 0.0,
-        "only the ends of the road were marked"
+        marked * 2 >= interior.len(),
+        "seed {}: only {} of {} cells along the road were marked",
+        seed,
+        marked,
+        interior.len()
     );
-    // And it fades, rather than staying dark for ever.
-    let deep = w.flows.carried[middle];
-    run(&mut w, 120);
-    assert!(w.flows.carried[middle] > deep, "the mark never faded");
+    // And the mark fades rather than staying dark for ever. The decay
+    // phase on its own, for the same reason as above.
+    let deep: f32 = interior.iter().map(|&c| w.flows.carried[c]).sum();
+    for _ in 0..40 {
+        crate::sim::flows::tick(&mut w);
+    }
+    let now: f32 = interior.iter().map(|&c| w.flows.carried[c]).sum();
+    assert!(
+        now > deep,
+        "seed {}: the mark never faded: {:.3} to {:.3}",
+        seed,
+        deep,
+        now
+    );
 }
 
 /// A good nobody else has is worth more than one every town offers.

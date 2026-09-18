@@ -82,6 +82,43 @@ fn round_trip_is_exact() {
     assert_eq!(texts(&loaded), texts(&w));
 }
 
+/// A covenant survives being put away and taken out again.
+///
+/// The watcher is the one piece of state in the world that is about the
+/// person playing rather than about the world, so a save that dropped it
+/// would silently unbind them and quietly take their power away.
+#[test]
+fn a_covenant_survives_a_round_trip() {
+    let mut w = small_world(60);
+    let people = (0..w.cultures.len())
+        .find(|&c| w.cultures[c].extinct.is_none())
+        .expect("a peopled world has a people in it");
+    crate::sim::fate::bind(&mut w, people);
+    for _ in 0..40 {
+        w.tick();
+    }
+    assert!(w.fate.power > 0.0, "a covenant gathers nothing");
+    let before = (
+        w.fate.patron,
+        w.fate.bound,
+        w.fate.power,
+        w.fate.acts,
+        w.fate.high,
+    );
+    let bytes = ser::save(&mut w);
+    let loaded = ser::load(&bytes).expect("loads");
+    assert_eq!(
+        (
+            loaded.fate.patron,
+            loaded.fate.bound,
+            loaded.fate.power,
+            loaded.fate.acts,
+            loaded.fate.high,
+        ),
+        before
+    );
+}
+
 /// `peak_cities` is the first field a section has gained since the chunked
 /// format was written, so it is also the first exercise of the rule: the
 /// `poly` section is at version 2, the value round-trips, and a version-1
@@ -190,13 +227,14 @@ fn header_is_what_we_say_it_is() {
     // count is the length of the `sections!` table, so adding a section
     // means updating this line — which is the point of asserting it.
     let cs = chunks(&bytes);
-    assert_eq!(cs.len(), 22);
+    assert_eq!(cs.len(), 23);
     assert_eq!(cs.last().unwrap().3, bytes.len());
     assert!(cs.iter().any(|c| &c.0 == b"terr"));
     assert!(cs.iter().any(|c| &c.0 == b"chrn"));
     assert!(cs.iter().any(|c| &c.0 == b"hous"));
     assert!(cs.iter().any(|c| &c.0 == b"tech"));
     assert!(cs.iter().any(|c| &c.0 == b"trde"));
+    assert!(cs.iter().any(|c| &c.0 == b"fate"));
 }
 
 #[test]

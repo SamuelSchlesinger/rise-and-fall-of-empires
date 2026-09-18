@@ -21,6 +21,48 @@ The bottom rows show the keys for the current screen, with shortcuts in
 yellow. Time and follow status stay on the last line. Press `-` to slow down
 further, or `f` on the map to enable automatic jumps to major events.
 
+### The covenant
+
+On your first launch the world asks you one question: **whose god will you
+be?** Pick a people, and their lives become your strength. The status bar
+carries the number.
+
+* **Devotion** accrues every year, in proportion to how many of your people
+  there are as a share of the whole world — flattened, so a small nation is
+  worth playing for and a large one is not a licence to do as you please.
+* **They decide what you are.** What a people values, their god is good at.
+  A warlike people makes a god of strife; a mercantile one a god of the work
+  of hands; a mystical, inward one a god of endings; an open, peaceable one a
+  god of the harvest. Acts within your nature cost four tenths less and
+  everything else a quarter more, so the opening question is a real one and
+  not simply "which people is largest". The covenant card says what each
+  people would make of you before you choose.
+* **Acts cost.** `x` reaches into the world wherever the cursor is — a realm,
+  a town, a person, or a stretch of open country — and each of the six
+  choices carries its price beside it. Acts you cannot afford are marked
+  with `·` rather than hidden, because knowing what you are saving for is
+  most of the reason to save.
+* **It can be lost.** Your people can be conquered, scattered and absorbed.
+  When the last of them is gone the altars go cold, the chronicle says so,
+  and what you had drains away at a little over a point a year. The
+  simulation was always capable of dealing you that hand; now it means
+  something.
+
+The loop this makes is the game: devotion comes from your people, so helping
+them is how you stay able to help anybody, and every point spent on a
+stranger — or on an enemy of theirs, which is often the better investment —
+is a real sacrifice. Press `r` for the recap and the first block tells you
+how the wager is going.
+
+`:bind` on its own lists the living peoples and says who you serve now;
+`:bind <name>` changes it, and `--bind PEOPLE` on the command line starts a
+world already bound (`auto` picks the largest). Binding to nobody is allowed
+and leaves you with a thinner income from a world that owes you nothing —
+poorer than a covenant, but enough to reach in every few decades, which is
+what somebody who wants to watch and occasionally nudge is after. If you
+want the interventions free and unlimited as they were before there was a
+covenant, put `tune.fate_trickle = 60` in your config.
+
 ### Explore the world
 
 | Screen | How to open it | What to look for |
@@ -29,7 +71,8 @@ further, or `f` on the map to enable automatic jumps to major events.
 | Recap | `r` on the map | The last fifty years, for the selected realm or city, or the whole world if nothing is selected |
 | Chronicle | `c` on the map | Search history with `/`, change importance with `f`, or click an event to visit its location |
 | Current stories | `t` on the map, or click a story under Now | The realm, person or place behind a current headline |
-| Hand of Fate | Select a realm with `s`, then `x` | Six interventions; press 1–6 to choose, or Esc to cancel |
+| Hand of Fate | Put the cursor on anything, then `x` | Six interventions, each with a price; press 1–6 to choose, or Esc to cancel |
+| The covenant | `:bind` | Who you serve, what they give you, and who else you could serve instead |
 
 In lists, Tab changes category; the selected category stays visible even in
 a narrow window. On detail pages, Backspace retraces links and Esc returns
@@ -72,7 +115,7 @@ in the game for the full key list — it is the authority, and it scrolls.
 | `f` | follow: the cursor jumps to each major event as it happens |
 | `e` | lists: realms, cities, peoples, schools, persons, wars, places, relics, prophecies, figures, houses |
 | `c` | the full chronicle (`f` or `v` cycles importance 0–3, `/` filters by text) |
-| `x` | the Hand of Fate: intervene in the selected realm |
+| `x` | the Hand of Fate: intervene in whatever the cursor is on, at a price |
 | `D`, `v` | cycle simulation detail; the event log's level (1 everything, 2 the notable, 3 only the great) |
 | `?` or F1 | help |
 | `q` twice, `ZZ`, Ctrl-C | quit, saving if a save file is set; `ZQ` quits without saving |
@@ -124,7 +167,8 @@ text.
 | `:mute battle` | hide an event kind from the feeds (toggle); `:mute` lists |
 | `:set key value`, `:map <from> <to>`, `:unmap key`, `:maps` | runtime versions of the config file |
 | `:mkconfig`, `:config` | write a commented config template; show its path |
-| `:fate N` | apply Hand of Fate option N to the selected realm |
+| `:fate N` | apply Hand of Fate option N to the selection, if you can afford it |
+| `:bind [people]` | bind yourself to a people, or list them and say who you serve |
 | `:q`, `:wq`, `:q!` | quit (saving if a save file is set), save and quit, quit without saving |
 
 Most have the abbreviations and synonyms you would expect — `:write`,
@@ -177,7 +221,13 @@ on adding a field.
 #   tune.alliance_chance = 0.035          # how readily realms swear to each other
 #   tune.tribute_share = 0.2              # what a tributary owes its overlord
 #   tune.marriage_chance = 0.22           # how often a ruler finds a match
-#   tune.birth_chance = 0.16              # how many heirs a house produces
+#   tune.birth_chance = 0.26              # how many heirs a house produces
+#   tune.cadet_birth_chance = 0.11        # how wide a ruling house grows
+#   tune.house_living_cap = 18            # how many of a house lives at once
+#   tune.tech_state_chance = 0.010        # how fast a realm spreads what it knows
+#   tune.fate_trickle = 0.45              # what an unbound watcher gathers a year
+#                                         # (set it very high for the old free sandbox)
+#   tune.fate_covenant = 2.6              # what a covenant gathers at full strength
 #   tune.diadochi_min_generals = 2        # generals a dead conqueror needs to be
 #                                         # carved up between them
 #   tune.migration_sea_chance = 0.35      # how readily a crowded coast takes to boats
@@ -430,6 +480,10 @@ as a list of turning points rather than a diary.
 | `--ascii` | Use plain ASCII glyphs. |
 | `--no-mouse` | Keep the terminal's own text selection. |
 | `--tour` | Show the introductory card again. |
+| `--bind PEOPLE` | Bind yourself to a people from the first year, by name or `auto` for the largest. Works with `--headless` and `--snapshot`. |
+| `--at PLACE` | Centre a snapshot on a named realm, city, region or people rather than the largest realm's capital. |
+| `--zoom N` | Snapshot map zoom, 1--4. |
+| `--plain` | Snapshot the map alone, filling the frame, with no sidebar, event log or key rows --- a plate rather than a screenshot. |
 | `--mkconfig` | Write a commented configuration template. |
 | `-V, --version` | Print the version. |
 | `-h, --help` | List all options. |

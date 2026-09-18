@@ -71,54 +71,76 @@ fn pair_rivals(w: &mut World) {
     if pool.len() < 2 {
         return;
     }
-    // Look for an unmatched pair in the same line of work and of comparable
-    // standing, in the same realm or in realms that share a border.
+    // Find every pair that could be rivals, then choose among them.
     //
-    // Requiring the same realm made rivalries so rare they never once fired:
-    // two generals of equal fame in one kingdom at one time is a narrow
-    // thing to ask for. Across a border it is common — and a rivalry between
-    // two men on opposite sides of a war is the better story anyway.
-    for _ in 0..24 {
-        let a = pool[rng.below(pool.len())];
-        let b = pool[rng.below(pool.len())];
-        if a == b || w.persons[a].rival.is_some() || w.persons[b].rival.is_some() {
-            continue;
-        }
+    // This used to draw two people out of the pool at random and try again
+    // if they did not suit, twenty-four times. Four conditions have to hold
+    // at once --- same trade, comparable fame, neither already matched, and
+    // realms that at least share a border --- and with a pool of half a
+    // dozen the chance that a random pair satisfies all four is small
+    // enough that the whole system fired about once a century. The
+    // machinery was right; the search was a rejection sampler with an
+    // acceptance rate near zero.
+    //
+    // Sorting by trade and then by fame puts every candidate next to the
+    // people it could plausibly be measured against, so walking neighbours
+    // finds the matches instead of hoping to stumble on them.
+    let mut free: Vec<usize> = pool
+        .into_iter()
+        .filter(|&i| w.persons[i].rival.is_none())
+        .collect();
+    free.sort_by(|&a, &b| {
+        (w.persons[a].role as u8)
+            .cmp(&(w.persons[b].role as u8))
+            .then(w.persons[b].renown.total_cmp(&w.persons[a].renown))
+            .then(a.cmp(&b))
+    });
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    for pair in free.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
         if w.persons[a].role != w.persons[b].role {
             continue;
         }
         let (Some(pa), Some(pb)) = (w.persons[a].polity, w.persons[b].polity) else {
             continue;
         };
-        let known_to_each_other =
-            pa == pb || w.polities[pa].neighbors.iter().any(|&(q, _)| q == pb);
-        if !known_to_each_other {
+        // In one realm, or in realms that know of each other. A rivalry
+        // across a border is the better story anyway.
+        if pa != pb && !w.polities[pa].neighbors.iter().any(|&(q, _)| q == pb) {
             continue;
         }
         let (ra, rb) = (w.persons[a].renown, w.persons[b].renown);
         if ra.min(rb) < ra.max(rb) * MATCHED {
             continue;
         }
-        w.persons[a].rival = Some(b);
-        w.persons[b].rival = Some(a);
-        let p = pa;
-        let text = if pa == pb {
-            prose::rivalry_begun(w, a, b, &Pick::rolled(&rng))
-        } else {
-            // One draw either way, so the stream does not depend on which
-            // arm is taken.
-            let _ = Pick::rolled(&rng).index(3);
-            prose::rivalry_across_border(w, a, b, pa, pb)
-        };
-        w.log(
-            1,
-            EventKind::Person,
-            &[Ref::Person(a), Ref::Person(b), Ref::Polity(p)],
-            w.capital_cell(p),
-            text,
-        );
+        pairs.push((a, b));
+    }
+    if pairs.is_empty() {
         return;
     }
+    let (a, b) = pairs[rng.below(pairs.len())];
+    let (pa, pb) = (
+        w.persons[a].polity.unwrap_or(0),
+        w.persons[b].polity.unwrap_or(0),
+    );
+    w.persons[a].rival = Some(b);
+    w.persons[b].rival = Some(a);
+    let p = pa;
+    let text = if pa == pb {
+        prose::rivalry_begun(w, a, b, &Pick::rolled(&rng))
+    } else {
+        // One draw either way, so the stream does not depend on which arm
+        // is taken.
+        let _ = Pick::rolled(&rng).index(3);
+        prose::rivalry_across_border(w, a, b, pa, pb)
+    };
+    w.log(
+        1,
+        EventKind::Person,
+        &[Ref::Person(a), Ref::Person(b), Ref::Polity(p)],
+        w.capital_cell(p),
+        text,
+    );
 }
 
 /// Somebody of standing takes up somebody young.

@@ -43,6 +43,7 @@ pub(super) fn navigation(mode: Mode, paused: bool) -> [&'static str; 2] {
             "Arrows scroll  PgUp/PgDn page",
         ],
         Mode::Fate => ["1-6 choose an intervention", "Esc cancel"],
+        Mode::Covenant => ["1-9 bind yourself to a people", "0 or Esc watch only"],
     }
 }
 

@@ -176,6 +176,8 @@ pub enum Mode {
     Guide,
     Fate,
     Recap,
+    /// Choosing the people the watcher is bound to.
+    Covenant,
 }
 
 /// The kind of question a layer answers. Tab steps between these.
@@ -461,6 +463,9 @@ pub struct Ui {
     pub theme: Theme,
     pub keymap: Vec<(Key, Key)>,
     pub zoom: usize,
+    /// Render as a plate: the map alone, filling the frame, with no
+    /// sidebar and no event log. Set only by `snapshot`.
+    pub plate: bool,
     pub muted: Vec<EventKind>,
     story_rows: Vec<(usize, Ref)>,
     /// The one-line key under the map (`:legend` toggles it).
@@ -507,19 +512,20 @@ fn mark_tour_seen() {
 
 /// The card a first-time viewer sees, with optional help before watching.
 pub const TOUR: &[&str] = &[
-    "A world that rises and falls on its own.",
+    "A world that rises and falls on its own, and one god watching it.",
     "",
-    "Watch history unfold, or pause and explore.",
-    "The map legend explains its symbols; the sidebar describes each place.",
+    "Peoples settle, crowns are taken, wars move borders and empires end.",
+    "None of it needs you. All of it can be leaned on, if you have the",
+    "strength — and your strength comes from a people who remember you.",
     "",
     "t  Start a short, skippable interface tutorial",
     "p  Read the player guide",
     "Space pauses time. Arrows move. Enter inspects. ? opens help.",
     "e browses realms and people; r recaps history; c opens the chronicle.",
+    "x reaches into the world, wherever the cursor is.",
     "The bottom rows show the keys for each screen. Esc takes you back.",
-    "Time starts at 2 years/sec. The map stays put unless you enable f.",
     "",
-    "Any other key: watch the world.",
+    "Any other key: choose the people you will be god to.",
 ];
 
 pub fn run(
@@ -597,28 +603,75 @@ pub(crate) fn time_frames(world: World, cols: usize, rows: usize, frames: u32) -
     t.elapsed().as_secs_f64() * 1000.0 / f64::from(frames)
 }
 
-pub fn snapshot(
-    world: World,
-    ascii: bool,
-    cols: usize,
-    rows: usize,
-    years: i32,
-    layer: &str,
-    path: &str,
-) {
-    let mut ui = Ui::new(world, ascii, false, cols, rows);
+/// What a snapshot is to be taken of, beyond the layer: where to look, how
+/// closely, and whether to keep the furniture.
+///
+/// A world is worth illustrating — a history of one certainly is — and a
+/// renderer that can only ever centre on the largest realm's capital at
+/// zoom 1 can produce exactly one picture of it. These are the three knobs
+/// that turn that into a set of plates.
+#[derive(Default, Clone)]
+pub struct Shot {
+    /// Plain ASCII glyphs rather than box drawing.
+    pub ascii: bool,
+    /// Frame size in character cells.
+    pub cols: usize,
+    pub rows: usize,
+    /// Which map to draw, or which page.
+    pub layer: String,
+    /// Years to run before the frame is taken.
+    pub years: i32,
+    /// A place to centre on, by name: a realm, city, region, people or
+    /// anything else the `/` search can find. Empty means the largest
+    /// realm's capital, which is what it always used to be.
+    pub at: String,
+    /// Map zoom, 1 to 4. 0 means leave it alone.
+    pub zoom: usize,
+    /// Write the map pane alone, without sidebar, event log or key rows —
+    /// a plate rather than a screenshot.
+    pub plain: bool,
+}
+
+pub fn snapshot(world: World, path: &str, shot: &Shot) {
+    let layer = shot.layer.as_str();
+    let mut ui = Ui::new(world, shot.ascii, false, shot.cols, shot.rows);
     ui.layer = Layer::from_name(layer).unwrap_or(Layer::Political);
-    for _ in 0..years {
+    for _ in 0..shot.years {
         ui.world.tick();
     }
-    // Look at the largest realm's capital.
-    let mut ps = ui.world.living_polities();
-    ps.sort_by_key(|&p| std::cmp::Reverse(ui.world.polities[p].cells));
-    if let Some(&p) = ps.first() {
-        if let Some(c) = ui.world.capital_cell(p) {
-            ui.goto_cell(c);
+    ui.plate = shot.plain;
+    if shot.zoom > 0 {
+        ui.set_zoom(shot.zoom.clamp(1, 4));
+    }
+    // Where to look. A named place if one was asked for and found;
+    // otherwise the largest realm's capital, as it always was.
+    let found = if shot.at.is_empty() {
+        None
+    } else {
+        let hits = ui.search(&shot.at);
+        match hits.first() {
+            Some(&r) => Some(r),
+            None => {
+                eprintln!("empires: --at {}: nothing of that name", shot.at);
+                None
+            }
         }
-        ui.selected = Some(Ref::Polity(p));
+    };
+    match found {
+        Some(r) => {
+            ui.goto_ref(r);
+            ui.selected = Some(r);
+        }
+        None => {
+            let mut ps = ui.world.living_polities();
+            ps.sort_by_key(|&p| std::cmp::Reverse(ui.world.polities[p].cells));
+            if let Some(&p) = ps.first() {
+                if let Some(c) = ui.world.capital_cell(p) {
+                    ui.goto_cell(c);
+                }
+                ui.selected = Some(Ref::Polity(p));
+            }
+        }
     }
     ui.paused = true;
     match layer {
@@ -705,6 +758,7 @@ pub fn snapshot(
         "guide" => ui.mode = Mode::Guide,
         "tutorial" => ui.start_tutorial(),
         "fate" => ui.mode = Mode::Fate,
+        "covenant" => ui.mode = Mode::Covenant,
         "zoom2" => ui.set_zoom(2),
         "zoom3" => ui.set_zoom(3),
         "paper" => ui.theme = Theme::Paper,
@@ -716,11 +770,22 @@ pub fn snapshot(
         _ => {}
     }
     ui.compose();
+    // A plate is the map pane and the legend line under it, and nothing
+    // else. Cropped after composing rather than rendered differently, so
+    // what a plate shows is exactly what the screen shows.
+    let (x0, y0, x1, y1) = if shot.plain {
+        let (_, _, mw, mh) = ui.map_rect();
+        // The legend occupies the last row of the map pane, so the pane's
+        // own height is the whole plate.
+        (0, 0, mw.min(ui.screen.w), mh.min(ui.screen.h))
+    } else {
+        (0, 0, ui.screen.w, ui.screen.h)
+    };
     let mut txt = String::new();
     let mut html = String::from("<!doctype html><meta charset=utf-8><style>body{background:#000;margin:0}pre{font:13px/1.15 monospace;color:#ccc;padding:8px}</style><pre>");
     let mut last: Option<(Rgb, Rgb, u8)> = None;
-    for y in 0..ui.screen.h {
-        for x in 0..ui.screen.w {
+    for y in y0..y1 {
+        for x in x0..x1 {
             let c = ui.screen.cell(x, y);
             txt.push(c.ch);
             let st = (c.fg, c.bg, c.attr);
@@ -824,6 +889,7 @@ impl Ui {
             theme: Theme::Default,
             keymap: Vec::new(),
             zoom: 1,
+            plate: false,
             muted: Vec::new(),
             story_rows: Vec::new(),
             show_legend: true,
@@ -1036,8 +1102,12 @@ impl Ui {
     fn map_rect(&self) -> (usize, usize, usize, usize) {
         let sw = self.screen.w;
         let sh = self.screen.h;
-        let sidebar = if sw >= 100 { 36 } else { 0 };
-        let log_h = if sh >= 34 {
+        // A plate is all map: the caller asked for a picture of the world,
+        // not a picture of the program looking at the world.
+        let sidebar = if self.plate || sw < 100 { 0 } else { 36 };
+        let log_h = if self.plate {
+            0
+        } else if sh >= 34 {
             8
         } else if sh >= 24 {
             5

@@ -14,6 +14,17 @@
 # Agent scratch space and git worktrees
 /.claude/
 
+# A written history of one particular world, and the plates it is
+# illustrated with. Kept out of the tree because it documents a save rather
+# than the game, and because the world it describes predates the balance
+# changes since and no longer reproduces from the seed on its colophon.
+history-of-dae.*
+/docs/dae/
+*.aux
+*.toc
+*.out
+*.log
+
 # Editors
 *.swp
 *~

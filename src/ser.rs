@@ -1324,6 +1324,11 @@ fn event<S: Io>(s: &mut S, e: &mut Event) {
     seq(s, &mut e.refs, || Ref::Polity(0), reff);
     opt_usize(s, &mut e.loc);
     s.string(&mut e.text);
+    // Absent from version-1 files: an event loaded from one was nobody's
+    // doing, which is true of every event in a world that had no watcher.
+    if s.ver() >= 2 {
+        s.bool(&mut e.by_fate);
+    }
 }
 
 fn blank_event() -> Event {
@@ -1334,6 +1339,7 @@ fn blank_event() -> Event {
         refs: Vec::new(),
         loc: None,
         text: String::new(),
+        by_fate: false,
     }
 }
 
@@ -1342,6 +1348,12 @@ fn blank_era() -> Era {
         start: 0,
         name: String::new(),
         description: String::new(),
+        wars: 0,
+        schools: 0,
+        born: 0,
+        realms: 0,
+        fell: 0,
+        wonders: 0,
     }
 }
 
@@ -1349,6 +1361,17 @@ fn era<S: Io>(s: &mut S, e: &mut Era) {
     s.i32(&mut e.start);
     s.string(&mut e.name);
     s.string(&mut e.description);
+    // Absent from version-1 files. An era loaded from one carries no
+    // figures, and `events::eras` skips those when judging how unusual a
+    // century was rather than reading them as a century of nothing.
+    if s.ver() >= 2 {
+        s.u32(&mut e.wars);
+        s.u32(&mut e.schools);
+        s.u32(&mut e.born);
+        s.u32(&mut e.realms);
+        s.u32(&mut e.fell);
+        s.u32(&mut e.wonders);
+    }
 }
 
 fn blank_plague() -> Plague {
@@ -1489,6 +1512,35 @@ fn stats<S: Io>(s: &mut S, w: &mut World) {
     vec_f64(s, &mut w.stats.pop_history);
 }
 
+/// The covenant: who the watcher is bound to and what they hold.
+///
+/// Its own section rather than a few more fields on `head`, so that a save
+/// written before there was a watcher loads with an unbound one instead of
+/// dropping everything else in that chunk — the tag is simply absent and
+/// `Fate::default` stands.
+fn fate_sec<S: Io>(s: &mut S, w: &mut World) {
+    let mut has = w.fate.patron.map_or(0u32, |c| c as u32 + 1);
+    s.u32(&mut has);
+    w.fate.patron = if has == 0 {
+        None
+    } else {
+        Some(has as usize - 1)
+    };
+    s.i32(&mut w.fate.bound);
+    s.f32(&mut w.fate.power);
+    s.f32(&mut w.fate.income);
+    s.f32(&mut w.fate.spent);
+    s.u32(&mut w.fate.acts);
+    s.f32(&mut w.fate.high);
+    let mut forsaken = w.fate.forsaken.unwrap_or(i32::MIN);
+    s.i32(&mut forsaken);
+    w.fate.forsaken = if forsaken == i32::MIN {
+        None
+    } else {
+        Some(forsaken)
+    };
+}
+
 /// A world's own record of itself, decade by decade.
 ///
 /// Its own chunk rather than more fields on `stat`, and the reason is the
@@ -1593,15 +1645,16 @@ sections! {
     T_TRDE = b"trde", 1, routes;
     T_SCHL = b"schl", 1, schools;
     T_WARS = b"wars", 2, wars;
-    T_ERAS = b"eras", 1, eras;
+    T_ERAS = b"eras", 2, eras;
     T_PLAG = b"plag", 1, plagues;
     T_ARTI = b"arti", 1, artifacts;
     T_PROP = b"prop", 1, prophecies;
-    T_CHRN = b"chrn", 1, chronicle;
+    T_CHRN = b"chrn", 2, chronicle;
     T_STAT = b"stat", 1, stats;
     T_CTRS = b"ctrs", 1, counters;
     T_BFNM = b"bfnm", 1, battlefields;
     T_HIST = b"hist", 1, history;
+    T_FATE = b"fate", 1, fate_sec;
 }
 
 /// The version-1 body: the same sections, positional, with no chunk frames.

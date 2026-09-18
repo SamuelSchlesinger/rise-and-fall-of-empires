@@ -2,8 +2,8 @@
 //! the cities, and how it ended.
 
 use super::{
-    cap, count, host, ordinal_word, realm, realm_adj, realm_full, realm_full_cap, realm_its,
-    realm_was, who, years, Pick,
+    cap, count, host, number, ordinal, ordinal_word, realm, realm_adj, realm_full, realm_full_cap,
+    realm_its, realm_was, who, years, Pick,
 };
 use crate::sim::{WarKind, World};
 
@@ -236,10 +236,19 @@ pub fn siege_withstood(w: &World, city: usize) -> String {
 
 /// The defenders turn a defence into an advance.
 pub fn pressed_advantage(w: &World, winner: usize) -> String {
-    format!(
-        " {} pressed its advantage and took ground.",
-        cap(&host(w, winner))
-    )
+    // Two forms of the same phrase: `host` reads "the Kisigian host", which
+    // has to be capitalised to open a sentence and must not be capitalised
+    // inside one. Using the opening form everywhere printed "went with it
+    // to The Kisigian host".
+    let lower = host(w, winner);
+    let h = cap(&lower);
+    match Pick::stable(w.year, winner).index(5) {
+        0 => format!(" {} pressed its advantage and took ground.", h),
+        1 => format!(" {} did not stop at the field, and took ground.", h),
+        2 => format!(" {} followed the retreat as far as it would go.", h),
+        3 => format!(" The ground behind the field went with it to {}.", lower),
+        _ => format!(" {} took what the rout left open.", h),
+    }
 }
 
 /// A ruler who led from the front and did not come back.
@@ -280,16 +289,46 @@ pub fn battle_flourish(w: &World, winner: usize, loser: usize, pick: &Pick) -> S
 // ---------------------------------------------------------------------------
 
 /// A city stormed and plundered.
-pub fn city_sacked(w: &World, city: &str, winner: usize, wonder_lost: Option<&str>) -> String {
+///
+/// `sacked` is how many times this has now happened to it, which the world
+/// has always counted and never said. A city taken for the ninth time is a
+/// different sentence from a city taken for the first, and the difference
+/// is most of what makes a place feel old.
+pub fn city_sacked(
+    w: &World,
+    city: &str,
+    winner: usize,
+    wonder_lost: Option<&str>,
+    sacked: u32,
+) -> String {
+    // Capitalised: a wonder's name carries its own article ("the Iron
+    // Tower of Mozhildun"), and this clause opens a sentence.
     let lost = match wonder_lost {
-        Some(wn) => format!(" {} was cast down.", wn),
+        Some(wn) => format!(" {} was cast down.", cap(wn)),
         None => String::new(),
     };
+    let again = match sacked {
+        0 | 1 => String::new(),
+        2 => " It had been sacked once before.".to_string(),
+        3..=4 => format!(
+            " It was the {} time the city had been taken.",
+            ordinal_word(sacked as i64)
+        ),
+        5..=8 => format!(
+            " {} times now, and the walls have been rebuilt on the rubble of the walls before them.",
+            cap(&number(sacked as i64))
+        ),
+        _ => format!(
+            " The {} sack. There is nothing left in the city that is older than its last burning.",
+            ordinal(sacked as i64)
+        ),
+    };
     format!(
-        " {} was taken and sacked by {}.{}",
+        " {} was taken and sacked by {}.{}{}",
         city,
         host(w, winner),
-        lost
+        lost,
+        again
     )
 }
 

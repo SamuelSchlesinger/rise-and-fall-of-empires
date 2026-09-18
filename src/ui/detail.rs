@@ -2582,9 +2582,24 @@ pub const HELP: &[&str] = &[
     "Learn        p player guide   t interactive tutorial   Esc back",
     "             Reopen these any time with :guide or :tutorial. Ctrl-g skips a tutorial.",
     "",
-    "  A passive world simulator. Leave it running; peoples, realms, faiths and magical orders",
-    "  rise and fall on their own. Look closer whenever you like. Keys work like vim: a number",
-    "  before a motion repeats it (12j, 3], 5.).",
+    "  A world that runs without you: peoples, realms, faiths and magical orders rise and fall",
+    "  on their own. Look closer whenever you like. Keys work like vim: a number before a",
+    "  motion repeats it (12j, 3], 5.).",
+    "",
+    "Covenant     You are bound to a people, and what they give you is what you can spend.",
+    "             The status bar shows it. x reaches into the world — a realm, a town, a person",
+    "             or a stretch of country — and each of the six acts has a price against what",
+    "             you hold. Devotion grows with how many of your people there are and how well",
+    "             they are doing, so helping them is how you stay able to help anyone, and",
+    "             spending on a stranger is a real sacrifice. Lose them all and it drains away.",
+    "             They also decide what you are: a warlike people makes a god of strife, a",
+    "             mercantile one a god of the work of hands, a mystical one a god of endings,",
+    "             an open one a god of the harvest. Acts of your own nature cost far less and",
+    "             everything else costs more, which is why the largest people is not always",
+    "             the one to pick.",
+    "             :bind lists the peoples and :bind <name> changes who you serve; r shows how",
+    "             they stand. :bind with no people at all leaves you watching, which is the",
+    "             old sandbox and is deliberately poor.",
     "",
     "Time         Space pause    + - speed    . step a year    D detail    :until 900   :step 50",
     "             ? or F1 this page.  Counts work everywhere: 12j, 3], 5.",
@@ -2608,7 +2623,7 @@ pub const HELP: &[&str] = &[
     "             :new [seed]  :until YEAR  :step N  :follow on  :log 1-3  :mute battle  :story",
     "             :recap 100 (the last N years)   :legend (the key under the map)   :tour",
     "             :set key value  :map <from> <to>  :unmap key  :maps  :mkconfig  :config",
-    "             :fate 3  :q  :wq  :q!",
+    "             :fate 3  :bind Zhonnites  :q  :wq  :q!",
     "             :export chronicle|map|timeline|series|house|realms|wealth|cities|roads|persons|wars",
     "             (Markdown for the history, HTML for the map, CSV for a table)",
     "",
@@ -2647,6 +2662,64 @@ pub const HELP: &[&str] = &[
     "             has a Why block: what pulls its stability up or down, ranked, in words.",
 ];
 
+/// The peoples a watcher may bind themselves to, largest first.
+///
+/// Largest first because the first thing anybody wants to know is who is
+/// doing well, and because a covenant is a wager on a people lasting: the
+/// list is the odds board. Capped at nine so that one keystroke chooses.
+pub fn covenant_choices(w: &World) -> Vec<(usize, String)> {
+    let mut living: Vec<usize> = (0..w.cultures.len())
+        .filter(|&c| w.cultures[c].extinct.is_none() && w.cultures[c].pop > 0.0)
+        .collect();
+    living.sort_by(|&a, &b| w.cultures[b].pop.total_cmp(&w.cultures[a].pop));
+    living.truncate(9);
+    living
+        .into_iter()
+        .map(|c| {
+            let cul = &w.cultures[c];
+            let realms = w
+                .alive_polities
+                .iter()
+                .filter(|&&p| w.polities[p].culture == c)
+                .count();
+            let line = format!(
+                "{} — {} people, {} — {}",
+                cul.plural,
+                crate::ui::words::folk(cul.pop as f32),
+                crate::sim::prose::count(realms as i64, "realm"),
+                crate::sim::fate::aspect_of(w, c).title()
+            );
+            (c, line)
+        })
+        .collect()
+}
+
+/// The card that asks the watcher who they serve.
+///
+/// This is the whole of the onboarding for the covenant, and it exists
+/// because a feature reachable only by typing `:bind` is a feature nobody
+/// finds. The world's opening question should be a question.
+pub fn covenant_card(w: &World) -> Vec<String> {
+    let mut out = vec![
+        "Whose god will you be?".to_string(),
+        String::new(),
+        "Bind yourself to a people and their lives become your strength:".into(),
+        "the more of them there are, the more you may reach into the world".into(),
+        "with x. Lose them all and it drains away.".into(),
+        String::new(),
+        "They also decide what you are. What a people values, their god is".into(),
+        "good at: a warlike people makes a god of strife, and war and".into(),
+        "ambition cost such a god little. Everything else costs more.".into(),
+        String::new(),
+    ];
+    for (n, (_, line)) in covenant_choices(w).iter().enumerate() {
+        out.push(format!("{}  {}", n + 1, line));
+    }
+    out.push(String::new());
+    out.push("0  Bind yourself to no one, and simply watch.".into());
+    out
+}
+
 /// Whether the Hand of Fate has anything to say about a thing.
 ///
 /// It used to reach realms and nothing else, which meant the only way to
@@ -2663,8 +2736,59 @@ pub fn fate_reaches(w: &World, r: Ref) -> bool {
     }
 }
 
-/// The menu for whatever is selected, or an empty list if nothing fitting is.
+/// The menu for whatever is selected, with the price of each act and what
+/// there is to pay it with.
+///
+/// The menu used to be six free choices, which is not a menu: a thing you
+/// can do as often as you like is not a decision. Every line now carries
+/// its cost against what [`crate::sim::fate`] has gathered, and the ones
+/// that cannot be afforded say so rather than being hidden — knowing what
+/// you are saving up for is most of the reason to save.
 pub fn fate_menu_for(w: &World, r: Ref) -> Vec<String> {
+    let mut lines = fate_menu_bare(w, r);
+    if lines.is_empty() {
+        return lines;
+    }
+    let f = &w.fate;
+    let people = f
+        .patron
+        .filter(|&c| c < w.cultures.len())
+        .map(|c| w.cultures[c].plural.clone());
+    let held = match &people {
+        Some(name) => format!(
+            "{:.0} in hand, {:+.1} a year from the {}; {}.",
+            f.power,
+            f.income,
+            name,
+            crate::sim::fate::aspect_of(w, f.patron.unwrap_or(0)).cheap()
+        ),
+        None => format!(
+            "{:.0} in hand, {:+.1} a year. Bind a people with :bind.",
+            f.power, f.income
+        ),
+    };
+    // The first line is the question, the second is blank, then the six.
+    let mut out = Vec::with_capacity(lines.len() + 2);
+    out.push(lines.remove(0));
+    out.push(held);
+    out.push(String::new());
+    // The blank separator is not a choice, so it must not advance the
+    // numbering: counting it charged every act the price of the one below it.
+    let mut choice = 0u8;
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let cost = crate::sim::fate::price(w, r, choice);
+        let mark = if f.can(cost) { ' ' } else { '·' };
+        out.push(format!("{}{}  ({:.0})", mark, line, cost));
+        choice += 1;
+    }
+    out
+}
+
+/// The six acts themselves, unpriced.
+fn fate_menu_bare(w: &World, r: Ref) -> Vec<String> {
     match r {
         Ref::Polity(p) if fate_reaches(w, r) => fate_menu(w, p),
         Ref::City(c) if fate_reaches(w, r) => vec![
@@ -2706,13 +2830,25 @@ pub fn hand_of_fate_on(w: &mut World, r: Ref, choice: u8) -> String {
     if !fate_reaches(w, r) {
         return "that is beyond reach now".into();
     }
-    match r {
+    let cost = crate::sim::fate::price(w, r, choice);
+    if !w.fate.pay(cost) {
+        return format!(
+            "not enough: that costs {:.0} and you hold {:.0}",
+            cost, w.fate.power
+        );
+    }
+    // Everything logged between here and the end of the act is the
+    // watcher's doing, and says so for ever after.
+    w.fate_mark = true;
+    let said = match r {
         Ref::Polity(p) => hand_of_fate(w, p, choice),
         Ref::City(c) => city_fate(w, c, choice),
         Ref::Person(i) => person_fate(w, i, choice),
         Ref::Feature(f) => land_fate(w, f, choice),
         _ => "nothing answers".into(),
-    }
+    };
+    w.fate_mark = false;
+    said
 }
 
 /// What can be done to a single town.

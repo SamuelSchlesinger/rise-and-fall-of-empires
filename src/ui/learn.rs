@@ -106,10 +106,11 @@ enum Step {
     Zoom,
     Browse,
     Back,
+    Reach,
     Done,
 }
 
-const STEPS: [Step; 8] = [
+const STEPS: [Step; 9] = [
     Step::Resume,
     Step::Pause,
     Step::Move,
@@ -117,6 +118,7 @@ const STEPS: [Step; 8] = [
     Step::Zoom,
     Step::Browse,
     Step::Back,
+    Step::Reach,
     Step::Done,
 ];
 
@@ -130,7 +132,11 @@ impl Step {
             Self::Zoom => ("Zoom", "Type zo to zoom out. More of the world fits on screen. Type zi when you want to look closer again."),
             Self::Browse => ("Lists", "Press e to browse the world's realms, cities, peoples and more. In a list, Tab changes category and Enter opens an item."),
             Self::Back => ("Return", "Press Esc to return to the map. On a detail page, bracketed letters follow links and Backspace retraces them."),
-            Self::Done => ("Ready", "Press Enter to finish. :w saves your world. ? opens help; press p there for the player guide. Reopen this tutorial with :tutorial."),
+            // The one verb the player has. A tutorial that teaches the
+            // interface and never the game leaves somebody knowing how to
+            // read a world they have no part in.
+            Self::Reach => ("Reach in", "Press x. Whatever the cursor is on — a realm, a town, a person, or open country — can be leaned on, and each of the six acts costs devotion, which your people give you. The number is in the status bar. Esc closes the menu without spending anything."),
+            Self::Done => ("Ready", "Press Enter to finish. :bind changes who you serve. :w saves your world. ? opens help; press p there for the player guide. Reopen this tutorial with :tutorial."),
         }
     }
 }
@@ -195,6 +201,15 @@ impl Ui {
         if key == Key::Ctrl('c') {
             return false;
         }
+        // Esc closes an open menu before it means anything else, whatever
+        // step the lesson has reached: a player who opens the Hand of Fate
+        // and backs out of it has not asked to abandon the tutorial.
+        if key == Key::Esc && matches!(self.mode, Mode::Fate | Mode::Covenant) {
+            self.mode = self.prev_mode;
+            return true;
+        }
+        // Otherwise Esc is the lesson in the Back step and the way out
+        // everywhere else.
         if key == Key::Ctrl('g') || (key == Key::Esc && step != Step::Back) {
             self.stop_tutorial();
             return true;
@@ -215,6 +230,7 @@ impl Ui {
             Step::Zoom => matches!(key, Key::Char('z' | 'o' | 'i')),
             Step::Browse => key == Key::Char('e'),
             Step::Back => key == Key::Esc,
+            Step::Reach => matches!(key, Key::Char('x' | 'X')),
             Step::Done => false,
         };
         if !allowed {
@@ -235,10 +251,32 @@ impl Ui {
             Step::Zoom => self.zoom > 1,
             Step::Browse => self.mode == Mode::List,
             Step::Back => self.mode == Mode::Map,
+            // Pressing the key is the lesson. Whether the menu opened
+            // depends on what happens to be under the cursor, and a
+            // tutorial that can stall on an empty sea is worse than one
+            // that teaches a keystroke.
+            Step::Reach => true,
             Step::Done => false,
         };
         if complete {
-            self.tutorial.as_mut().unwrap().step = STEPS[step as usize + 1];
+            let next = STEPS[step as usize + 1];
+            self.tutorial.as_mut().unwrap().step = next;
+            // The Reach lesson needs something to reach. Wherever the
+            // cursor wandered to in the Explore step, it may be open ocean,
+            // and a tutorial whose instruction does nothing is worse than
+            // no tutorial.
+            if next == Step::Reach {
+                if let Some(p) = self
+                    .world
+                    .alive_polities
+                    .iter()
+                    .copied()
+                    .max_by_key(|&p| self.world.polities[p].cells)
+                {
+                    self.goto_ref(crate::sim::chronicle::Ref::Polity(p));
+                    self.selected = Some(crate::sim::chronicle::Ref::Polity(p));
+                }
+            }
         }
         true
     }
@@ -289,7 +327,13 @@ mod tests {
     use crate::sim::Detail;
 
     fn ui() -> Ui {
-        Ui::new(World::new(7, 40, 20, Detail::Medium), false, false, 80, 24)
+        // Ticked, because several of these lessons are about things a world
+        // has to contain: a realm to reach into, a list with rows in it.
+        let mut w = World::new(7, 40, 20, Detail::Medium);
+        for _ in 0..80 {
+            w.tick();
+        }
+        Ui::new(w, false, false, 80, 24)
     }
 
     #[test]
@@ -320,7 +364,18 @@ mod tests {
         }
         assert_eq!(ui.mode, Mode::List);
         assert!(ui.handle_key(Key::Esc));
+        assert_eq!(ui.tutorial.as_ref().unwrap().step, Step::Reach);
+        // The lesson that is about the game rather than the interface: x
+        // opens the menu, and Esc closes it without ending the tutorial.
+        assert!(ui.handle_key(Key::Char('x')));
+        assert_eq!(ui.mode, Mode::Fate);
         assert_eq!(ui.tutorial.as_ref().unwrap().step, Step::Done);
+        assert!(ui.handle_key(Key::Esc));
+        assert_eq!(ui.mode, Mode::Map);
+        assert!(
+            ui.tutorial.is_some(),
+            "Esc ended the tutorial from the menu"
+        );
         assert!(ui.handle_key(Key::Enter));
         assert!(ui.tutorial.is_none());
         assert!(!ui.paused);

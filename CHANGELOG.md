@@ -10,6 +10,300 @@ world may change between releases. A change that makes a given seed produce a
 different history is noted here under **Changed** as *world-changing*, because
 it invalidates saved worlds' futures and every seed anyone has written down.
 
+## [Unreleased]
+
+Someone to be god to, a dynasty that is a tree, and a world with a late act.
+
+### Added
+
+- **The Covenant.** On first launch the world asks one question: whose god
+  will you be? Bind yourself to a people and their lives become your
+  strength — devotion accrues each year in proportion to their share of the
+  world, flattened by a square root so that a small nation is worth playing
+  for and a large one is not a licence to do as you please. The status bar
+  carries the balance; `:bind` lists the peoples and changes who you serve;
+  `r` opens with how the wager stands.
+
+  This exists because the Hand of Fate was a cheat menu. Twenty-four
+  interventions, every one of them free and unlimited, with no reason to
+  choose between them and no reason not to use all of them at once. A thing
+  you can do as often as you like is not a decision, and a world you can
+  rewrite at no cost is not a world you can care about. Every act now has a
+  price against what you hold, the menu shows it, and the ones you cannot
+  afford are marked rather than hidden. Devotion comes from your people, so
+  helping them is how you stay able to help anybody and spending on a
+  stranger is a real sacrifice — and when the last of your people is gone the
+  chronicle says so and what you had drains away. Binding to nobody is still
+  allowed and still works; it is simply, deliberately, poor.
+
+- **A people decides what kind of god you are.** The twenty-four acts fall
+  into four natures — growth, ruin, craft and strife — and a people's own
+  values decide which of them their god is good at. Acts within your nature
+  cost four tenths less and everything else a quarter more. It is derived
+  rather than chosen, so the opening question stays one question, and it is
+  what stops the only sane answer to it being "whichever people is largest".
+  The covenant card names what each people would make of you.
+
+- **Collateral succession.** A crown that has no child to go to now goes
+  sideways — to a brother, a nephew, an uncle, a cousin — and the chronicle
+  names the tie. `dynasty::kinship` measures a blood link as steps up to the
+  nearest shared ancestor and back down, which is what tells a nephew from
+  an uncle from a cousin, and `kin_heirs` ranks the claimants by nearness and
+  then by age.
+
+- **Cadet branches.** The ruler's brothers and cousins marry and have
+  children of their own, capped per house so the world does not fill with
+  idle claimants. Until now only the reigning ruler ever married, which is
+  why a house had no width: it was a thread, and a king who died childless
+  ended his line however many brothers survived him. The greatest house in a
+  1500-year world went from **11 rulers to 99**, across six thrones.
+
+- **A regent with a name, and the uncle who does not wait.** A child heir is
+  now seated by a named kinsman of the house; where the heir is very young,
+  the throne is shaky and the nearest grown kinsman is ambitious, the
+  regency does not happen at all.
+
+- **An administration spreads what it knows.** A realm carries innovations
+  from the provinces that have them to the provinces that do not, at a rate
+  set by its development and slowed by sprawl and a rotted court. Cell-by-cell
+  diffusion crawls at walking pace and trade only joins two cities that
+  happen to be trading, so a realm that held a third of the world for four
+  centuries used to spread nothing at all.
+
+### Changed
+
+- *World-changing.* **A century is named for what was unusual about it.** The
+  tests were a mixture of relative and absolute: a warlike century was one
+  with more than two wars per living realm, but a century of doctrine was
+  one with seven new schools in it, full stop. So once a world was large
+  enough to found seven schools in a century it founded seven in every
+  century, and that test --- which sits near the bottom of the chain and
+  should almost never win --- named **forty-seven of one world's fifty-nine
+  centuries**. Five thousand years of history read as Ages of Prophets, of
+  Argument and of Open Schools while nineteen thousand wars went unremarked.
+
+  Every measure is now taken per living realm and judged against the median
+  of that world's own past centuries, in units of the median absolute
+  deviation --- robust, because a history has outliers in it by
+  construction, and comparable, because falls and finished wonders swing
+  about far more from century to century than wars and schools do, so a
+  plain ratio against the usual simply hands every age to whichever measure
+  is noisiest. Two new things a century can be named for: the realms that
+  ended in it, and the great works finished in it. Across three seeds,
+  centuries named for doctrine fell from about four in five to about one in
+  ten, roughly a third are called ordinary, and the rest spread over eight
+  families.
+
+- *World-changing.* **A realm's obituary says how large and how old it was,
+  and what that was worth.** The fall of a realm of two thousand lands and
+  five thousand years got exactly the sentence a chiefdom of forty got ---
+  the world knew perfectly well which was which and had no way of saying so,
+  and the chronicle never once mentioned how long anything had stood.
+  It now gives the age, and where the dead realm ranks against everything
+  this world has already buried: the largest ever to stand, the longest ever
+  to end, or how many years it has been since anything of its size ended.
+  That last is the only kind of sentence in the game that compares one
+  century to another.
+
+- *World-changing.* **A city says how many times it has been sacked.** The
+  count was kept from the first day and never used. A city taken for the
+  ninth time now reads differently from one taken for the first --- "The
+  ninth sack. There is nothing left in the city that is older than its last
+  burning" --- which is most of what makes a place feel old.
+
+- *World-changing.* **A town is founded for a reason.** Every town in the
+  world was raised "where the land would feed them", which is true of all of
+  them and therefore says nothing about any of them, and a realm founds one
+  every few years for six thousand years. The clause now depends on what the
+  realm was doing: at war, devout, sprawling, or none of those.
+
+- *World-changing.* **A ruler dies of what was going on around them.** A
+  death in a plague year, on campaign, after a reign longer than most lives,
+  or at the end of a cruel one now draws from its own set rather than from
+  the one hat of sixteen.
+
+- *World-changing.* **Rivalries actually happen.** Two notables of the same
+  trade and comparable fame, in one realm or across a border, are supposed
+  to spend their careers being measured against each other. The search for
+  such a pair drew two people out of the pool at random and tried again if
+  they did not suit, twenty-four times --- and four conditions have to hold
+  at once, so with a pool of half a dozen the whole system fired about once
+  a century. Sorting the pool by trade and then by fame puts every candidate
+  next to the people it could be compared with, and walking neighbours finds
+  the matches instead of hoping to stumble on them: about one every twenty
+  years now rather than one a century.
+
+- *World-changing.* **Nobody credits a three-year-old with a conquest.** The
+  chronicle credited whoever sat the throne, so a realm whose ruler was an
+  infant produced the least believable line in the record: an emperor
+  acclaimed for conquering at seven lands a year at the age of three. Land
+  won and cities founded are now credited to whoever was actually running
+  the realm --- a serving general where the crown is on a child, and nobody
+  at all where there is none, which is honest, because in that case nobody
+  knows who did it. The world also no longer calls a child great; it may
+  call them great later, which is a better moment for it anyway.
+
+- *World-changing.* **A house can come back.** Nothing in this world ever
+  returned: realms fell and stayed fallen, and a house that lost a throne
+  never saw it again, so the chronicle could tell the story of a decline and
+  never the story of a restoration --- which is the older and the better of
+  the two. `dynasty::restoration` walks a house's cadet-branch chain and the
+  realm's own list of rulers, and where a line takes back a throne it lost
+  at least sixty years and two rulers ago, the chronicle says so. About one
+  every twenty years in a world of two hundred realms, and the only sentence
+  in the game that reaches back further than a lifetime.
+
+
+- *World-changing.* **The dynastic cycle.** Decadence used to be permanent:
+  it climbed to its ceiling in a century and a half and stayed there, so
+  every realm older than that carried the same crushing stability penalty for
+  the rest of its life. The world was not finding an equilibrium, it was
+  accumulating an unpayable debt — which is why the greatest realm held 17%
+  of the world in the third century and never more than 4% again, and why
+  after the eighth century the map froze into two hundred equally weak realms
+  and stayed that way for a thousand years. A new house on an old throne now
+  sweeps the court, and a reformer cleans it without the dynasty having to
+  fall first. Empires peak late again: in seed 7 the largest realm of the
+  whole run now tops out in **year 737**, and great powers live a median 429
+  years against 347.
+
+- *World-changing.* Rulers have children more readily (`birth_chance` 0.16 →
+  0.26), a house is founded with kin rather than as one man with no
+  relations, and cadet lines are governed by three new tuning fields
+  (`cadet_marriage_chance`, `cadet_birth_chance`, `house_living_cap`).
+
+- **The chronicle repeats itself far less.** The worst offender — the clause
+  appended to every battle of every coalition war — appeared **756 times in
+  eight centuries, six percent of every line a reader would ever see**. It is
+  now 198, and the rest of the top twenty went with it: a ruler's natural
+  death has sixteen phrasings instead of seven, an assassin ten instead of
+  five, and the settlement, marriage, famine, wonder, stalemate, election,
+  regency and usurpation lines have four to six each. A new test,
+  `no_phrase_becomes_the_whole_chronicle`, measures the thing directly —
+  every seven-word run of common words across eight centuries — and fails if
+  any one of them reaches 3% of all events.
+
+- *World-changing.* **Names you can say.** The generator coined realms called
+  Loulnyuxngolmungon and peoples called the Loulnyuxngolmungonians, because
+  three separate rules each believed somebody else was measuring: `place`
+  checked the length of the first half of a compound and then glued a second
+  half on with no length check and no cluster check, and `demonym` added a
+  suffix to the result. The cluster rule itself counted *letters*, so it had
+  to be loose enough to let every digraph through — which let `nnnd`,
+  `xngolm` and `quthnusuwh` through with them. It now counts *sounds*, with
+  a table of the letter pairs these languages write for one, and there is a
+  deterministic smoother at every seam where a suffix or a compound is glued
+  on. Names are capped at twelve characters and trimmed at a vowel so the
+  result still reads as a word of the same language. Mean name length across
+  eight centuries fell from 9.6 to 7.6, trebled letters from dozens to zero,
+  and nothing in the world is now longer than a sidebar column.
+
+- The Hand of Fate panel carries the covenant's balance, prices every act,
+  and is clamped to the width of the map.
+
+- **The watcher's own acts are marked.** Six interventions in a world of
+  fifty thousand events are invisible, and an act you cannot find afterwards
+  did not feel like one. Events caused by the Hand of Fate now carry a flag
+  through the save format, are drawn lit and marked with `▸` in both the
+  event log and the chronicle, and the recap keeps a "Your hand" list of the
+  last four.
+
+- **Plates.** `--snapshot` could only ever take one picture of a world: the
+  largest realm's capital, at zoom 1, with the sidebar and the event log
+  around it. It now takes `--at PLACE` to centre on any realm, city, region
+  or people the search can find, `--zoom N`, and `--plain` to render the map
+  alone, filling the frame, as an illustration rather than a screenshot. A
+  world can now be documented rather than merely screenshotted: a set of
+  plates of one world, region by region, is a few invocations rather than
+  one picture of wherever the largest realm happens to sit.
+
+- **`--bind PEOPLE`**, by name or `auto` for the largest, so a headless run,
+  a snapshot or a script can live its whole history under a covenant rather
+  than the last part of it.
+
+- **A realm of your own people is marked in the sidebar** with `◆` rather
+  than `■`, so a covenant is visible on the screen you actually watch.
+
+- **The tutorial teaches the game, not only the interface.** A new "Reach in"
+  lesson covers `x`, what an act costs and where the devotion to pay for it
+  comes from. Esc now closes an open menu inside the tutorial rather than
+  abandoning it.
+
+- **The era lines, which are the one sentence a reader is guaranteed to see
+  every hundred years.** They had three phrasings apiece, so the same one
+  turned up in four centuries out of six, and the summary a new world hands
+  a new player at year 100 could be "Nothing much happened". A game whose
+  own verdict on its first century is that nothing happened has talked the
+  reader out of the next four hundred years. Six phrasings each now, and the
+  quiet ones say what a quiet century is actually like — "children born at
+  its start died of old age in their own beds, which almost no century can
+  be made to say" — rather than apologising for it.
+
+- The chronicle's well-formedness test reads four worlds rather than one.
+  Every phrasing sits behind a random or hashed choice, so a single seed
+  reaches perhaps a third of them — and the variants added to break up the
+  repetition are precisely the sentences it is least likely to reach.
+
+### Fixed
+
+- A joined list of allies took a singular verb --- "Tseizri and Roksnio was
+  in the line beside them", "Eshilvale and Tsesa had come to help, and was
+  carried off the field with them" --- and a realm whose name is a people
+  was given one too: "The Tsishan Clans was inherited by a child". Both
+  forms were available at every one of those sites and the singular one was
+  hard-coded. Guarded now by a test on the helpers themselves rather than on
+  the chronicle, because "the Chasimban attack on the Ngeese Clans was
+  thrown back" is perfectly correct and no substring rule can tell the two
+  apart.
+
+- A wonder name opening a sentence was not capitalised, in two places ("…
+  lost everything behind it. the White Tower of Dhabirn was destroyed"), and
+  an heir's age was given as "she is 17 years". The chronicle's
+  well-formedness test now checks every sentence in an entry rather than the
+  first: an event is built by appending clauses, and a clause written to sit
+  mid-sentence that ends up opening one reads as a bug however correct the
+  sentence before it was. It found all three.
+
+- `a_wonder_costs_what_a_realm_can_afford` picked a realm with two towns and
+  assumed it could build, so it failed whenever that realm happened to be at
+  war that year. It now asks for the preconditions it depends on.
+
+- `kinship_names_the_relation_it_measures` read a person's children as
+  siblings. A child is listed by both of its parents but names only one of
+  them, so somebody who had children by two partners lists two people who
+  are not siblings at all --- which is exactly the relation the test exists
+  to measure.
+
+- `shutting_a_road_marks_the_road` tested one road in one world through a
+  whole simulated year, so it passed or failed on whatever else that year
+  happened to do --- it resolves the war, marches the armies and can take
+  one of the two cities --- and it broke twice on changes made elsewhere. It
+  now drives the trade and decay phases directly, over three worlds, and
+  measures the corridor rather than a single midpoint cell that may belong
+  to another road.
+
+- A ruler could be **named "The"**. The phonology was free to coin it, and
+  every sentence about him read like a capitalisation bug: "Khan The
+  Bloodhand of Lorker died in the bath". Coined names are now rejected if
+  they collide with a short English function word.
+
+- A capitalised realm name in the middle of a sentence, in three places: an
+  ally answering a call ("the call went to The Kingdom of Sha"), a host
+  taking ground, and an empire shrinking back to a kingdom. Every realm name
+  comes in an opening form and an inside-a-sentence form, and a family of
+  near-identical helpers will eventually be used the wrong way round — so
+  the chronicle's well-formedness test now fails on a capitalised article
+  after a lower-case letter or a comma, which no sentence in this world
+  should ever contain.
+
+- A people's plural returned early for the `-s` ending and so skipped the
+  cluster smoother, which is how the people of Chinluthhr became the
+  Chinluthhrs.
+
+- A school-crowding brake whose equilibrium sat at almost exactly the bound
+  its own test asserted, so any change to how many realms a world carries
+  could tip it over. Fourth power rather than third.
+
 ## [0.4.0] - 2026-09-17
 
 Understanding a world, and reaching into it.

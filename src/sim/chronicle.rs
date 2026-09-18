@@ -102,6 +102,13 @@ pub struct Event {
     pub loc: Option<usize>,
     /// The sentence itself.
     pub text: String,
+    /// Whether the watcher's own hand caused this.
+    ///
+    /// A world of fifty thousand events swallows six of them without trace,
+    /// and an act you cannot find afterwards is an act that did not feel
+    /// like one. Marked here rather than remembered as a list of indices,
+    /// because compaction drops events and renumbers everything after them.
+    pub by_fate: bool,
 }
 
 /// Every event of a world's life, indexed by what each one is about.

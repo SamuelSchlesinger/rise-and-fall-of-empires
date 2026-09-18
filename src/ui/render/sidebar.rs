@@ -409,8 +409,17 @@ impl Ui {
                     None => "  ",
                 };
                 self.power_rows.push((y, p));
-                self.screen
-                    .put(x, y, if ascii { '#' } else { '■' }, color, bg);
+                // A realm of your own people is marked, because a covenant
+                // you cannot see on the map is a number in a corner of the
+                // status bar and nothing more.
+                let mine = self.world.fate.patron == Some(self.world.polities[p].culture);
+                let swatch = match (mine, ascii) {
+                    (true, true) => '*',
+                    (true, false) => '\u{25c6}',
+                    (false, true) => '#',
+                    (false, false) => '\u{25a0}',
+                };
+                self.screen.put(x, y, swatch, color, bg);
                 // swatch, name, lands, war, trend: the name gives up what
                 // the numbers need, and says so with an ellipsis.
                 let namew = tx.saturating_sub(11);

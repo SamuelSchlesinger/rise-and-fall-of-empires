@@ -46,6 +46,8 @@ sim/
   chronicle.rs   the event store and its per-entity index
   prose/         every sentence the chronicle prints
   explain.rs     why things are as they are — a pure reading of &World
+  fate.rs        the watcher: who they are bound to, what they gather and
+                 what an act costs
 
 ser.rs           save files: one symmetric Io trait, chunked format
 config.rs        ~/.config/empires/config, settings and key remaps
@@ -67,7 +69,7 @@ ui/
 The dependency direction is one-way: `geo` and `lang` know nothing about
 `sim`; `sim` knows nothing about `ui` or `term`; `ui` reads the world and never
 changes it except through the few `&mut World` entry points (`tick`, loading, the
-Hand of Fate). `ser` is the one module that sees the whole `World` at once.
+Hand of Fate, and `fate::bind`). `ser` is the one module that sees the whole `World` at once.
 
 ## The data model
 
@@ -259,6 +261,7 @@ prints.
 | 22 | `stories::tick_prophecies` | prophecies fulfilled or failed at their deadline |
 | 23 | `stories::tick_legends` | tyrants, heroes, legends |
 | 24 | `World::recompute` | rebuild aggregates: sizes, populations, neighbours, sprawl, what each realm knows |
+| — | `fate::tick` | the covenant gathers, or drains if its people are gone (unprofiled: one lookup) |
 | 25 | `events::eras` | name the age if it has turned |
 
 Then the chronicle is compacted to `tuning.chronicle_cap`, and every tenth year

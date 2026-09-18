@@ -53,6 +53,13 @@ struct Args {
     cols: usize,
     rows: usize,
     tour: bool,
+    /// A people to be bound to from the first year: a name, or "auto" for
+    /// whichever is largest. Lets a headless run, a snapshot or a script
+    /// start with a covenant instead of the thin trickle of no covenant.
+    bind: Option<String>,
+    /// Where a snapshot looks, how closely, and whether it keeps the
+    /// interface furniture around the map.
+    shot: ui::Shot,
 }
 
 /// Complain on stderr and stop. Bad arguments are the user's to fix, so the
@@ -93,12 +100,19 @@ empires — rise and fall of empires
       --no-mouse        do not capture the mouse (keeps the terminal's own
                         text selection)
       --tour            show the introductory card again
+      --bind PEOPLE     bind yourself to a people from the first year, by
+                        name or `auto` for whichever is largest
       --mkconfig        write a commented config template to
                         ~/.config/empires/config
       --snapshot PATH   render one frame after --headless N years (default 300)
                         to PATH.txt and PATH.html
       --layer L         layer for the snapshot: political, terrain, culture,
                         mana, population, biomes
+      --at PLACE        centre the snapshot on a named realm, city, region
+                        or people rather than the largest realm's capital
+      --zoom N          snapshot map zoom, 1-4
+      --plain           snapshot the map alone, without the sidebar, the
+                        event log or the key rows
       --cols C          terminal width for the snapshot, 20-1000 (default 160)
       --rows R          terminal height for the snapshot, 5-1000 (default 45)
   -V, --version         print the version and exit
@@ -129,6 +143,8 @@ fn parse_args(cfg: &config::Config) -> Args {
         cols: 160,
         rows: 45,
         tour: false,
+        bind: None,
+        shot: ui::Shot::default(),
     };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -173,6 +189,10 @@ fn parse_args(cfg: &config::Config) -> Args {
             "--min-importance" | "-i" => a.min_importance = number!(&mut i, u8, "a whole number"),
             "--ascii" => a.ascii = true,
             "--tour" => a.tour = true,
+            "--bind" => a.bind = Some(value(&mut i)),
+            "--at" => a.shot.at = value(&mut i),
+            "--zoom" => a.shot.zoom = number!(&mut i, usize, "a zoom level, 1-4"),
+            "--plain" => a.shot.plain = true,
             "--stats" => a.stats = true,
             "--bench" => a.bench = true,
             "--load" | "-l" => a.load = Some(value(&mut i)),
@@ -255,6 +275,40 @@ fn main() {
             eprintln!("empires: config: {}", e);
         }
     }
+    // Before anything reads the world, so that a headless run's whole
+    // history is lived under the covenant rather than the last part of it.
+    if let Some(want) = &args.bind {
+        let lower = want.to_lowercase();
+        let pick = if lower == "auto" {
+            (0..world.cultures.len())
+                .filter(|&c| world.cultures[c].extinct.is_none())
+                .max_by(|&a, &b| world.cultures[a].pop.total_cmp(&world.cultures[b].pop))
+        } else {
+            (0..world.cultures.len()).find(|&c| {
+                world.cultures[c].extinct.is_none()
+                    && (world.cultures[c].plural.to_lowercase().starts_with(&lower)
+                        || world.cultures[c].name.to_lowercase().starts_with(&lower)
+                        || world.cultures[c].adj.to_lowercase().starts_with(&lower))
+            })
+        };
+        match pick {
+            Some(c) => sim::fate::bind(&mut world, c),
+            None => {
+                let living: Vec<&str> = world
+                    .cultures
+                    .iter()
+                    .filter(|c| c.extinct.is_none())
+                    .map(|c| c.plural.as_str())
+                    .collect();
+                eprintln!(
+                    "empires: --bind {}: no living people by that name. Try one of: {}",
+                    want,
+                    living.join(", ")
+                );
+                std::process::exit(1);
+            }
+        }
+    }
     if args.load.is_some() && args.headless.is_some() {
         // A loaded world keeps its own detail unless one was given explicitly.
         if std::env::args().any(|a| a == "--detail" || a == "-d") {
@@ -262,15 +316,13 @@ fn main() {
         }
     }
     if let Some(path) = args.snapshot {
-        ui::snapshot(
-            world,
-            args.ascii,
-            args.cols,
-            args.rows,
-            args.headless.unwrap_or(300),
-            &args.layer,
-            &path,
-        );
+        let mut shot = args.shot.clone();
+        shot.ascii = args.ascii;
+        shot.cols = args.cols;
+        shot.rows = args.rows;
+        shot.layer = args.layer.clone();
+        shot.years = args.headless.unwrap_or(300);
+        ui::snapshot(world, &path, &shot);
         return;
     }
     if args.bench {

@@ -59,12 +59,31 @@ pub fn famine_cause(pick: &Pick) -> String {
 
 /// A realm goes hungry. No draw.
 pub fn famine(w: &World, p: usize, cause: &str) -> String {
-    format!(
-        "{} and famine gripped {}. The granaries of {} were emptied, and the people ate bark.",
-        cause,
-        realm_full(w, p),
-        capital_name(w, p)
-    )
+    let realm = realm_full(w, p);
+    let realm_cap = super::realm_full_cap(w, p);
+    let cap = capital_name(w, p);
+    match Pick::stable(w.year, p).index(5) {
+        0 => format!(
+            "{} and famine gripped {}. The granaries of {} were emptied, and the people ate bark.",
+            cause, realm, cap
+        ),
+        1 => format!(
+            "{}, and {} went hungry. The queues at the granaries of {} started before dawn and were turned away at noon.",
+            cause, realm, cap
+        ),
+        2 => format!(
+            "{}. {} had bread until midwinter and after that it had prices nobody could pay.",
+            cause, realm_cap
+        ),
+        3 => format!(
+            "{} and {} starved. They ate the seed corn in {}, which is the decision that makes the second year worse than the first.",
+            cause, realm, cap
+        ),
+        _ => format!(
+            "{}. The famine that followed in {} emptied the villages towards {}, and {} had no more to give them than they had left behind.",
+            cause, realm, cap, cap
+        ),
+    }
 }
 
 /// Flood, earthquake or fire in a city. Draws no random number: the
@@ -128,7 +147,9 @@ pub fn city_disaster(w: &World, city: usize, kind: &str, wonder_lost: Option<&st
         },
     };
     if let Some(wn) = wonder_lost {
-        text.push_str(&format!(" {} was destroyed.", wn));
+        // Capitalised: a wonder carries its own article, and this opens a
+        // sentence.
+        text.push_str(&format!(" {} was destroyed.", cap(wn)));
     }
     text
 }
@@ -227,10 +248,19 @@ pub fn notable_died(name: &str, role: &str, age: i32) -> String {
 
 /// A great work is finished. One draw.
 pub fn wonder_built(w: &World, p: usize, name: &str, ruler: &str, pick: &Pick) -> String {
-    match pick.index(3) {
+    match pick.index(5) {
         0 => format!(
             "{} raised {}. It took a generation to build and beggared the treasury, but travellers came from every land to see it.",
             ruler, name
+        ),
+        3 => format!(
+            "{} was thirty years in the building and was not paid for in {}'s lifetime. It is still there.",
+            cap(name),
+            ruler
+        ),
+        4 => format!(
+            "They finished {} under {}. The accounts for it were burned, which the treasury considered the kindest thing to do with them.",
+            name, ruler
         ),
         1 => format!(
             "{} was completed in {}, in the reign of {}.",
@@ -342,25 +372,49 @@ pub fn era_of_schools(schools: u32, pick: &Pick) -> String {
 /// An age of new crowns. No draw.
 pub fn era_of_crowns(born: u32, pick: &Pick) -> String {
     let n = count(born as i64, "new realm");
-    match pick.index(3) {
-        0 => format!("{} were founded as peoples everywhere took up crowns.", cap(&n)),
-        1 => format!(
-            "{} rose out of the old ones, and a crown became a thing a determined man could simply take.",
+    // Six, because an era line is importance 3: it is drawn bold, it is the
+    // one sentence a reader is guaranteed to see every hundred years, and
+    // three phrasings meant the same one turned up four centuries in six.
+    match pick.index(6) {
+        0 => format!(
+            "{} were founded as peoples everywhere took up crowns.",
             cap(&n)
         ),
-        _ => format!(
+        1 => format!(
+            "{} rose out of the old ones, and a crown became a thing anyone determined enough could simply take.",
+            cap(&n)
+        ),
+        2 => format!(
             "The century made {}, and half of them would not see the next one.",
             n
+        ),
+        3 => format!(
+            "{}. Heralds could not keep up, and stopped trying.",
+            cap(&n)
+        ),
+        4 => format!(
+            "There were {} by its end, most of them founded by somebody who had served the realm they broke away from.",
+            n
+        ),
+        _ => format!(
+            "{} in a hundred years. The old maps were not redrawn so much as abandoned.",
+            cap(&n)
         ),
     }
 }
 
 /// A quiet age. No draw.
 pub fn era_of_peace(pick: &Pick) -> String {
+    // None of these may read as an apology for the century. "Nothing much
+    // happened" is the first summary a new world hands a new player, and a
+    // game whose opening verdict on itself is that nothing happened has
+    // talked the reader out of the next four hundred years.
     pick.text(&[
         "Harvests were good, the roads were safe, and the chroniclers complained of having little to write.",
-        "Nothing much happened, and the people who lived through it were the luckier for that.",
+        "Children born at its start died of old age in their own beds, which almost no century can be made to say.",
         "Granaries filled, bridges were built, and the great quarrels of the age were over land boundaries and grazing rights.",
+        "The armies drilled and were not used. Their commanders wrote memoirs about what they would have done.",
+        "Towns outgrew their walls and nobody thought to rebuild them further out. The next century made them regret it.",
     ])
 }
 
@@ -369,7 +423,9 @@ pub fn era_ordinary(pick: &Pick) -> String {
     pick.text(&[
         "The world turned as it always had.",
         "A century of ordinary years, which is to say of weather, taxes and funerals.",
-        "Later ages found little in it worth arguing about.",
+        "Later ages found little in it worth arguing about, and argued about it anyway.",
+        "Everything that would matter later was already in it, unnoticed.",
+        "Borders moved a field at a time, in the way that is only visible from two hundred years off.",
     ])
 }
 
@@ -531,6 +587,55 @@ pub const ERA_NAMES_ORDINARY: &[&str] = &[
     "the Century Between",
     "the Age of Ordinary Days",
 ];
+
+/// Names for a century in which a great many realms ended.
+///
+/// Not the same as a century of war: realms die in this world far more
+/// often by their garrisons quietly obeying the nearest lord than by
+/// anyone's army, and a century that buried a great many of them deserves
+/// its own name.
+pub const ERA_NAMES_FALL: &[&str] = &[
+    "the Age of Endings",
+    "the Century of Falling Crowns",
+    "the Age of Empty Thrones",
+    "the Winnowing",
+    "the Age of Last Kings",
+    "the Century of Ruins",
+];
+
+/// Names for a century that built.
+pub const ERA_NAMES_BUILDING: &[&str] = &[
+    "the Age of Masons",
+    "the Building Century",
+    "the Age of Great Works",
+    "the Century of Scaffolds",
+    "the Age of Raised Stone",
+    "the Century of Monuments",
+];
+
+/// A century that buried a great many realms. No draw.
+pub fn era_of_fall(fell: u32, pick: &Pick) -> String {
+    let n = count(fell as i64, "realm");
+    match pick.index(5) {
+        0 => format!("{} ended in a hundred years, and the mapmakers could not keep up with the funerals.", cap(&n)),
+        1 => format!("The century buried {}. Most of them were not conquered; they simply stopped being obeyed.", n),
+        2 => format!("{} passed out of the world, and the succeeding age inherited their borders without their names.", cap(&n)),
+        3 => format!("It was a century of endings: {} went into the ground, and the chroniclers of the next age had to be told who they had been.", n),
+        _ => format!("{} died in it. A crown was never worth less than in these hundred years.", cap(&n)),
+    }
+}
+
+/// A century that built. No draw.
+pub fn era_of_wonders(built: u32, pick: &Pick) -> String {
+    let n = count(built as i64, "great work");
+    match pick.index(5) {
+        0 => format!("{} were finished in a hundred years, and every treasury in the world was the poorer for it.", cap(&n)),
+        1 => format!("The masons had a good century: {}, and the accounts for most of them do not survive.", n),
+        2 => format!("{} rose in it. Some of them are still standing, which is more than can be said for the realms that raised them.", cap(&n)),
+        3 => format!("It was an age for building rather than for taking: {} finished, and rather fewer wars than usual to knock them down.", n),
+        _ => format!("{} were completed, and the century is remembered for what it left behind rather than for what it did.", cap(&n)),
+    }
+}
 
 /// Names for a century ruled by one empire, built around that empire.
 pub fn era_names_empire(w: &World, p: usize) -> Vec<String> {

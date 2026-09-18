@@ -1438,7 +1438,13 @@ fn capture_city(w: &mut World, city: usize, winner: usize, loser: usize, wid: us
         // which nothing showed until there was a page that ranked realms by
         // what they were worth.
         w.polities[winner].treasury += w.cities[city].pop * 2.0;
-        prose::city_sacked(w, &name, winner, lost.as_deref())
+        prose::city_sacked(
+            w,
+            &name,
+            winner,
+            lost.as_deref(),
+            w.cities[city].times_sacked,
+        )
     } else {
         prose::city_surrendered(w, &name, winner)
     };

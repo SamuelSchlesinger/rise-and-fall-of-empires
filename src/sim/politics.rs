@@ -325,6 +325,7 @@ pub fn found_polity(
                 let name = w.polities[id].dynasty.clone();
                 let h = w.new_house(name, culture, Some(ruler));
                 w.seat_house(id, h);
+                super::dynasty::seed_house_kin(w, id, h, ruler);
             }
         }
         w.house_accession(ruler);
@@ -1156,20 +1157,76 @@ fn succession(w: &mut World, p: usize, old: usize) {
         return;
     }
 
-    // A minor and no adult: a regency, with the child the reader has
-    // already met rather than a stranger.
+    // No child of the body. Before the throne goes to a stranger it goes
+    // sideways: a brother, a nephew, an uncle, a cousin. This is how a
+    // house survives a ruler who dies young, and without it almost every
+    // succession in the world was a usurpation.
     if heirs.is_empty() {
-        if let Some(&child) = minors.first() {
-            install_ruler(w, p, child);
-            w.polities[p].stability = (w.polities[p].stability - 0.25).max(0.0);
-            let text = prose::succession_regency(w, p, child);
+        let kin = super::dynasty::kin_heirs(w, p, old);
+        // Under tanistry the crown is the house's, not the dead man's, so a
+        // grown kinsman is preferred to an infant son. Everywhere else the
+        // child inherits and somebody rules in their name.
+        let child_first = custom != Inheritance::Tanistry;
+        if child_first {
+            if let Some(&child) = minors.first() {
+                // The uncle who does not wait. A very young heir, a grown
+                // kinsman with ambition and a throne that is not sitting
+                // steady: the regency that should have followed never
+                // happens, and everybody knows why.
+                let infant = w.persons[child].age(w.year) <= 9;
+                let grasping = kin.first().map(|&(m, _)| {
+                    w.persons[m].traits.ambition * 0.7 + (0.6 - w.polities[p].stability).max(0.0)
+                        > 0.55
+                });
+                if !(infant && grasping == Some(true) && rng.chance(0.6)) {
+                    regency(w, p, child, kin.first().map(|&(m, _)| m));
+                    return;
+                }
+                let (usurper, tie) = kin[0];
+                install_ruler(w, p, usurper);
+                w.polities[p].stability = (w.polities[p].stability - 0.18).max(0.0);
+                let house = w.polities[p].dynasty.clone();
+                let text = prose::uncle_takes_throne(
+                    w,
+                    p,
+                    usurper,
+                    child,
+                    tie,
+                    &house,
+                    &Pick::rolled(&rng),
+                );
+                w.log(
+                    3,
+                    EventKind::Politics,
+                    &[Ref::Person(usurper), Ref::Person(child), Ref::Polity(p)],
+                    w.capital_cell(p),
+                    text,
+                );
+                personal_union(w, p, usurper);
+                return;
+            }
+        }
+        if let Some(&(kinsman, tie)) = kin.first() {
+            install_ruler(w, p, kinsman);
+            // A crown that moves sideways is never quite as firmly held as
+            // one that moves down, and the further the blood the worse it
+            // sits.
+            let doubt = 0.04 * (tie.steps() as f32 - 1.0);
+            w.polities[p].stability = (w.polities[p].stability - doubt).max(0.0);
+            let house = w.polities[p].dynasty.clone();
+            let text = prose::kin_succeeds(w, p, kinsman, old, tie, &house, &Pick::rolled(&rng));
             w.log(
-                2,
+                1,
                 EventKind::Politics,
-                &[Ref::Person(child), Ref::Polity(p)],
+                &[Ref::Person(kinsman), Ref::Polity(p)],
                 w.capital_cell(p),
                 text,
             );
+            personal_union(w, p, kinsman);
+            return;
+        }
+        if let Some(&child) = minors.first() {
+            regency(w, p, child, None);
             return;
         }
         usurpation(w, p, old);
@@ -1298,6 +1355,25 @@ fn elect(w: &mut World, p: usize, old: usize) -> usize {
 }
 
 /// Nobody had a claim: somebody takes it anyway.
+/// A child takes the throne and somebody else does the governing.
+///
+/// The regent is named when the house has a grown kinsman to supply one,
+/// because "the great houses ruled in his name" is a much smaller sentence
+/// than "his uncle did, and everyone knew what that meant".
+fn regency(w: &mut World, p: usize, child: usize, regent: Option<usize>) {
+    install_ruler(w, p, child);
+    w.polities[p].stability = (w.polities[p].stability - 0.25).max(0.0);
+    let text = match regent {
+        Some(g) => prose::succession_regent(w, p, child, g, &Pick::rolled(&w.rng.clone())),
+        None => prose::succession_regency(w, p, child),
+    };
+    let mut refs = vec![Ref::Person(child), Ref::Polity(p)];
+    if let Some(g) = regent {
+        refs.push(Ref::Person(g));
+    }
+    w.log(2, EventKind::Politics, &refs, w.capital_cell(p), text);
+}
+
 fn usurpation(w: &mut World, p: usize, old: usize) {
     let rng = w.rng.clone();
     let culture = w.polities[p].culture;
@@ -1325,6 +1401,7 @@ fn usurpation(w: &mut World, p: usize, old: usize) {
     let old_house = w.polities[p].house;
     let house = w.new_house(dyn_name.clone(), culture, Some(usurper));
     w.seat_house(p, house);
+    super::dynasty::seed_house_kin(w, p, house, usurper);
     install_ruler(w, p, usurper);
     if let Some(oh) = old_house {
         w.close_house_if_spent(oh);
@@ -1454,6 +1531,15 @@ fn personal_union(w: &mut World, p: usize, ruler: usize) {
 }
 
 pub fn install_ruler(w: &mut World, p: usize, r: usize) {
+    // Whether the throne changes families, which has to be read before the
+    // accession writes over it.
+    let swept = match w.polities[p].rulers.last().copied() {
+        Some(q) => {
+            let old = w.persons[q].house;
+            old.is_some() && old != w.persons[r].house
+        }
+        None => false,
+    };
     w.persons[r].polity = Some(p);
     w.persons[r].role = Role::Ruler;
     // A house is joined by birth, by marriage, or by founding it — never
@@ -1472,6 +1558,9 @@ pub fn install_ruler(w: &mut World, p: usize, r: usize) {
     if w.persons[r].crowned.is_none() {
         w.persons[r].crowned = Some(w.year);
     }
+    // Read before the accession is written down, since it asks who has held
+    // this throne up to now.
+    let returned = super::dynasty::restoration(w, p, r);
     w.house_accession(r);
     let pol = &mut w.polities[p];
     pol.ruler = Some(r);
@@ -1483,6 +1572,38 @@ pub fn install_ruler(w: &mut World, p: usize, r: usize) {
     let wisdom = w.persons[r].traits.wisdom;
     if wisdom > 0.6 {
         w.polities[p].decadence *= 0.7;
+    }
+    // A new house on an old throne is the one thing that clears a rotted
+    // court, and this is the whole of the dynastic cycle.
+    //
+    // Rot used to be permanent. Decadence climbed to its ceiling in a
+    // century and a half and stayed there, so every realm older than that
+    // carried the same crushing stability penalty for the rest of its life
+    // — which is why the top realm in the world held seventeen percent of
+    // it in the third century and never more than four percent again. The
+    // world was not finding an equilibrium; it was accumulating an
+    // unpayable debt. A dynasty that ends is a court that is swept, the
+    // creditors are killed, and the new house gets the century its
+    // predecessor wasted.
+    if swept {
+        let pol = &mut w.polities[p];
+        pol.decadence *= 0.3;
+        pol.exhaustion *= 0.7;
+    }
+    // A line come back to a throne it lost. The oldest story there is, and
+    // until now this world had no way of telling it.
+    if let Some((last, gap)) = returned {
+        w.polities[p].prestige += 20.0;
+        w.polities[p].stability = (w.polities[p].stability + 0.1).min(1.0);
+        let house = w.polities[p].dynasty.clone();
+        let text = prose::house_restored(w, p, r, last, gap, &house, &Pick::rolled(&w.rng.clone()));
+        w.log(
+            3,
+            EventKind::Politics,
+            &[Ref::Person(r), Ref::Polity(p), Ref::Person(last)],
+            w.capital_cell(p),
+            text,
+        );
     }
 }
 
@@ -1516,7 +1637,16 @@ pub fn rulers(w: &mut World) {
             + (0.5 - stability).max(0.0) * tn.ruler_assassination_unrest_weight;
         let roll = rng.f64();
         if roll < p_nat as f64 {
-            let cause = prose::natural_death(age as i32, &Pick::rolled(&rng));
+            let cx = prose::DeathContext {
+                at_war: w.polities[p].at_war(),
+                plague: w
+                    .plagues
+                    .iter()
+                    .any(|pl| pl.years_left > 0 && pl.polities.contains(&p)),
+                reign_years: w.persons[r].reign_years,
+                cruel: w.persons[r].traits.cruelty > 0.65,
+            };
+            let cause = prose::natural_death_in(age as i32, cx, &Pick::rolled(&rng));
             ruler_dies(w, p, &cause, 1);
         } else if roll < (p_nat + p_assassin) as f64 {
             let by = prose::assassin(w, p, &Pick::rolled(&rng));
@@ -1633,6 +1763,7 @@ pub fn fall(
     if !w.polities[p].alive() {
         return;
     }
+    w.century_polities_fell += 1;
     super::stories::artifacts_on_fall(w, p, absorbed_by);
     let cells = w.transfer_cells(p, absorbed_by);
     for &i in &cells {
@@ -1878,6 +2009,7 @@ fn apply_kind_change(w: &mut World, p: usize, new: PolityKind) {
             let d = dynasty_name(w, culture, &founder);
             let house = w.new_house(d, culture, Some(r));
             w.seat_house(p, house);
+            super::dynasty::seed_house_kin(w, p, house, r);
             w.house_accession(r);
         }
     }

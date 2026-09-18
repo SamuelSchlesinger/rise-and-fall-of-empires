@@ -649,12 +649,22 @@ mod tests {
         // surfacing, an innovation named. A hundred years reached none of
         // them, so a lost line continuation in one of those sentences sat
         // in the tree until somebody read the chronicle by eye.
-        let mut w = World::new(11, 96, 48, Detail::High);
-        for _ in 0..500 {
-            w.tick();
+        // Several worlds, not one. Every phrasing is behind a random or a
+        // hashed choice, so one seed reads perhaps a third of them, and the
+        // variants added to break up the chronicle's repetition are exactly
+        // the sentences a single-seed test is least likely to reach. A
+        // lower-case realm name at the head of one of them survived this
+        // test twice before a reader found it.
+        let mut events: Vec<crate::sim::chronicle::Event> = Vec::new();
+        for seed in [11u64, 7, 23, 41] {
+            let mut w = World::new(seed, 96, 48, Detail::High);
+            for _ in 0..400 {
+                w.tick();
+            }
+            assert!(w.chronicle.len() > 50, "the world should have a history");
+            events.extend(w.chronicle.events.iter().cloned());
         }
-        assert!(w.chronicle.len() > 50, "the world should have a history");
-        for e in &w.chronicle.events {
+        for e in &events {
             let t = &e.text;
             let ctx = format!("year {}: {:?}", e.year, t);
             assert!(!t.is_empty(), "empty event text at {}", ctx);
@@ -670,6 +680,60 @@ mod tests {
             assert!(!t.contains(" ,"), "space before a comma in {}", ctx);
             assert!(!t.contains(".."), "doubled full stop in {}", ctx);
             assert!(!t.contains(",,"), "doubled comma in {}", ctx);
+            // A capitalised article in the middle of a sentence.
+            //
+            // Every realm name comes in two forms — `realm_full` gives "the
+            // Kingdom of Sha" and `realm_full_cap` gives "The Kingdom of
+            // Sha" — and a phrasing that uses the opening form where the
+            // name is not opening the sentence reads "the call went to The
+            // Kingdom of Sha". Two of the variants added to break up the
+            // chronicle's repetition did exactly that, which is what a
+            // family of near-identical helpers will always eventually cost.
+            // Nothing in this world is named "The ...", so a capitalised
+            // article after a lower-case letter or a comma is always wrong.
+            let chars: Vec<char> = t.chars().collect();
+            for (k, w) in chars.windows(5).enumerate() {
+                let opens = k == 0 || {
+                    let before = chars[k - 1];
+                    before.is_lowercase() || before == ','
+                };
+                let article = matches!(w, ['T', 'h', 'e', ' ', _])
+                    || matches!(w, ['A', ' ', _, _, _])
+                    || matches!(w, ['A', 'n', ' ', _, _]);
+                if k > 0 && opens && article && chars[k - 1] != '.' {
+                    let around: String = chars[k.saturating_sub(24)..(k + 24).min(chars.len())]
+                        .iter()
+                        .collect();
+                    panic!(
+                        "capitalised article mid-sentence in {}: ...{}...",
+                        ctx, around
+                    );
+                }
+            }
+            // Every sentence in an entry, not only the first. An event is
+            // built by appending clauses --- a battle, then a sack, then a
+            // wonder cast down --- and a clause written to sit mid-sentence
+            // that ends up opening one reads as a bug however correct the
+            // sentence before it was.
+            let mut after_stop = false;
+            for (k, c) in chars.iter().enumerate() {
+                if after_stop && !c.is_whitespace() {
+                    assert!(
+                        c.is_uppercase() || c.is_ascii_digit() || *c == '"' || *c == '\'',
+                        "lower-case sentence start in {}: ...{}...",
+                        ctx,
+                        chars[k.saturating_sub(20)..(k + 20).min(chars.len())]
+                            .iter()
+                            .collect::<String>()
+                    );
+                    after_stop = false;
+                }
+                // A full stop ends a sentence unless it is an initial or a
+                // decimal point, neither of which is followed by a space.
+                if *c == '.' || *c == '!' || *c == '?' {
+                    after_stop = chars.get(k + 1).is_some_and(|n| *n == ' ');
+                }
+            }
             let first = t.chars().next().unwrap();
             // A digit is a fine way to begin a sentence — "26% of the
             // world's settled land now lay under the Lafulannic Kingdom" —
@@ -688,5 +752,114 @@ mod tests {
                 ctx
             );
         }
+    }
+
+    /// A joined list of names takes a plural verb.
+    ///
+    /// Two helpers here return something that may be singular or plural ---
+    /// `join_names`, and a realm whose name is a people ("the Tsishan
+    /// Clans") --- and a clause written for the singular case reads as a
+    /// mistake the moment the other turns up: "Tseizri and Roksnio was in
+    /// the line beside them", "The Tsishan Clans was inherited by a child".
+    /// Checked at the helpers rather than by pattern-matching the chronicle,
+    /// because "the Chasimban attack on the Ngeese Clans was thrown back" is
+    /// perfectly correct and no substring rule can tell the two apart.
+    #[test]
+    fn a_list_of_allies_takes_a_plural_verb() {
+        let mut w = World::new(5, 80, 40, Detail::Medium);
+        for _ in 0..300 {
+            w.tick();
+        }
+        let realms: Vec<usize> = w.alive_polities.iter().copied().take(6).collect();
+        assert!(realms.len() >= 4, "too few realms to make a coalition");
+        // One ally on the winning side, then two.
+        let one = diplomacy::battle_allies(&w, &realms[..2], &realms[2..3]);
+        let two = diplomacy::battle_allies(&w, &realms[..3], &realms[3..4]);
+        for (text, allies) in [(&one, 1), (&two, 2)] {
+            if text.is_empty() {
+                continue;
+            }
+            let plural = text.contains("were") || text.contains("have ");
+            let singular = text.contains(" was ") || text.contains(" has ");
+            if allies == 2 && singular && !plural {
+                panic!("two allies took a singular verb: {:?}", text);
+            }
+        }
+        // And a realm whose name is a people is plural wherever it is the
+        // subject.
+        for p in w.alive_polities.iter().copied() {
+            let was = realm_was(&w, p);
+            let it = realm_it(&w, p);
+            assert_eq!(
+                was == "were",
+                it == "they",
+                "{} disagrees with itself about number",
+                w.polities[p].name
+            );
+        }
+    }
+
+    /// No one sentence may be the world's whole voice.
+    ///
+    /// The chronicle is the product. When a phrase fires on every battle of
+    /// every coalition war it is not colour, it is a stuck record: the
+    /// clause "was no longer a quarrel between two realms" once appeared
+    /// seven hundred and fifty-six times in eight centuries, six percent of
+    /// every line the reader would ever see, and four of the next five
+    /// worst offenders were the same sentence about a horse.
+    ///
+    /// This measures the thing directly rather than the code that causes
+    /// it: every seven-word run of common words in a long history, and the
+    /// share of all events the commonest of them accounts for. It is a
+    /// ratchet — if a new event type is added and given one phrasing, this
+    /// is what says so.
+    #[test]
+    fn no_phrase_becomes_the_whole_chronicle() {
+        use std::collections::HashMap;
+        let mut w = World::new(7, 200, 100, Detail::High);
+        for _ in 0..800 {
+            w.tick();
+        }
+        let lines: Vec<&str> = w.chronicle.events.iter().map(|e| e.text.as_str()).collect();
+        assert!(lines.len() > 2000, "too short a history to measure");
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for line in &lines {
+            // Proper nouns are the part that *does* vary, so a run
+            // containing one says nothing about repetition. Only runs made
+            // entirely of ordinary words are counted.
+            let words: Vec<&str> = line
+                .split(|c: char| !c.is_alphabetic() && c != '\'')
+                .filter(|s| !s.is_empty())
+                .collect();
+            let mut seen_here: Vec<String> = Vec::new();
+            for run in words.windows(7) {
+                if run
+                    .iter()
+                    .any(|word| word.chars().next().is_some_and(char::is_uppercase))
+                {
+                    continue;
+                }
+                let key = run.join(" ");
+                // Once per line: a sentence that says the same thing twice
+                // is one repetition, not two.
+                if seen_here.contains(&key) {
+                    continue;
+                }
+                seen_here.push(key.clone());
+                *counts.entry(key).or_insert(0) += 1;
+            }
+        }
+        let (worst, &n) = counts
+            .iter()
+            .max_by_key(|&(_, n)| n)
+            .expect("a history has words in it");
+        let share = n as f64 / lines.len() as f64;
+        assert!(
+            share < 0.03,
+            "{:.1}% of all {} events contain the same seven words: {:?}",
+            share * 100.0,
+            lines.len(),
+            worst
+        );
     }
 }

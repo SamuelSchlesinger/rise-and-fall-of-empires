@@ -361,7 +361,12 @@ fn crowding(w: &World) -> f64 {
     let living = w.schools.iter().filter(|x| x.alive()).count() as f64;
     let room = (w.alive_polities.len() as f64 * w.tuning.schools_per_realm).max(1.0);
     let over = living / room;
-    1.0 / (1.0 + over * over * over)
+    // Fourth power, not third. The cube left the equilibrium sitting at
+    // almost exactly three times the room available, which is close enough
+    // to the guard in `living_schools_answer_to_the_size_of_the_world` that
+    // any change to how many realms the world carries could tip it over.
+    // Below the line it is barely different; above it, it bites sooner.
+    1.0 / (1.0 + over * over * over * over)
 }
 
 fn found_schools(w: &mut World, rooted: &[u32]) {

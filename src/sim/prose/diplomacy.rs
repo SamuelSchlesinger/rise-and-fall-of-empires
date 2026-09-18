@@ -121,12 +121,34 @@ pub fn peace_attacker_won_aim(
             t,
             realm(w, defender)
         ),
-        WarAim::Border => format!(
-            "ended in victory for {} after {}; {} ceded the lands it had lost and paid an indemnity.",
-            realm(w, attacker),
-            t,
-            realm(w, defender)
-        ),
+        WarAim::Border => {
+            let a = realm(w, attacker);
+            let d = realm(w, defender);
+            match Pick::stable(w.year, defender).index(5) {
+                0 => format!(
+                    "ended in victory for {} after {}; {} ceded the lands it had lost and paid an indemnity.",
+                    a, t, d
+                ),
+                1 => format!(
+                    "ended after {} with {} beaten: the border moved, and {} paid for the moving of it.",
+                    t, d, d
+                ),
+                2 => format!(
+                    "ended after {} in a peace dictated by {}. {} signed what was put in front of it.",
+                    t, a, d
+                ),
+                3 => format!(
+                    "ended after {} with {} in possession of the disputed ground and {} in possession of a debt.",
+                    t, a, d
+                ),
+                _ => format!(
+                    "was won by {} after {}. The new border was drawn where the {} army had stopped.",
+                    a,
+                    t,
+                    realm_adj(w, attacker)
+                ),
+            }
+        }
     }
 }
 
@@ -186,12 +208,39 @@ pub fn peace_stalemate_aim(
             "ended after {} in an exhausted settlement: the tribute was halved and nobody spoke of loyalty.",
             t
         ),
-        _ => format!(
-            "ended after {} with neither side the master. {} gave up {} and both realms counted their dead.",
-            t,
-            realm_full_cap(w, attacker),
-            aim_object(w, aim)
-        ),
+        _ => match Pick::stable(w.year, attacker).index(5) {
+            0 => format!(
+                "ended after {} with neither side the master. {} gave up {} and both realms counted their dead.",
+                t,
+                realm_full_cap(w, attacker),
+                aim_object(w, aim)
+            ),
+            1 => format!(
+                "ended after {} where it had begun. {} let {} go, and the border was where it always was.",
+                t,
+                realm_full_cap(w, attacker),
+                aim_object(w, aim)
+            ),
+            2 => format!(
+                "ended after {} because both armies were spent. {} never got {}, and stopped asking.",
+                t,
+                realm_full_cap(w, attacker),
+                aim_object(w, aim)
+            ),
+            3 => format!(
+                "was still not won after {}, and was abandoned. {} had wanted {}; what it had was a shorter muster roll.",
+                t,
+                realm_full_cap(w, attacker),
+                aim_object(w, aim)
+            ),
+            _ => format!(
+                "ended after {} in a peace nobody celebrated. {} kept none of {}, and {} kept its dead.",
+                t,
+                realm_full_cap(w, attacker),
+                aim_object(w, aim),
+                realm(w, defender)
+            ),
+        },
     }
 }
 
@@ -268,13 +317,41 @@ pub fn alliance_lapsed(w: &World, p: usize, q: usize) -> String {
 
 /// An ally answers the call.
 pub fn ally_joined(w: &World, q: usize, principal: usize, foe: usize, war_name: &str) -> String {
-    format!(
-        "{} honoured its oath to {} and declared against {}, and {} was no longer a quarrel between two realms.",
-        realm_full_cap(w, q),
-        realm(w, principal),
-        realm_full(w, foe),
-        war_name
-    )
+    // Two forms: `realm_full_cap` opens a sentence, `realm_full` sits
+    // inside one. Using the opening form everywhere printed "the call
+    // went to The Kingdom of Sha".
+    let ally_cap = realm_full_cap(w, q);
+    let ally = realm_full(w, q);
+    let friend = realm(w, principal);
+    let enemy = realm_full(w, foe);
+    match Pick::stable(w.year, q).index(6) {
+        0 => format!(
+            "{} honoured its oath to {} and declared against {}, and {} was no longer a quarrel between two realms.",
+            ally_cap, friend, enemy, war_name
+        ),
+        1 => format!(
+            "The call went to {}, and {} answered it: war on {}, and {} was now everybody's.",
+            ally, friend, enemy, war_name
+        ),
+        2 => format!(
+            "{} had sworn to {} in easier years, and paid the debt: it declared against {}.",
+            ally_cap, friend, enemy
+        ),
+        3 => format!(
+            "{} came into {} on the side of {}, against {}.",
+            ally_cap, war_name, friend, enemy
+        ),
+        4 => format!(
+            "{} sent its herald to {} rather than its regrets to {}: the oath held, and {} widened.",
+            ally_cap, enemy, friend, war_name
+        ),
+        _ => format!(
+            "The oath between {} and {} was called in, and {} found itself fighting both.",
+            realm_full(w, q),
+            friend,
+            enemy
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -348,21 +425,49 @@ pub fn battle_allies(w: &World, winner_side: &[usize], loser_side: &[usize]) -> 
     let names =
         |side: &[usize]| -> Vec<String> { side.iter().skip(1).map(|&p| realm(w, p)).collect() };
     let (wa, la) = (names(winner_side), names(loser_side));
+    // Keyed on the year and the winner so that two battles in one year read
+    // differently and no draw is taken from the simulation's stream. This
+    // clause fires on every battle of every coalition war, which made it the
+    // most repeated sentence in the world by a factor of two: seven hundred
+    // and fifty-six identical copies in eight centuries.
+    let pick = Pick::stable(w.year, winner_side.first().copied().unwrap_or(0));
+    let wn = super::join_names(&wa);
+    let ln = super::join_names(&la);
+    // "Tseizri and Roksnio was in the line beside them." A joined list is
+    // plural whenever it joined anything, and a clause written for one
+    // ally reads as a mistake the moment two of them turn up.
+    let w_is = if wa.len() > 1 { "were" } else { "was" };
+    let l_is = if la.len() > 1 { "were" } else { "was" };
     match (wa.is_empty(), la.is_empty()) {
         (true, true) => String::new(),
-        (false, true) => format!(
-            " {} had come in alongside the victors.",
-            super::join_names(&wa)
-        ),
-        (true, false) => format!(
-            " {} had stood with the beaten host, and shared in the rout.",
-            super::join_names(&la)
-        ),
-        (false, false) => format!(
-            " It was no longer a quarrel between two realms: {} stood with the victors and {} with the beaten.",
-            super::join_names(&wa),
-            super::join_names(&la)
-        ),
+        (false, true) => match pick.index(4) {
+            0 => format!(" {} had come in alongside the victors.", wn),
+            1 => format!(" {} had marched with them, and shared the day.", wn),
+            2 => format!(" {} {} in the line beside them.", wn, w_is),
+            _ => format!(" The banners of {} were on the winning side.", wn),
+        },
+        (true, false) => match pick.index(4) {
+            0 => format!(" {} had stood with the beaten host, and shared in the rout.", ln),
+            1 => format!(
+                " {} had come to help, and {} carried off the field with them.",
+                ln, l_is
+            ),
+            2 => format!(" {} lost as much in the rout as the host it came to save.", ln),
+            _ => format!(" {} had answered the call, and wished afterwards it had not.", ln),
+        },
+        (false, false) => match pick.index(5) {
+            0 => format!(
+                " It was no longer a quarrel between two realms: {} stood with the victors and {} with the beaten.",
+                wn, ln
+            ),
+            1 => format!(" Half the region was on the field: {} with the winners, {} with the losers.", wn, ln),
+            2 => format!(" {} shared the victory; {} shared the rout.", wn, ln),
+            3 => format!(" Others had their banners there too — {} on one side, {} on the other.", wn, ln),
+            _ => format!(
+                " Two realms had begun it and six finished it. {} held with the victors, {} with the beaten.",
+                wn, ln
+            ),
+        },
     }
 }
 

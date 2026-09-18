@@ -45,7 +45,14 @@ impl Ui {
             match k {
                 Key::Char('t') => self.start_tutorial(),
                 Key::Char('p') => self.open_guide(),
-                _ => self.say("? for help   :guide to read   :tutorial to practice   :q to quit"),
+                // Anything else goes straight to the one question the game
+                // wants an answer to. A covenant reachable only by typing
+                // `:bind` is a covenant nobody makes, and a watcher with
+                // nothing at stake is watching a screensaver.
+                _ => {
+                    self.prev_mode = Mode::Map;
+                    self.mode = Mode::Covenant;
+                }
             }
             return true;
         }
@@ -62,6 +69,10 @@ impl Ui {
         }
         if self.mode == Mode::Fate {
             self.key_fate(&k);
+            return true;
+        }
+        if self.mode == Mode::Covenant {
+            self.key_covenant(&k);
             return true;
         }
         // Second key of a two-key command.
@@ -202,7 +213,7 @@ impl Ui {
             Mode::Detail => self.key_detail(&k),
             Mode::Chronicle => self.key_chronicle(&k),
             Mode::Recap => self.key_recap(&k),
-            Mode::Help | Mode::Guide | Mode::Fate => {}
+            Mode::Help | Mode::Guide | Mode::Fate | Mode::Covenant => {}
         }
         self.count = None;
         true
@@ -601,6 +612,30 @@ impl Ui {
         }
     }
 
+    /// Choosing a people to be bound to, or declining to.
+    fn key_covenant(&mut self, k: &Key) {
+        let peoples = crate::ui::detail::covenant_choices(&self.world);
+        match k {
+            Key::Esc | Key::Char('q') | Key::Char('0') => {
+                self.mode = self.prev_mode;
+                self.say("unbound: you watch, and gather very little");
+            }
+            Key::Char(c) if c.is_ascii_digit() => {
+                let n = *c as usize - '1' as usize;
+                if let Some(&(culture, _)) = peoples.get(n) {
+                    crate::sim::fate::bind(&mut self.world, culture);
+                    let name = self.world.cultures[culture].plural.clone();
+                    self.mode = self.prev_mode;
+                    self.say(&format!(
+                        "bound to the {}. Press x to reach into the world.",
+                        name
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
     // -- prompts: `:` commands and `/` search ------------------------------
 
     fn key_prompt(&mut self, k: Key) -> bool {
@@ -749,14 +784,22 @@ impl Ui {
                 MouseKind::Press(_) => self.mode = self.prev_mode,
                 _ => {}
             },
+            Mode::Covenant => {
+                if let MouseKind::Press(_) = m.kind {
+                    self.mode = self.prev_mode;
+                }
+            }
             Mode::Fate => {
                 if let MouseKind::Press(_) = m.kind {
                     let (fx, fy, fw, fh) = self.fate_rect;
                     if m.x >= fx && m.x < fx + fw && m.y >= fy && m.y < fy + fh {
+                        // Title, balance, blank, then the six: the balance
+                        // line pushed every choice down a row, and the
+                        // mouse was still aiming at where they used to be.
                         let row = m.y.saturating_sub(fy + 1);
-                        if (2..8).contains(&row) {
+                        if (3..9).contains(&row) {
                             if let Some(r) = self.selected {
-                                self.choose_fate(r, row - 2);
+                                self.choose_fate(r, row - 3);
                             }
                         }
                     } else {

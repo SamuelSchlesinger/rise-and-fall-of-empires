@@ -60,12 +60,15 @@ impl Ui {
         let bg = Rgb(12, 12, 16);
         self.screen.clear(bg);
         match self.mode {
-            Mode::Map | Mode::Fate => {
+            Mode::Map | Mode::Fate | Mode::Covenant => {
                 self.render_map();
                 self.render_sidebar();
                 self.render_log();
                 if self.mode == Mode::Fate {
                     self.render_fate();
+                }
+                if self.mode == Mode::Covenant {
+                    self.render_covenant();
                 }
             }
             Mode::List => self.render_list(),
@@ -128,7 +131,7 @@ impl Ui {
             "Ctrl-g skip"
         } else if self.prompt != Prompt::None {
             "Enter apply  Esc cancel"
-        } else if self.mode == Mode::Fate {
+        } else if self.mode == Mode::Fate || self.mode == Mode::Covenant {
             "Esc cancel"
         } else if self.mode == Mode::Map {
             "? help  :q quit"
@@ -165,11 +168,24 @@ impl Ui {
             } else {
                 format!("{} years/sec", SPEEDS[self.speed_idx])
             };
+            // The covenant sits in the status bar next to the year,
+            // because it is the one number the watcher spends and so the
+            // one they need in front of them at all times.
+            let f = &self.world.fate;
+            let bound = f
+                .patron
+                .filter(|&c| c < self.world.cultures.len())
+                .map(|c| self.world.cultures[c].adj.clone());
+            let covenant = match bound {
+                Some(adj) => format!(" | {} {:.0}", adj, f.power),
+                None => format!(" | unbound {:.0}", f.power),
+            };
             let status = format!(
-                "Year {} | {} | Follow {}",
+                "Year {} | {} | Follow {}{}",
                 self.world.year,
                 state,
-                if self.follow { "on" } else { "off" }
+                if self.follow { "on" } else { "off" },
+                covenant
             );
             self.screen
                 .text_clip(1, y, &status, room, Style::attr(key, bg, BOLD));
@@ -342,10 +358,27 @@ impl Ui {
                 continue;
             }
             let (color, attr) = event_style(e.kind, e.importance);
+            // The watcher's own acts, marked and lit. Six interventions in
+            // fifty thousand events are invisible otherwise, and an act you
+            // cannot find afterwards did not feel like one.
+            let (color, attr) = if e.by_fate {
+                (Rgb(255, 215, 130), crate::term::BOLD)
+            } else {
+                (color, attr)
+            };
+            let mark = if e.by_fate {
+                if self.ascii {
+                    '>'
+                } else {
+                    '\u{25b8}'
+                }
+            } else {
+                ' '
+            };
             let wrapped = term::wrap(&e.text, width);
             for (k, l) in wrapped.iter().enumerate().rev() {
                 let prefix = if k == 0 {
-                    format!("{:>5}  ", e.year)
+                    format!("{:>5} {}", e.year, mark)
                 } else {
                     Ui::CHRON_CONT.to_string()
                 };

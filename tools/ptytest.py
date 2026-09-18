@@ -77,6 +77,10 @@ KEYS = [
     # a fresh world, detail, filters, the hand of fate, a search that misses
     *b':new 5\r', b'D', b'v', b'\t', b'\x1b[Z', b'x', b'1',
     *b':find zzzz\r',
+    # the covenant: what it says unbound, a people that does not exist, a
+    # binding, what it says bound, and an act paid for out of it
+    *b':bind\r', *b':bind zzzzz\r', *b':bind a\r', *b':bind\r',
+    b'x', b'1', b'x', b'2', b'x', b'3',
 ]
 
 # Sent after KEYS. An interrupted ZZ must not quit; the two q's then should.

@@ -947,6 +947,7 @@ pub fn tick(w: &mut World) {
     if w.year % DIFFUSION_EVERY == 0 {
         diffuse(w);
         carried_by_trade(w);
+        carried_by_the_state(w);
     }
 }
 
@@ -1009,6 +1010,112 @@ fn carried_by_trade(w: &mut World) {
             if take != 0 {
                 w.known[to] |= take;
                 w.refresh_yield(to);
+            }
+        }
+    }
+}
+
+/// What an administration carries that a caravan does not.
+///
+/// An empire is, among other things, a machine for making its provinces
+/// resemble one another: the same weights, the same roll of taxes, the same
+/// plough in the same field, because the same clerks go everywhere. Cell
+/// diffusion crawls at walking pace and trade only ever joins two cities
+/// that happen to be trading, so neither of them knows what a state is —
+/// and a realm that held a third of the world for four centuries used to
+/// spread nothing at all.
+///
+/// That was the hidden brake on the whole world. Settled land that knows
+/// nothing carries no development; development is what
+/// [`Polity::admin_capacity`] is made of; so no later empire could grow any
+/// larger than the first ones had, and after the eighth century the map
+/// froze into two hundred equally weak realms and stayed that way for a
+/// thousand years. An empire now leaves the world better able to hold an
+/// empire, which is what gives a history an arc instead of a plateau.
+///
+/// Walks cities, not cells, and only the realms with more than one.
+fn carried_by_the_state(w: &mut World) {
+    let rng = w.rng.clone();
+    let base = w.tuning.tech_state_chance * DIFFUSION_EVERY as f64;
+    let tn = w.tuning;
+    for p in w.living_polities() {
+        let cities: Vec<usize> = w.polities[p]
+            .cities
+            .iter()
+            .copied()
+            .filter(|&c| w.cities[c].destroyed.is_none())
+            .collect();
+        if cities.len() < 2 {
+            continue;
+        }
+        // What the realm knows anywhere, which is what its clerks can carry
+        // anywhere else.
+        let mut pool = 0u128;
+        for &c in &cities {
+            pool |= w.known[w.cities[c].cell];
+        }
+        if pool == 0 {
+            continue;
+        }
+        // A state that governs badly carries badly. Sprawl and a rotted
+        // court are exactly the things that stop an order reaching a
+        // province, so they stop an idea reaching one too.
+        let over = w.polities[p].overextension(&tn);
+        let carry =
+            base * (0.35 + w.polities[p].dev as f64) * (1.0 - w.polities[p].decadence as f64 * 0.5)
+                / (1.0 + (over - 1.0).max(0.0) as f64);
+        if carry <= 0.0 {
+            continue;
+        }
+        for c in cities {
+            let cell = w.cities[c].cell;
+            let mine = w.known[cell];
+            let offered = pool & !mine;
+            if offered == 0 {
+                continue;
+            }
+            let bent_of = match w.cells[cell].culture {
+                Some(cu) => w.cultures[cu].learning,
+                None => continue,
+            };
+            let mut take = 0u128;
+            for inn in &w.techs {
+                let b = inn.bit();
+                if offered & b == 0 {
+                    continue;
+                }
+                if !inn
+                    .needs
+                    .iter()
+                    .all(|&need| mine & w.techs[need].bit() != 0)
+                {
+                    continue;
+                }
+                let bent = bent_of[inn.field as usize];
+                if bent < MIN_BENT {
+                    continue;
+                }
+                if rng.chance(carry * inn.spread as f64 * bent as f64) {
+                    take |= b;
+                }
+            }
+            if take == 0 {
+                continue;
+            }
+            w.known[cell] |= take;
+            w.refresh_yield(cell);
+            // And out into the country the city administers, which is how a
+            // province comes to know what its capital knows.
+            for nb in w.terrain.neighbors8(cell).collect::<Vec<_>>() {
+                if !w.terrain.is_land(nb) || w.cells[nb].pop < 0.02 {
+                    continue;
+                }
+                let gain = take & !w.known[nb];
+                if gain == 0 {
+                    continue;
+                }
+                w.known[nb] |= gain;
+                w.refresh_yield(nb);
             }
         }
     }

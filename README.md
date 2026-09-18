@@ -1,9 +1,18 @@
 # Rise and Fall of Empires
 
-A passive world simulator for your terminal. Watch peoples settle, kingdoms
-rise, wars reshape borders and empires fall on a procedurally generated map.
-Pause to explore a city, follow a dynasty or read the last fifty years of
-history. Or leave it running and see what survives.
+A world simulator for your terminal, and one god watching it. Peoples settle,
+kingdoms rise, wars reshape borders and empires fall on a procedurally
+generated map, none of it waiting for you.
+
+Then you bind yourself to a people, and their lives become your strength.
+The more of them there are, the further you can reach into the world — a
+harvest, a fire, a wonder, a knife — and every act has a price. Help them
+and you stay able to help anybody. Spend on a stranger and you have given
+something up. Lose them all and the altars go cold.
+
+Pause to explore a city, follow a dynasty across nine centuries, or read the
+last fifty years of history. Or bind yourself to nobody, leave it running,
+and see what survives.
 
 Written in Rust with **zero crate dependencies**. Runs on **Linux and macOS**.
 
@@ -50,8 +59,10 @@ empires --load world.rfe         # continue a saved world
 empires --seed 42 --headless 800  # print 800 years of history without the UI
 ```
 
-On first launch, press **t** for a short, optional tutorial or **p** for the
-player guide. Reopen them any time with `:tutorial` or `:guide`.
+On first launch the world asks whose god you will be: press a number to bind
+yourself to a people, or **0** to watch and nothing more. Press **t** instead
+for a short, optional tutorial or **p** for the player guide; reopen them any
+time with `:tutorial` or `:guide`, and change who you serve with `:bind`.
 
 Time starts at **2 years per second**, with event following off so the map
 stays where you put it. Press **Space** to pause and **?** for help.
@@ -70,6 +81,7 @@ place and the world's current stories.
 | Tab / Shift+Tab | Change map layer |
 | `zi` / `zo` | Zoom in / out |
 | `e` / `c` / `r` | Entity lists (realms, houses, figures, …) / chronicle / recap |
+| `x` | Reach into the world where the cursor is, at a price |
 | `/` | Search by name |
 | `:` | Enter a command, such as `:w`, `:speed 25` or `:theme paper` |
 | Esc | Go back |
@@ -90,6 +102,9 @@ The [player guide](docs/GUIDE.md#playing) covers every key and command.
 | `-o, --save FILE` | Enable saving and autosaving. |
 | `-l, --load FILE` | Continue a saved world. |
 | `--headless N` | Run N years and print the chronicle. |
+| `--bind PEOPLE` | Start bound to a people (`auto` for the largest). |
+| `--at PLACE` | Centre a snapshot on a named place. |
+| `--plain` | Snapshot the map alone, as an illustration. |
 | `--ascii` | Use plain ASCII glyphs. |
 | `--no-mouse` | Keep the terminal's text selection. |
 | `--mkconfig` | Write a commented config template. |

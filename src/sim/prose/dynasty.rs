@@ -5,7 +5,7 @@
 //! alive to be watched. It names the deed that earned the title, so the
 //! chronicle says *why* as well as *who*.
 
-use super::{cap, join_names, ordinal, realm, realm_full, years};
+use super::{cap, join_names, ordinal, realm, realm_full, realm_full_cap, years};
 use super::{Pick, World};
 use crate::sim::{Gender, SchoolKind};
 
@@ -148,15 +148,37 @@ pub fn acclaimed(
 pub fn married_abroad(w: &World, r: usize, h: usize, p: usize, q: usize) -> String {
     let a = &w.persons[r];
     let b = &w.persons[h];
-    format!(
-        "{} {} of {} was married to {} of {}, and the two houses were joined. \
-         The border between them grew quiet.",
-        w.honorific(p, a.gender),
-        a.name,
-        realm(w, p),
-        b.name,
-        realm_full(w, q)
-    )
+    let (hon, an, bn) = (w.honorific(p, a.gender), a.name.clone(), b.name.clone());
+    let (pn, qn) = (realm(w, p), realm_full(w, q));
+    match Pick::stable(w.year, r).index(5) {
+        0 => format!(
+            "{} {} of {} was married to {} of {}, and the two houses were joined. \
+             The border between them grew quiet.",
+            hon, an, pn, bn, qn
+        ),
+        1 => format!(
+            "{} {} of {} married {} out of {}. It was cheaper than the war it \
+             replaced.",
+            hon, an, pn, bn, qn
+        ),
+        2 => format!(
+            "A match was made between {} of {} and {} of {}. Both courts \
+             called it love and both chanceries called it a treaty.",
+            an, pn, bn, qn
+        ),
+        3 => format!(
+            "{} sent {} to {} to be married, and the two houses have had the \
+             same grandchildren to argue over ever since.",
+            realm_full_cap(w, q),
+            bn,
+            pn
+        ),
+        _ => format!(
+            "{} {} of {} and {} of {} were wed, and the garrisons on that \
+             border were thinned within the year.",
+            hon, an, pn, bn, qn
+        ),
+    }
 }
 
 /// A ruler married at home.
@@ -258,8 +280,10 @@ pub fn heir_succeeds(w: &World, p: usize, heir: usize, old: usize, house: &str) 
     } else {
         "kinsman"
     };
+    // Capitalised, and "years old": this clause opens its own sentence, and
+    // "she is 17 years" is not a sentence anybody writes.
     let youth = if age < 20 {
-        format!(" {} is {}.", h.they(), years(age.max(1) as i64))
+        format!(" {} is {} old.", cap(h.they()), years(age.max(1) as i64))
     } else {
         String::new()
     };

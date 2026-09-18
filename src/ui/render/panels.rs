@@ -445,15 +445,53 @@ impl Ui {
         );
     }
 
+    pub(super) fn render_covenant(&mut self) {
+        let lines = detail::covenant_card(&self.world);
+        let (sw, sh) = (self.screen.w, self.screen.h);
+        let w = (lines.iter().map(|l| l.chars().count()).max().unwrap_or(30) + 6).min(sw.max(10));
+        let h = (lines.len() + 4).min(sh.max(4));
+        let x = sw.saturating_sub(w) / 2;
+        let y = sh.saturating_sub(h) / 2;
+        let bg = Rgb(24, 22, 34);
+        let fg = Rgb(228, 224, 236);
+        self.screen
+            .fill(Rect::new(x, y, w, h), ' ', Style::new(fg, bg));
+        self.screen.frame(
+            Rect::new(x, y, w, h),
+            "The Covenant",
+            Style::new(Rgb(230, 200, 120), bg),
+        );
+        for (k, l) in lines.iter().enumerate() {
+            if 2 + k >= h.saturating_sub(1) {
+                break;
+            }
+            let (c, a) = if k == 0 {
+                (Rgb(255, 230, 170), BOLD)
+            } else {
+                (fg, 0)
+            };
+            self.screen.text_clip(
+                x + 3,
+                y + 2 + k,
+                l,
+                w.saturating_sub(5),
+                Style::attr(c, bg, a),
+            );
+        }
+    }
+
     pub(super) fn render_fate(&mut self) {
         let Some(r) = self.selected else { return };
         let lines = detail::fate_menu_for(&self.world, r);
         if lines.is_empty() {
             return;
         }
-        let w = lines.iter().map(|l| l.chars().count()).max().unwrap_or(20) + 4;
-        let h = lines.len() + 2;
         let (_, _, mw, mh) = self.map_rect();
+        // Clamped to the map: the panel sizes itself to its longest line,
+        // and a line longer than the terminal used to put its left edge at
+        // zero and its right edge off the screen.
+        let w = (lines.iter().map(|l| l.chars().count()).max().unwrap_or(20) + 4).min(mw.max(8));
+        let h = (lines.len() + 2).min(mh.max(3));
         let x = mw.saturating_sub(w) / 2;
         let y = mh.saturating_sub(h) / 2;
         self.fate_rect = (x, y, w, h);

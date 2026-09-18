@@ -499,6 +499,51 @@ impl Ui {
                     _ => self.open_fate(),
                 }
             }
+            // The covenant. Named by people, because a people is the thing
+            // that outlives the realms that hold it, and a covenant with a
+            // realm would be over in two centuries.
+            "bind" | "covenant" => {
+                if arg.is_empty() {
+                    let living: Vec<String> = (0..self.world.cultures.len())
+                        .filter(|&c| self.world.cultures[c].extinct.is_none())
+                        .map(|c| self.world.cultures[c].plural.clone())
+                        .collect();
+                    let said = match self.world.fate.patron {
+                        Some(c) => format!(
+                            "bound to the {} since year {}; {:.0} in hand. \
+                             :bind <people> to change it — {}",
+                            self.world.cultures[c].plural,
+                            self.world.fate.bound,
+                            self.world.fate.power,
+                            living.join(", ")
+                        ),
+                        None => format!("unbound. :bind <people> — {}", living.join(", ")),
+                    };
+                    self.say(&said);
+                } else {
+                    let want = arg.to_lowercase();
+                    let found = (0..self.world.cultures.len()).find(|&c| {
+                        self.world.cultures[c].extinct.is_none()
+                            && (self.world.cultures[c]
+                                .plural
+                                .to_lowercase()
+                                .starts_with(&want)
+                                || self.world.cultures[c]
+                                    .name
+                                    .to_lowercase()
+                                    .starts_with(&want)
+                                || self.world.cultures[c].adj.to_lowercase().starts_with(&want))
+                    });
+                    match found {
+                        Some(c) => {
+                            crate::sim::fate::bind(&mut self.world, c);
+                            let name = self.world.cultures[c].plural.clone();
+                            self.say(&format!("bound to the {}", name));
+                        }
+                        None => self.say("no living people by that name"),
+                    }
+                }
+            }
             "mute" | "unmute" => {
                 if arg.is_empty() {
                     let names: Vec<&str> = self.muted.iter().map(|k| k.name()).collect();

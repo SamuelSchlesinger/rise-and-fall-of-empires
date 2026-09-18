@@ -245,6 +245,7 @@ pub fn tick(w: &mut World) {
     child_deaths(w);
     marriages(w);
     births(w);
+    cadet_branches(w);
     growing_up(w);
     score(w);
     coronations(w);
@@ -412,6 +413,12 @@ fn acclaim(w: &mut World, r: usize) {
         Some(p) if w.polities[p].alive() => p,
         _ => return,
     };
+    // The world does not call a child great. It may call them great later,
+    // when they are old enough for the epithet to be about them --- and
+    // that is a better moment for it anyway.
+    if w.persons[r].age(w.year) < MAJORITY {
+        return;
+    }
     let rng = w.rng.clone();
     let epithet = acclaim_epithet(w, r, &Pick::rolled(&rng));
     w.persons[r].epithet = Some(epithet.clone());
@@ -714,6 +721,348 @@ pub fn adult_heirs(w: &World, p: usize) -> Vec<usize> {
         .copied()
         .filter(|&h| w.persons[h].alive() && w.persons[h].age(w.year) >= MAJORITY)
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Collateral kin
+// ---------------------------------------------------------------------------
+
+/// How far back a claim will be traced. Beyond this the relation is too thin
+/// for anyone to march for, and the walk is bounded so that a house a
+/// thousand years deep costs no more to search than a young one.
+const KIN_DEPTH: u32 = 4;
+
+/// The shape of a blood tie: how many steps up from the dead ruler to the
+/// nearest shared ancestor, and how many back down to the claimant.
+///
+/// The two halves are kept apart because they are what tells a brother from
+/// a nephew from an uncle, and the chronicle has to be able to say which.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Kin {
+    pub up: u32,
+    pub down: u32,
+}
+
+impl Kin {
+    /// Steps along the whole path. Siblings are 2, uncle and nephew 3,
+    /// first cousins 4.
+    pub fn steps(self) -> u32 {
+        self.up + self.down
+    }
+
+    /// What the relation is called, from the dead ruler's side.
+    pub fn name(self, gender: Gender) -> &'static str {
+        let f = gender == Gender::F;
+        match (self.up, self.down) {
+            (0, 1) => {
+                if f {
+                    "daughter"
+                } else {
+                    "son"
+                }
+            }
+            (1, 0) => {
+                if f {
+                    "mother"
+                } else {
+                    "father"
+                }
+            }
+            (1, 1) => {
+                if f {
+                    "sister"
+                } else {
+                    "brother"
+                }
+            }
+            (1, 2) => {
+                if f {
+                    "niece"
+                } else {
+                    "nephew"
+                }
+            }
+            (2, 1) => {
+                if f {
+                    "aunt"
+                } else {
+                    "uncle"
+                }
+            }
+            (2, 2) => "cousin",
+            (1, _) => {
+                if f {
+                    "great-niece"
+                } else {
+                    "great-nephew"
+                }
+            }
+            (_, 1) => {
+                if f {
+                    "great-aunt"
+                } else {
+                    "great-uncle"
+                }
+            }
+            _ => "cousin",
+        }
+    }
+}
+
+/// The blood tie between two people, if there is one close enough to matter.
+///
+/// Walks up from `a` collecting ancestors and their depth, then up from `b`
+/// until it meets one of them. Both walks are capped at [`KIN_DEPTH`], so
+/// the cost does not grow with the age of the house.
+pub fn kinship(w: &World, a: usize, b: usize) -> Option<Kin> {
+    if a == b {
+        return Some(Kin { up: 0, down: 0 });
+    }
+    let mut up_a: [(usize, u32); KIN_DEPTH as usize + 1] =
+        [(usize::MAX, 0); KIN_DEPTH as usize + 1];
+    let mut n = 0usize;
+    let mut cur = Some(a);
+    let mut d = 0u32;
+    while let Some(x) = cur {
+        up_a[n] = (x, d);
+        n += 1;
+        if d == KIN_DEPTH {
+            break;
+        }
+        d += 1;
+        cur = w.persons[x].parent;
+    }
+    let mut cur = Some(b);
+    let mut d = 0u32;
+    while let Some(x) = cur {
+        if let Some(&(_, up)) = up_a[..n].iter().find(|&&(y, _)| y == x) {
+            return Some(Kin { up, down: d });
+        }
+        if d == KIN_DEPTH {
+            break;
+        }
+        d += 1;
+        cur = w.persons[x].parent;
+    }
+    None
+}
+
+/// The living members of a house, newest first.
+///
+/// Members are stored in person order, which is birth order, so the living
+/// are at the end of the list and the scan stops after a bounded look back.
+/// A house that has ruled for a millennium has tens of thousands of names on
+/// it and only the last few dozen can still draw breath.
+fn living_kin(w: &World, house: usize) -> Vec<usize> {
+    const LOOKBACK: usize = 96;
+    let members = &w.houses[house].members;
+    let from = members.len().saturating_sub(LOOKBACK);
+    members[from..]
+        .iter()
+        .copied()
+        .filter(|&m| w.persons[m].alive())
+        .collect()
+}
+
+/// Everyone of the realm's house who could take the throne when the dead
+/// ruler's own children cannot: brothers, nephews, uncles, cousins.
+///
+/// Nearest blood first and, among equals, the eldest — which is what most
+/// of these realms would call the obvious man. Returns each claimant with
+/// the tie that gives them the claim, so the chronicle can name it.
+///
+/// Without this, a house was one thread: only the reigning ruler married,
+/// only the reigning ruler had children, and a king who died childless
+/// ended his line however many brothers survived him. Houses lasted two
+/// rulers and the chronicle was a column of usurpations.
+pub fn kin_heirs(w: &World, p: usize, old: usize) -> Vec<(usize, Kin)> {
+    let house = match w.polities[p].house {
+        Some(h) => h,
+        None => return Vec::new(),
+    };
+    let mut out: Vec<(usize, Kin)> = living_kin(w, house)
+        .into_iter()
+        .filter(|&m| m != old && w.persons[m].age(w.year) >= MAJORITY)
+        // Somebody already on a throne of their own does not abandon it.
+        .filter(|&m| match w.persons[m].polity {
+            Some(q) => !(w.polities[q].alive() && w.polities[q].ruler == Some(m)),
+            None => true,
+        })
+        .filter_map(|m| kinship(w, old, m).map(|k| (m, k)))
+        .filter(|(_, k)| k.steps() >= 2 && k.steps() <= KIN_DEPTH + 1)
+        .collect();
+    // Nearest blood, then the eldest of them, then by id so that two people
+    // born in the same year always fall the same way.
+    out.sort_by_key(|&(m, k)| (k.steps(), k.down, w.persons[m].born, m));
+    out
+}
+
+/// Whether this accession puts a house back on a throne it had lost, and
+/// how long it was out of possession.
+///
+/// Nothing in this world ever came back. Realms fell and stayed fallen,
+/// exiled claimants vanished, and a house that lost a throne never saw it
+/// again --- so the chronicle could tell the story of a decline and never
+/// the story of a return, which is the older and better of the two. The
+/// data was always there: a realm keeps the list of everyone who has ruled
+/// it, and a person knows their house.
+///
+/// A cadet branch counts. The line of a house that forked three hundred
+/// years ago coming back to the senior throne is exactly the shape of thing
+/// this is for.
+pub fn restoration(w: &World, p: usize, heir: usize) -> Option<(usize, i32)> {
+    let house = w.persons[heir].house?;
+    // The house, and the house it forked from, and so on up.
+    let mut line = vec![house];
+    let mut at = w.houses[house].parent;
+    while let Some(h) = at {
+        if line.contains(&h) {
+            break;
+        }
+        line.push(h);
+        at = w.houses[h].parent;
+    }
+    let of_the_line = |q: usize| -> bool { w.persons[q].house.is_some_and(|h| line.contains(&h)) };
+    // Somebody else has held it since: a son following a father is not a
+    // restoration, however long the reign.
+    let since = w.polities[p]
+        .rulers
+        .iter()
+        .rev()
+        .take_while(|&&q| !of_the_line(q))
+        .count();
+    if since == 0 {
+        return None;
+    }
+    let last = *w.polities[p]
+        .rulers
+        .iter()
+        .rev()
+        .find(|&&q| of_the_line(q))?;
+    let out = w.persons[last]
+        .died
+        .or(w.persons[last].crowned)
+        .unwrap_or(w.year);
+    let gap = w.year - out;
+    // Long enough that nobody alive remembers it, or it is merely a family
+    // taking turns.
+    if gap >= 60 && since >= 2 {
+        Some((last, gap))
+    } else {
+        None
+    }
+}
+
+/// Give a house that has just been named the kin it has always implicitly
+/// had: a dead progenitor and a brother or sister of the founder.
+///
+/// A dynasty used to begin as one man with no relations, so a founder who
+/// died before his children grew up ended his own house in a single
+/// generation — which is why almost every succession in the world was a
+/// usurpation. A family that starts as a family survives its first bad
+/// throw of the dice, and the reader meets the brother years before the
+/// crown ever reaches him.
+pub fn seed_house_kin(w: &mut World, p: usize, house: usize, founder: usize) {
+    if living_kin(w, house).len() > 1 {
+        return;
+    }
+    let rng = w.rng.clone();
+    let culture = w.persons[founder].culture;
+    // A father nobody ever met, who exists only to make two people
+    // brothers. He is born dead, in the sense that he is never alive in any
+    // year the world simulates.
+    let sire = match w.persons[founder].parent {
+        Some(f) => f,
+        None => {
+            let born = w.persons[founder].born - rng.int(22, 38);
+            let f = w.new_person(culture, Role::Noble, Some(p), born, None);
+            w.persons[f].died = Some(w.persons[founder].born + rng.int(0, 20));
+            w.persons[founder].parent = Some(f);
+            w.persons[f].children.push(founder);
+            f
+        }
+    };
+    for _ in 0..rng.int(1, 2) {
+        let born = w.persons[founder].born + rng.int(-14, 14);
+        let sib = w.new_person(culture, Role::Noble, Some(p), born, None);
+        w.persons[sib].parent = Some(sire);
+        w.persons[sire].children.push(sib);
+        w.join_house(sib, house);
+    }
+}
+
+/// The rest of the house: the brothers and cousins who do not reign.
+///
+/// Only the ruler used to marry and only the ruler used to breed, so the
+/// family tree had no width at all. Cadets marry later, have fewer children
+/// and are capped per house, which keeps the person list from growing while
+/// still giving a line the depth to survive a bad generation.
+fn cadet_branches(w: &mut World) {
+    let rng = w.rng.clone();
+    let cap = w.tuning.house_living_cap;
+    for p in w.living_polities() {
+        let house = match w.polities[p].house {
+            Some(h) if w.houses[h].alive() => h,
+            _ => continue,
+        };
+        if !w.polities[p].kind.has_dynasty() {
+            continue;
+        }
+        let ruler = w.polities[p].ruler;
+        let kin = living_kin(w, house);
+        if kin.len() >= cap {
+            continue;
+        }
+        let culture = w.polities[p].culture;
+        for m in kin {
+            if Some(m) == ruler {
+                continue;
+            }
+            let per = &w.persons[m];
+            let age = per.age(w.year);
+            if age < MARRIAGE_AGE {
+                continue;
+            }
+            let lifespan = w.races[per.race].lifespan;
+            if age as f32 / lifespan > 0.55 {
+                continue;
+            }
+            match w.persons[m].spouse {
+                None => {
+                    if !rng.chance(w.tuning.cadet_marriage_chance) {
+                        continue;
+                    }
+                    let gender = match w.persons[m].gender {
+                        Gender::F => Gender::M,
+                        Gender::M => Gender::F,
+                        Gender::N => Gender::N,
+                    };
+                    let born = w.year - rng.int(MARRIAGE_AGE, 32);
+                    let consort = w.new_person(culture, Role::Noble, Some(p), born, None);
+                    w.persons[consort].gender = gender;
+                    wed(w, m, consort);
+                }
+                Some(s) => {
+                    if !w.persons[s].alive() || w.persons[m].children.len() >= 4 {
+                        continue;
+                    }
+                    if !rng.chance(w.tuning.cadet_birth_chance) {
+                        continue;
+                    }
+                    let brood = super::blood::conceive(w, m, s, &rng);
+                    let child =
+                        w.new_person(culture, Role::Noble, Some(p), w.year, Some(brood.traits));
+                    w.persons[child].genes = brood.genes;
+                    w.persons[child].vigour = brood.vigour;
+                    w.persons[child].inbred = brood.inbred;
+                    w.persons[child].parent = Some(m);
+                    w.join_house(child, house);
+                    w.persons[m].children.push(child);
+                    w.persons[s].children.push(child);
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

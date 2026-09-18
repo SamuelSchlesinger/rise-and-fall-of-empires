@@ -170,6 +170,94 @@ fn touches(w: &World, e: usize, p: usize) -> bool {
 /// The height is what the digest spends: it fills the page it is given and
 /// says "there was more" when it runs out, rather than stopping at a fixed
 /// thirty lines and leaving the bottom third of a tall terminal blank.
+/// How the covenant stands: who the watcher serves, how those people fare
+/// against the world, and what has been spent on them.
+///
+/// The simulation does not know or care that anyone is watching, which is
+/// the point of it — but the one thing a watcher has staked anything on
+/// deserves an answer in plain words rather than a number in a corner of
+/// the status bar.
+fn covenant_report(w: &World) -> Vec<Line> {
+    let mut out = Vec::new();
+    let Some(c) = w.fate.patron.filter(|&c| c < w.cultures.len()) else {
+        out.push(line("THE COVENANT", ACCENT, BOLD));
+        out.push(line(
+            "You are bound to no one and gather almost nothing. :bind <people>.",
+            DIMC,
+            DIM,
+        ));
+        out.push(line("", FG, 0));
+        return out;
+    };
+    let cul = &w.cultures[c];
+    let share = crate::sim::fate::devotion(w) * 100.0;
+    let realms: Vec<usize> = w
+        .alive_polities
+        .iter()
+        .copied()
+        .filter(|&p| w.polities[p].culture == c)
+        .collect();
+    let greatest = realms
+        .iter()
+        .copied()
+        .max_by_key(|&p| w.polities[p].cells)
+        .map(|p| {
+            format!(
+                "{} ({})",
+                w.polities[p].name,
+                words::realm_size(w.polities[p].cells)
+            )
+        });
+    out.push(line(
+        format!("THE {}", cul.plural.to_uppercase()),
+        ACCENT,
+        BOLD,
+    ));
+    let standing = match cul.extinct {
+        Some(y) => format!("gone since year {}. There is nothing left to be god of.", y),
+        None => format!(
+            "{} people, {:.1}% of the world, in {}.",
+            words::folk(cul.pop as f32),
+            share,
+            count(realms.len(), "realm")
+        ),
+    };
+    out.push(line(standing, FG, 0));
+    if let Some(g) = greatest {
+        out.push(line(format!("Their greatest realm is {}.", g), FG, 0));
+    }
+    out.push(line(
+        format!(
+            "Bound in year {}. {:.0} in hand, {:+.1} a year, {:.0} spent over {}.",
+            w.fate.bound,
+            w.fate.power,
+            w.fate.income,
+            w.fate.spent,
+            count(w.fate.acts as usize, "act"),
+        ),
+        DIMC,
+        DIM,
+    ));
+    // What you did with it. Without this the acts vanish into fifty
+    // thousand events and the loop has no visible end.
+    let mine: Vec<&crate::sim::chronicle::Event> = w
+        .chronicle
+        .events
+        .iter()
+        .rev()
+        .filter(|e| e.by_fate)
+        .take(4)
+        .collect();
+    if !mine.is_empty() {
+        out.push(line("Your hand:", DIMC, DIM));
+        for e in mine {
+            out.push(line(format!("  {}  {}", e.year, clip(&e.text, 96)), FG, 0));
+        }
+    }
+    out.push(line("", FG, 0));
+    out
+}
+
 pub fn lines(
     w: &World,
     years: i32,
@@ -198,6 +286,14 @@ pub fn lines(
         DIM,
     ));
     out.push(line("", FG, 0));
+
+    // The one section that is about the reader. It goes first, above the
+    // world's own accounts, because a covenant is a wager and the first
+    // thing anybody wants from a summary of the last two centuries is
+    // whether they are winning it.
+    if only.is_none() {
+        out.extend(covenant_report(w));
+    }
 
     // How the world has gone, before what it has been doing lately. Only
     // for the world as a whole: the series are world totals, and a realm's

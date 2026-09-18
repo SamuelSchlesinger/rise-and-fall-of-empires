@@ -20,8 +20,14 @@ out="$root/docs/screenshot.png"
 
 [ -x "$bin" ] || { echo "build it first: cargo build --release" >&2; exit 1; }
 
+# On a Mac the browsers are app bundles and are not on PATH, which meant a
+# project that ships macOS binaries could not regenerate its own README image
+# on a Mac.
 browser=
-for b in firefox chromium chromium-browser google-chrome; do
+for b in firefox chromium chromium-browser google-chrome \
+         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+         "/Applications/Chromium.app/Contents/MacOS/Chromium" \
+         "/Applications/Firefox.app/Contents/MacOS/firefox"; do
     command -v "$b" >/dev/null 2>&1 && { browser=$b; break; }
 done
 [ -n "$browser" ] || {
@@ -35,12 +41,14 @@ tmp=$(mktemp -d)
 mkdir -p "$tmp/profile"
 trap 'rm -rf "$tmp"' EXIT
 
-"$bin" --seed "$seed" --headless "$years" --min-importance 3 \
+# Bound, because the covenant is what the game is about and an image of the
+# status bar reading "unbound" sells the screensaver it used to be.
+"$bin" --seed "$seed" --headless "$years" --min-importance 3 --bind auto \
        --snapshot "$tmp/frame" --layer "$layer" --cols "$cols" --rows "$rows" \
        >/dev/null
 
 mkdir -p "$root/docs"
-case $browser in
+case ${browser##*/} in
     firefox)
         "$browser" --headless --profile "$tmp/profile" \
                    --window-size=1350,660 --screenshot "$out" \
