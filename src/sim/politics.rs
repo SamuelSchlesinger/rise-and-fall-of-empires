@@ -452,6 +452,10 @@ pub fn form_polities(w: &mut World) {
 }
 
 /// What a point of trade adds to a city's prosperity.
+/// Above this, each further advantage a realm has is worth less than the
+/// last. Below it nothing is changed.
+pub const STABILITY_KNEE: f32 = 0.7;
+
 const TRADE_TO_PROSPERITY: f32 = 0.035;
 /// The prosperity a city can approach but not reach.
 const PROSPERITY_MAX: f32 = 2.5;
@@ -961,6 +965,14 @@ pub fn economy(w: &mut World) {
             + (avg_prosp - 0.4) * 0.15
             + vals.tradition * 0.05
             + super::treasury_confidence(&tn, pol.treasury) * 0.2;
+        // Bent towards the ceiling rather than clipped against it, the
+        // fifth and last place this simulation summed every advantage a
+        // thing had and then clamped the sum. A settled, rich, well-ruled
+        // kingdom at peace clears 1.0 on the thirteen terms above without
+        // difficulty, so the top tenth of realms all sat at exactly 1.0 and
+        // read identically: the same drift word, the same "pulls towards
+        // 100%", for a realm at 1.02 and one at 1.6.
+        let target = super::soft_ceiling(target, STABILITY_KNEE, 1.0);
         pol.stability +=
             (target - pol.stability) * tn.stability_adjust_rate + rng.range32(-0.02, 0.02);
         pol.stability = pol.stability.clamp(0.0, 1.0);

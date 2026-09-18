@@ -367,12 +367,31 @@ pub fn stability_factors(w: &World, p: usize) -> Vec<Factor> {
 }
 
 /// Where stability is heading, given everything pulling on it.
-pub fn stability_target(w: &World, p: usize) -> f32 {
-    (stability_base(w)
+/// Everything the factors add up to, before the ceiling bends it.
+///
+/// Worth showing beside the target when the two differ, because a realm
+/// whose advantages add to 130 and one whose add to 101 both settle near the
+/// top and are not at all the same realm.
+pub fn stability_raw(w: &World, p: usize) -> f32 {
+    stability_base(w)
         + stability_factors(w, p)
             .iter()
             .map(|f| f.weight)
-            .sum::<f32>())
+            .sum::<f32>()
+}
+
+/// Where stability is actually heading.
+///
+/// Through the same bend the simulation applies. This used to clamp the sum
+/// while `politics::economy` clamped the *value*, so above 1.0 the
+/// explanation and the world disagreed and the reported target understated
+/// the real pull towards the ceiling.
+pub fn stability_target(w: &World, p: usize) -> f32 {
+    crate::sim::soft_ceiling(
+        stability_raw(w, p),
+        crate::sim::politics::STABILITY_KNEE,
+        1.0,
+    )
     .clamp(0.0, 1.0)
 }
 
@@ -758,19 +777,71 @@ mod tests {
         assert_eq!(spell(-3), "-3");
     }
 
+    /// The listed pulls add up to the number the page prints beside them,
+    /// and the ceiling bends that number rather than clipping it.
     #[test]
     fn factors_sum_to_the_target() {
         let w = world();
         for p in w.living_polities() {
             let sum: f32 = stability_factors(&w, p).iter().map(|f| f.weight).sum();
-            let target = (stability_base(&w) + sum).clamp(0.0, 1.0);
-            assert!((stability_target(&w, p) - target).abs() < 1e-5);
+            // The raw total is exactly what the reader can add up from the
+            // column of figures.
+            assert!((stability_raw(&w, p) - (stability_base(&w) + sum)).abs() < 1e-5);
+            // And the target is that total bent towards the ceiling, never
+            // above it and never below what the total was.
+            let raw = stability_raw(&w, p);
+            let target = stability_target(&w, p);
+            assert!((0.0..=1.0).contains(&target));
+            if raw > 0.0 && raw <= 1.0 {
+                assert!(
+                    target <= raw + 1e-5,
+                    "realm {} was bent upwards: {} to {}",
+                    p,
+                    raw,
+                    target
+                );
+            }
             // Nothing tiny survives the filter.
             for f in stability_factors(&w, p) {
                 assert!(f.weight.abs() >= 0.01, "{} is too small to mention", f.text);
                 assert!(!f.text.is_empty());
             }
         }
+    }
+
+    /// A realm whose advantages far exceed what stability can hold must not
+    /// read the same as one that only just clears it.
+    ///
+    /// The thirteen terms of the stability target are summed and were then
+    /// clamped, so the top tenth of realms in a mature world all sat at
+    /// exactly 1.0: the same drift word, the same "pulls towards 100%", for
+    /// a realm at 1.02 and one at 1.6. The fifth and last instance of the
+    /// mistake this simulation kept making.
+    #[test]
+    fn a_realm_with_every_advantage_is_still_told_apart() {
+        let mut w = world();
+        let ps = w.living_polities();
+        let (a, b) = (ps[0], ps[1]);
+        // Two realms differing only in what their treasuries buy them,
+        // both far past what the ceiling used to allow.
+        w.polities[a].decadence = 0.0;
+        w.polities[b].decadence = 0.0;
+        w.polities[a].exhaustion = 0.0;
+        w.polities[b].exhaustion = 0.0;
+        w.polities[a].treasury = 200.0;
+        w.polities[b].treasury = 50_000.0;
+        let (ra, rb) = (stability_raw(&w, a), stability_raw(&w, b));
+        assert!(rb > ra, "the richer realm has no more going for it");
+        let (ta, tb) = (stability_target(&w, a), stability_target(&w, b));
+        assert!(ta <= 1.0 && tb <= 1.0);
+        assert!(
+            tb > ta,
+            "two realms with different advantages ({:.3} and {:.3}) settle at \
+             the same place ({:.3})",
+            ra,
+            rb,
+            ta
+        );
     }
 
     #[test]

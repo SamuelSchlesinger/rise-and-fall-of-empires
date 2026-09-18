@@ -168,7 +168,11 @@ fn span_bar(from: i32, to: i32, span: f32, width: usize) -> String {
     let at = |year: i32| -> usize {
         ((year.max(0) as f32 / span.max(1.0)) * width as f32).round() as usize
     };
-    let (start, end) = (at(from).min(width), at(to).min(width));
+    // The start is held one short of the end of the row: a realm founded in
+    // the world's last few years rounds to the full width, and the end
+    // cannot then be pushed past it, so the bar came out empty — a blank
+    // row saying a realm that plainly exists never did.
+    let (start, end) = (at(from).min(width.saturating_sub(1)), at(to).min(width));
     // A realm that rose and fell inside one column still gets a column: a
     // blank row would say it never existed.
     let end = end.max(start + 1).min(width);
@@ -1316,11 +1320,24 @@ fn realm_page(
                     out.push(line(format!("{}{}", pre, l), c, 0));
                 }
             }
+            // Both numbers when the ceiling is bending one into the other:
+            // a realm whose advantages add to 130 and one whose add to 101
+            // both settle near the top and are not the same realm at all.
+            let raw = explain::stability_raw(w, p);
+            let target = explain::stability_target(w, p);
             out.push(line(
-                format!(
-                    "  everything together pulls stability towards {:.0}%",
-                    explain::stability_target(w, p) * 100.0
-                ),
+                if raw - target > 0.02 {
+                    format!(
+                        "  everything together adds to {:.0}%, which settles at {:.0}%",
+                        raw * 100.0,
+                        target * 100.0
+                    )
+                } else {
+                    format!(
+                        "  everything together pulls stability towards {:.0}%",
+                        target * 100.0
+                    )
+                },
                 DIMC,
                 DIM,
             ));

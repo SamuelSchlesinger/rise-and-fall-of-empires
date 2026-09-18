@@ -154,6 +154,20 @@ Understanding a world, and reaching into it.
 
 - **A world carries only so many traditions.** *World-changing.* See below.
 
+- **Stability is bent towards its ceiling too.** *World-changing.* Its
+  target sums thirteen terms, and a settled, rich, well-ruled kingdom at
+  peace clears 1.0 on them without difficulty — so the top tenth of realms
+  in a mature world all sat at exactly 1.0, reading identically: the same
+  drift word, the same "pulls towards 100%", for a realm at 1.02 and one at
+  1.6. Realms at the ceiling fall from the whole top decile to under one in
+  a hundred, and the ninetieth percentile from 1.00 to 0.92.
+
+  `explain` also clamped the *sum* while the simulation clamped the
+  *value*, so above 1.0 the explanation and the world disagreed and the
+  page understated the real pull. Both go through the same bend now, and
+  when it bites the page says so: "everything together adds to 128%, which
+  settles at 96%".
+
 - **Prosperity is bent towards its ceiling rather than clipped against it.**
   *World-changing.* Everything that makes a city rich was added up and the
   sum then clamped, so by the twenty-first century the *median* city in the

@@ -2402,3 +2402,37 @@ fn the_relations_layer_draws_every_kind_of_tie() {
         "the selected realm is marked on every cell it holds"
     );
 }
+
+#[test]
+#[ignore]
+fn probe_stability_ceiling() {
+    let mut w = World::new(7, 288, 144, Detail::Medium);
+    for c in 0..8 {
+        run(&mut w, 400);
+        let mut st: Vec<f32> = w
+            .alive_polities
+            .iter()
+            .map(|&p| w.polities[p].stability)
+            .collect();
+        st.sort_by(f32::total_cmp);
+        let n = st.len().max(1);
+        let q = |f: f32| {
+            st.get(((n as f32 - 1.0) * f) as usize)
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let pinned = st.iter().filter(|&&v| v >= 0.985).count();
+        if c % 2 == 0 || c == 7 {
+            println!(
+                "year {:>5}: realms {:>4} | stability p50 {:.2} p90 {:.2} max {:.2} | at the ceiling {:>4} ({:.0}%)",
+                w.year,
+                n,
+                q(0.5),
+                q(0.9),
+                st.last().copied().unwrap_or(0.0),
+                pinned,
+                pinned as f32 / n as f32 * 100.0
+            );
+        }
+    }
+}
