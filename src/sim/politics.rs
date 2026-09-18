@@ -456,17 +456,17 @@ pub fn form_polities(w: &mut World) {
 /// last. Below it nothing is changed.
 pub const STABILITY_KNEE: f32 = 0.7;
 
-const TRADE_TO_PROSPERITY: f32 = 0.035;
+pub const TRADE_TO_PROSPERITY: f32 = 0.035;
 /// The prosperity a city can approach but not reach.
-const PROSPERITY_MAX: f32 = 2.5;
+pub const PROSPERITY_MAX: f32 = 2.5;
 /// Below this a city's prosperity is whatever its advantages add up to;
 /// above it, each further advantage is worth less than the last.
-const PROSPERITY_KNEE: f32 = 1.5;
+pub const PROSPERITY_KNEE: f32 = 1.5;
 /// The most prosperity a city can owe to the traffic through it, approached
 /// but never reached.
-const TRADE_PROSPERITY_MAX: f32 = 0.9;
+pub const TRADE_PROSPERITY_MAX: f32 = 0.9;
 /// The amount of that traffic worth half of it.
-const TRADE_PROSPERITY_HALF: f32 = 0.35;
+pub const TRADE_PROSPERITY_HALF: f32 = 0.35;
 
 // ---------------------------------------------------------------------------
 // Expansion

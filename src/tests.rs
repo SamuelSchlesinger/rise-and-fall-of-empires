@@ -1491,6 +1491,61 @@ fn wealth_saturates_rather_than_capping() {
     assert!(wealth_reach(tn, tn.court_reserve) > 0.4);
 }
 
+/// The prosperity breakdown must name where a city is actually heading.
+///
+/// Prosperity became the most interesting number in the game when trade fed
+/// it and a city's income came to depend on it, and it was the only such
+/// number with no explanation. The weights mirror `politics::economy`, so
+/// the same rule applies as for income: a duplicate with nothing holding it
+/// to account drifts.
+///
+/// Checked through the movement rather than the value, because prosperity
+/// is a stock that eases towards its target at a tuned rate: one year's
+/// step must be that rate times the distance the breakdown says remains.
+#[test]
+fn the_prosperity_breakdown_names_the_right_target() {
+    use crate::sim::explain;
+    let mut w = world(59);
+    run(&mut w, 200);
+    let mut errors: Vec<f32> = Vec::new();
+    for _ in 0..60 {
+        let before: Vec<(usize, f32, f32)> = (0..w.cities.len())
+            .filter(|&c| w.cities[c].destroyed.is_none())
+            .map(|c| (c, w.cities[c].prosperity, explain::prosperity_target(&w, c)))
+            .collect();
+        w.tick();
+        for (c, was, target) in before {
+            if w.cities[c].destroyed.is_some() {
+                continue;
+            }
+            let now = w.cities[c].prosperity;
+            // Clamped at both ends, and the Hand of Fate and the wonder
+            // builder both add to it directly, so a year against a limit
+            // says nothing about the arithmetic.
+            if !(0.06..=2.49).contains(&now) || !(0.06..=2.49).contains(&was) {
+                continue;
+            }
+            let want = (target - was) * w.tuning.prosperity_adjust_rate;
+            errors.push((now - was - want).abs());
+        }
+    }
+    assert!(
+        errors.len() > 400,
+        "only {} city-years checked",
+        errors.len()
+    );
+    errors.sort_by(f32::total_cmp);
+    let median = errors[errors.len() / 2];
+    // A city's people and its realm's development move within the tick as
+    // well, so the typical year is close rather than exact — and a missing
+    // term is nowhere near this.
+    assert!(
+        median <= 0.004,
+        "the typical city missed its breakdown's target by {:.5}",
+        median
+    );
+}
+
 /// A realm's books at the start of a year, for [`the_income_breakdown_adds_up`].
 struct Books {
     realm: usize,

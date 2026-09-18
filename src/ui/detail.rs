@@ -1768,11 +1768,62 @@ fn city_page(w: &World, ci: usize, r: Ref, width: usize, out: &mut Vec<Line>) {
             } else {
                 "thin"
             },
-            crate::sim::prose::count(city.times_sacked as i64, "time")
+            if city.times_sacked == 0 {
+                "never".to_string()
+            } else {
+                crate::sim::prose::count(city.times_sacked as i64, "time")
+            }
         ),
         FG,
         0,
     ));
+    // Why it is as rich as it is. The same block the realm page gives for
+    // stability and for money, for the number this page is mostly about.
+    let why = explain::prosperity_factors(w, ci);
+    if !why.is_empty() {
+        out.push(line("", FG, 0));
+        out.push(line("Why", ACCENT, BOLD));
+        for f in why.iter().take(8) {
+            // The arrows need no ascii flag: the frame's sweep maps them to
+            // `^` and `v`, which is why the realm page's block does not
+            // carry one either.
+            let (mark, c) = if f.weight > 0.0 {
+                ('▲', Rgb(150, 210, 150))
+            } else {
+                ('▼', Rgb(230, 150, 120))
+            };
+            for (k, l) in term::wrap(&f.text, w2.saturating_sub(18))
+                .into_iter()
+                .enumerate()
+            {
+                let pre = if k == 0 {
+                    format!("  {} {:>5}  ", mark, format!("{:+.0}", f.weight * 100.0))
+                } else {
+                    "           ".to_string()
+                };
+                out.push(line(format!("{}{}", pre, l), c, 0));
+            }
+        }
+        let raw = explain::prosperity_raw(w, ci);
+        let target = explain::prosperity_target(w, ci);
+        out.push(line(
+            if raw - target > 0.02 {
+                format!(
+                    "  its advantages add to {:.0}, which settles at {:.0}",
+                    raw * 100.0,
+                    target * 100.0
+                )
+            } else {
+                format!(
+                    "  everything together pulls prosperity towards {:.0}",
+                    target * 100.0
+                )
+            },
+            DIMC,
+            DIM,
+        ));
+        out.push(line("", FG, 0));
+    }
     // The hand of fate reaches towns now, so the page that describes one
     // should say so: a reader who has never pressed `x` will not guess that
     // it does anything here.

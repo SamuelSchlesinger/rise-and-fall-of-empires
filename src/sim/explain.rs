@@ -189,6 +189,124 @@ pub fn income_total(w: &World, p: usize) -> f32 {
     income_factors(w, p).iter().map(|f| f.weight).sum()
 }
 
+/// Everything making a city rich or poor, strongest first.
+///
+/// Prosperity became the most interesting number in the game when trade
+/// began to feed it and a city's income began to depend on it, and it was
+/// the one such number with no explanation at all. The weights mirror the
+/// target in `politics::economy`, and like that target they are a sum which
+/// is then *bent* towards a ceiling — so above the knee they no longer add
+/// to where the city is heading, which is what [`prosperity_raw`] and
+/// [`prosperity_target`] are for.
+pub fn prosperity_factors(w: &World, c: usize) -> Vec<Factor> {
+    use crate::sim::politics::{TRADE_PROSPERITY_HALF, TRADE_PROSPERITY_MAX, TRADE_TO_PROSPERITY};
+    let mut out: Vec<Factor> = Vec::new();
+    if c >= w.cities.len() || w.cities[c].destroyed.is_some() {
+        return out;
+    }
+    let city = &w.cities[c];
+    let cell = city.cell;
+    let t = &w.terrain;
+    push(
+        &mut out,
+        0.3,
+        "a town is worth something wherever it is".into(),
+    );
+    if t.coast[cell] {
+        let merc = w.cultures[city.culture].values.mercantilism;
+        push(
+            &mut out,
+            0.25 * (0.5 + merc),
+            "it sits on the sea, and its people put out from it".into(),
+        );
+    }
+    if t.river[cell] >= 1 {
+        push(
+            &mut out,
+            t.river[cell] as f32 * 0.07,
+            "a river runs through it".into(),
+        );
+    }
+    // Averaged over the ring the same way `economy` averages it.
+    let mut minerals = 0.0;
+    for nb in t.neighbors8(cell) {
+        minerals += t.minerals[nb];
+    }
+    minerals /= 8.0;
+    push(
+        &mut out,
+        minerals * 0.25,
+        "there is ore in the ground".into(),
+    );
+
+    if let Some(p) = city.polity.filter(|&p| w.polities[p].alive()) {
+        let pol = &w.polities[p];
+        push(
+            &mut out,
+            pol.dev * 0.3,
+            format!("{} is a developed realm", pol.short),
+        );
+        let peace = pol
+            .neighbors
+            .iter()
+            .filter(|&&(q, _)| w.war_between(p, q).is_none())
+            .count() as f32;
+        push(
+            &mut out,
+            (peace * 0.04).min(0.2),
+            "its neighbours are at peace with it".into(),
+        );
+        let (_, _, _, prosp_bonus) = w.school_effects(p);
+        push(
+            &mut out,
+            prosp_bonus,
+            "its doctrine favours industry".into(),
+        );
+        push(
+            &mut out,
+            w.tech_prosperity_bonus(p),
+            "what the realm knows is worth money".into(),
+        );
+        if pol.capital == Some(c) {
+            push(&mut out, 0.1, "the crown sits here".into());
+        }
+        if pol.at_war() {
+            push(&mut out, -0.15, "the realm is at war".into());
+        }
+    }
+    push(
+        &mut out,
+        city.wonders.len() as f32 * 0.08,
+        if city.wonders.len() == 1 {
+            "a wonder here draws people from everywhere".to_string()
+        } else {
+            format!(
+                "{} here draw people from everywhere",
+                crate::sim::prose::count(city.wonders.len() as i64, "wonder")
+            )
+        },
+    );
+    let passing = w.city_trade(c) * TRADE_TO_PROSPERITY;
+    push(
+        &mut out,
+        TRADE_PROSPERITY_MAX * passing / (passing + TRADE_PROSPERITY_HALF),
+        format!("{:.0} a year passes through it", w.city_trade(c)),
+    );
+    out.sort_by(|a, b| b.weight.abs().total_cmp(&a.weight.abs()));
+    out
+}
+
+/// What those advantages add to, before the ceiling bends them.
+pub fn prosperity_raw(w: &World, c: usize) -> f32 {
+    prosperity_factors(w, c).iter().map(|f| f.weight).sum()
+}
+
+/// Where a city's prosperity is actually heading.
+pub fn prosperity_target(w: &World, c: usize) -> f32 {
+    use crate::sim::politics::{PROSPERITY_KNEE, PROSPERITY_MAX};
+    crate::sim::soft_ceiling(prosperity_raw(w, c), PROSPERITY_KNEE, PROSPERITY_MAX)
+}
+
 /// Everything pulling a realm's stability up or down, strongest first.
 /// `stability_base` plus the weights is the value stability is drifting
 /// towards, which is what `politics::economy` computes each year.
