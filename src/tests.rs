@@ -2627,3 +2627,88 @@ fn shutting_a_road_marks_the_road() {
     run(&mut w, 120);
     assert!(w.flows.carried[middle] > deep, "the mark never faded");
 }
+
+/// A good nobody else has is worth more than one every town offers.
+///
+/// A good's price was a constant of the universe, so a world where one
+/// river valley grew the only spice and a world where it grew everywhere
+/// paid exactly the same for it. The Goods layer could show a reader where
+/// the salt was and say nothing at all about whether that mattered.
+///
+/// Compared between two copies of one world rather than against a formula
+/// written out again in the test, which would only check my arithmetic
+/// against itself: the same world is priced with the premium and without
+/// it, and the roads carrying what is rare must be the ones that gain.
+#[test]
+fn rarity_is_worth_something() {
+    use crate::sim::trade::{Good, GOODS};
+    let mut seed_world = World::new(89, 160, 64, Detail::Medium);
+    run(&mut seed_world, 600);
+    let bytes = ser::save(&mut seed_world);
+
+    let live: Vec<usize> = (0..seed_world.cities.len())
+        .filter(|&c| seed_world.cities[c].destroyed.is_none())
+        .collect();
+    assert!(live.len() > 20, "need a peopled world");
+    let offered = |w: &World, g: Good| -> usize {
+        live.iter()
+            .filter(|&&c| w.city_goods(c).contains(&g))
+            .count()
+    };
+    let counts: Vec<(Good, usize)> = GOODS
+        .into_iter()
+        .map(|g| (g, offered(&seed_world, g)))
+        .collect();
+    let common = *counts
+        .iter()
+        .max_by_key(|&&(_, n)| n)
+        .expect("twelve goods");
+    let rare = *counts
+        .iter()
+        .filter(|&&(_, n)| n > 0)
+        .min_by_key(|&&(_, n)| n)
+        .expect("something is rare");
+    assert!(
+        common.1 > rare.1 * 2,
+        "every good is about as common as every other, so this proves nothing"
+    );
+
+    // What the roads touching a given good are worth, on average, in a
+    // world priced one way or the other.
+    let mean_for = |premium: f32, g: Good| -> f32 {
+        let mut w = ser::load(&bytes).expect("a fresh save must load");
+        w.tuning.scarcity_premium = premium;
+        crate::sim::trade::refresh(&mut w);
+        let vals: Vec<f32> = w
+            .routes
+            .iter()
+            .filter(|r| w.city_goods(r.a).contains(&g) || w.city_goods(r.b).contains(&g))
+            .map(|r| r.value)
+            .collect();
+        if vals.is_empty() {
+            0.0
+        } else {
+            vals.iter().sum::<f32>() / vals.len() as f32
+        }
+    };
+    let flat_rare = mean_for(0.0, rare.0);
+    let flat_common = mean_for(0.0, common.0);
+    let priced_rare = mean_for(seed_world.tuning.scarcity_premium, rare.0);
+    let priced_common = mean_for(seed_world.tuning.scarcity_premium, common.0);
+    assert!(flat_rare > 0.0 && flat_common > 0.0, "no roads to compare");
+
+    // Both rise, because every good gains something from being scarce
+    // somewhere — but what almost nobody has must rise further.
+    let lift = |after: f32, before: f32| after / before;
+    assert!(
+        lift(priced_rare, flat_rare) > lift(priced_common, flat_common),
+        "{:?}, offered by {} towns, gained x{:.3}; {:?}, offered by {}, \
+         gained x{:.3}",
+        rare.0,
+        rare.1,
+        lift(priced_rare, flat_rare),
+        common.0,
+        common.1,
+        lift(priced_common, flat_common)
+    );
+}

@@ -160,6 +160,15 @@ Understanding a world, and reaching into it.
   gravity model, whose distance term was already there. Trade now holds near
   a fifth of realm income, flat across the ages.
 
+- **What a good is worth depends on how rare it is.** *World-changing.* A
+  price was a constant of the universe, so a world where one river valley
+  grew the only spice and a world where it grew everywhere paid exactly the
+  same for it — and the Goods layer could show a reader where the salt was
+  while saying nothing about whether that mattered. A realm holding the only
+  source of something is now worth trading with, and worth taking from. The
+  new `scarcity_premium` dial sets how much rarity is worth; zero restores
+  the old flat prices.
+
 - **A world can learn to carry goods.** *World-changing.* Twelve kinds of
   effect a generated tree could hand out, and not one touched a road: a
   realm could invent writing, coinage and the ocean-going ship and its

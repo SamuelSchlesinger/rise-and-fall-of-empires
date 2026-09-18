@@ -373,6 +373,12 @@ pub struct Tuning {
     /// world grow along with its cities instead of standing still while
     /// everything else compounds.
     pub trade_mass_ref: f32,
+    /// The most a good's rarity multiplies its worth by, over its nature.
+    ///
+    /// Zero makes every good worth the same wherever it grows, which is
+    /// what a price used to be: a constant of the universe rather than a
+    /// fact about this world.
+    pub scarcity_premium: f32,
     /// What share of its treasury a crown will sink into one wonder, when
     /// that is more than the flat cost. Splendour scales with what there is
     /// to spend.
@@ -735,6 +741,7 @@ impl Default for Tuning {
             school_schism_min_age: 60,
             school_schism_min_adherents: 4,
             school_schism_share: 0.45,
+            scarcity_premium: 2.0,
             wonder_cost_share: 0.22,
             trade_mass_ref: 24.0,
             court_reserve: 150.0,
@@ -977,6 +984,7 @@ impl Tuning {
                 self.school_schism_min_adherents = v.max(2.0) as usize;
             }
             "school_schism_share" => self.school_schism_share = v,
+            "scarcity_premium" => self.scarcity_premium = v.clamp(0.0, 8.0) as f32,
             "wonder_cost_share" => self.wonder_cost_share = v.clamp(0.0, 1.0) as f32,
             "trade_mass_ref" => self.trade_mass_ref = v.max(0.1) as f32,
             "court_reserve" => self.court_reserve = v.max(0.0) as f32,

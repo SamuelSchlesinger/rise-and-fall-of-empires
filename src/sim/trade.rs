@@ -189,6 +189,30 @@ const HINTERLAND: i32 = 4;
 /// this module that costs anything.
 pub const REFRESH: i32 = 20;
 
+/// What each good is worth over and above its own nature, given how much of
+/// the world can supply it.
+///
+/// A good nobody else has commands a premium; one every second town offers
+/// commands nothing. This is what makes the geography of goods *matter*
+/// rather than merely exist: a realm holding the only source of something
+/// is worth trading with, and worth taking from.
+///
+/// Bounded at both ends, because a good that exactly one city in a thousand
+/// happens to sit on should be dear and not priceless.
+fn scarcity_of(have: &[u16], premium: f32) -> [f32; 16] {
+    let mut out = [1.0f32; 16];
+    let total = have.len().max(1) as f32;
+    for g in GOODS {
+        let offered = have.iter().filter(|&&h| h & g.bit() != 0).count() as f32;
+        let share = offered / total;
+        // Everywhere: worth its bare nature. Nowhere: worth several times
+        // that. The curve is steep at the rare end, which is where the
+        // interesting geography is.
+        out[g as usize] = 1.0 + premium * (1.0 - share).powi(3);
+    }
+    out
+}
+
 /// What a city can offer: the goods of its own hinterland, as a bitset.
 fn hinterland(w: &World, city: usize) -> u16 {
     let cell = w.cities[city].cell;
@@ -240,6 +264,12 @@ pub fn refresh(w: &mut World) {
         return;
     }
     let have: Vec<u16> = live.iter().map(|&c| hinterland(w, c)).collect();
+    // What each good is worth in *this* world, now. A good's price was a
+    // constant of the universe, so a world where one river valley grew the
+    // only spice and a world where it grew everywhere paid exactly the same
+    // for it — and the Goods layer could show a reader where the salt was
+    // while saying nothing about whether that mattered.
+    let scarcity = scarcity_of(&have, tn.scarcity_premium);
     let mut routes: Vec<Route> = Vec::new();
     for (ia, &a) in live.iter().enumerate() {
         for (ib, &b) in live.iter().enumerate().skip(ia + 1) {
@@ -261,7 +291,7 @@ pub fn refresh(w: &mut World) {
                 GOODS
                     .into_iter()
                     .filter(|g| bits & g.bit() != 0)
-                    .map(Good::worth)
+                    .map(|g| g.worth() * scarcity[g as usize])
                     .sum()
             };
             let trade = worth(a_offers).min(worth(b_offers));
