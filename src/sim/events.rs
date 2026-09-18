@@ -519,14 +519,38 @@ pub fn wonders(w: &mut World) {
         if pol.treasury < tn.wonder_min_treasury || pol.stability < 0.5 || pol.at_war() {
             continue;
         }
+        // The capital usually, but the greatest city of the realm when that
+        // is somewhere else. A wonder was only ever raised where the crown
+        // sat, so the second city of an empire could not have one however
+        // large or old it grew, and one capital accumulated seventeen.
         let cap = match pol.capital {
-            Some(c) => c,
+            Some(c) => pol
+                .cities
+                .iter()
+                .copied()
+                .filter(|&x| w.cities[x].destroyed.is_none())
+                .max_by(|&a, &b| {
+                    let weigh =
+                        |x: usize| w.cities[x].pop / (1.0 + w.cities[x].wonders.len() as f32 * 0.5);
+                    weigh(a).total_cmp(&weigh(b))
+                })
+                .unwrap_or(c),
             None => continue,
         };
         if !rng.chance(tn.wonder_chance) {
             continue;
         }
-        let cost = tn.wonder_cost;
+        // What a crown spends on splendour is a share of what it has, not a
+        // fixed sum. A realm sitting on twelve thousand got its monuments
+        // for a hundred — inside the noise of a year's court spending — and
+        // a realm on a hundred and thirty was very nearly bankrupted by the
+        // same wonder and could not build another until it recovered. So
+        // the reward was worth far more to the poor realm and the cost
+        // nothing at all to the rich one, which is backwards.
+        let cost = tn
+            .wonder_cost
+            .max(pol.treasury * tn.wonder_cost_share)
+            .min(pol.treasury);
         let city = w.cities[cap].name.clone();
         let name = prose::wonder_name(&city, &Pick::rolled(&rng));
         w.polities[p].treasury -= cost;

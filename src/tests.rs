@@ -2491,3 +2491,73 @@ fn probe_stability_ceiling() {
         }
     }
 }
+
+/// A wonder costs what a realm can afford, and is not always raised in the
+/// same city.
+///
+/// Both halves were flat. A monument cost a hundred whoever built it, so a
+/// crown sitting on twelve thousand got one for inside the noise of a
+/// year's court spending while a realm on a hundred and thirty was nearly
+/// bankrupted by it — the reward worth far more to the poor realm and the
+/// cost nothing at all to the rich one. And it was only ever raised where
+/// the crown sat, so the second city of an empire could never have one
+/// however large it grew, while one capital accumulated seventeen and drew
+/// a hundred and thirty-six points of prosperity from them.
+#[test]
+fn a_wonder_costs_what_a_realm_can_afford() {
+    let mut seed_world = world(61);
+    run(&mut seed_world, 400);
+    let bytes = ser::save(&mut seed_world);
+    let realm = *seed_world
+        .alive_polities
+        .iter()
+        .find(|&&p| seed_world.polities[p].cities.len() >= 2)
+        .expect("a 400 year world has a realm with two towns");
+
+    // A rich realm pays a real share; a poor one pays the flat price.
+    let spent = |treasury: f32| -> f32 {
+        let mut w = ser::load(&bytes).expect("a fresh save must load");
+        w.tuning.wonder_chance = 1.0;
+        w.polities[realm].treasury = treasury;
+        w.polities[realm].stability = 0.9;
+        let before = w.polities[realm].treasury;
+        let wonders = |w: &World| -> usize {
+            w.polities[realm]
+                .cities
+                .iter()
+                .map(|&c| w.cities[c].wonders.len())
+                .sum()
+        };
+        let had = wonders(&w);
+        crate::sim::events::wonders(&mut w);
+        assert!(wonders(&w) > had, "no wonder was built at {}", treasury);
+        before - w.polities[realm].treasury
+    };
+    let poor = spent(200.0);
+    let rich = spent(10_000.0);
+    assert!(
+        rich > poor * 5.0,
+        "a realm with fifty times the money paid {:.0} against {:.0}",
+        rich,
+        poor
+    );
+    // And never more than it has.
+    assert!(spent(130.0) <= 130.0);
+
+    // Over many realms and years, wonders do not all land in capitals.
+    let mut w = ser::load(&bytes).expect("a fresh save must load");
+    w.tuning.wonder_chance = 0.5;
+    run(&mut w, 200);
+    let mut elsewhere = 0;
+    for &p in &w.alive_polities {
+        for &c in &w.polities[p].cities {
+            if w.polities[p].capital != Some(c) && !w.cities[c].wonders.is_empty() {
+                elsewhere += 1;
+            }
+        }
+    }
+    assert!(
+        elsewhere > 0,
+        "every wonder in the world stands in a capital"
+    );
+}
