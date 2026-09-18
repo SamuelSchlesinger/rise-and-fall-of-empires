@@ -114,6 +114,14 @@ Understanding a world, and reaching into it.
   named quantity — `lands>200`, `income<0`, `prosperity>=150`. Each page
   advertises what may be asked of it.
 
+- **A list filter can exclude, and offer alternatives.** `!` in front of a
+  term inverts it and `|` between terms means either, so `lands>200 !coast`
+  is the large inland realms and `wine|spice|salt` is the towns offering any
+  of the three. Sorting by an arbitrary field is deliberately not here: the
+  pages rank and trim before the filter runs, so a sort could only reorder
+  the page rather than choose what is on it, and a "sort by age" showing the
+  largest realms in age order would be a trap.
+
 - **Two new list pages.** **Wealth** ranks realms by what they hold with
   what the year will bring beside it, because a full treasury with a deficit
   is a different thing from the same treasury with a surplus. **Roads** is
