@@ -348,6 +348,21 @@ impl Ui {
         // between them has to be walked; the high bit records whether
         // anything is moving along it and the low bits how much, so that one
         // byte per cell carries both.
+        // Where the chronicle says things happened, counted once for the
+        // frame. Only built for the layer that draws it: walking sixty
+        // thousand events every frame for a map nobody is looking at is
+        // exactly what `stories()` was fixed for.
+        let events: Vec<u32> = if self.layer == Layer::Memory {
+            let mut v = vec![0u32; self.world.cells.len()];
+            for e in &self.world.chronicle.events {
+                if let Some(l) = e.loc.filter(|&l| l < v.len()) {
+                    v[l] += 1 + u32::from(e.importance);
+                }
+            }
+            v
+        } else {
+            Vec::new()
+        };
         let roads: Vec<u8> = if self.layer == Layer::Trade {
             let mut v = vec![0u8; self.world.cells.len()];
             for r in &self.world.routes {
@@ -748,6 +763,45 @@ impl Ui {
                                     }
                                 }
                                 None => bg = bg.scale(0.6),
+                            }
+                        }
+                    }
+                    // Where history happened. Built once for the frame from
+                    // every event the chronicle still holds — which is only
+                    // what compaction has spared, so this is the world's
+                    // memory rather than its whole past, and the layer is
+                    // named for that.
+                    Layer::Memory => {
+                        if let Some(&n) = events.get(i) {
+                            if n > 0 {
+                                let k = ((n as f32).ln_1p() / 3.5).clamp(0.0, 1.0);
+                                bg = Rgb(20, 20, 28)
+                                    .mix(Rgb(120, 110, 200), k.sqrt())
+                                    .mix(Rgb(255, 240, 170), (k - 0.65).max(0.0) * 2.8);
+                                fg = bg.scale(1.4);
+                            } else if !water {
+                                bg = bg.scale(0.35);
+                                fg = bg.scale(1.5);
+                                ch = ' ';
+                            }
+                        }
+                    }
+                    // How long the ground has been lived in. `since` is the
+                    // year a cell last changed hands, which is the closest
+                    // thing the world records to how settled a place is.
+                    Layer::Settled => {
+                        if !water {
+                            if cs.pop > 0.02 {
+                                let held = (self.world.year - cs.since).max(0) as f32;
+                                let k = (held / 400.0).clamp(0.0, 1.0);
+                                bg = Rgb(70, 40, 30)
+                                    .mix(Rgb(200, 170, 90), k.sqrt())
+                                    .mix(Rgb(235, 245, 225), (k - 0.7).max(0.0) * 3.0);
+                                fg = bg.scale(1.35);
+                            } else {
+                                bg = bg.scale(0.3);
+                                fg = bg.scale(1.5);
+                                ch = ' ';
                             }
                         }
                     }

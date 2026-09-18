@@ -427,6 +427,17 @@ pub fn legend_parts(layer: Layer, ascii: bool) -> Vec<String> {
                 "with nothing selected, each realm's own standing".into(),
             ]
         }
+        Layer::Memory => vec![
+            "where the chronicle says things happened".into(),
+            "dark to violet to gold as more of it did".into(),
+            "great events count for more than small ones".into(),
+            "only what compaction has spared: the world's memory, not its past".into(),
+        ],
+        Layer::Settled => vec![
+            "how long the ground has been held by whoever holds it".into(),
+            "dark earth is newly taken, pale is long settled".into(),
+            "empty country is left bare".into(),
+        ],
         Layer::Drift => vec![
             format!(
                 "{} the weather has turned wetter",

@@ -626,6 +626,50 @@ impl Ui {
                     }
                 }
             }
+            Layer::Memory => {
+                let n = w
+                    .chronicle
+                    .events
+                    .iter()
+                    .filter(|e| e.loc == Some(i))
+                    .count();
+                out.push((
+                    if n == 0 {
+                        "nothing the chronicle still remembers".to_string()
+                    } else {
+                        format!(
+                            "{} remembered here",
+                            crate::sim::prose::count(n as i64, "thing")
+                        )
+                    },
+                    dim,
+                ));
+                if w.chronicle.dropped > 0 {
+                    out.push((
+                        format!(
+                            "{} forgotten world-wide",
+                            crate::sim::prose::count(w.chronicle.dropped as i64, "entry")
+                        ),
+                        dim,
+                    ));
+                }
+            }
+            Layer::Settled => {
+                if land {
+                    match w.cells[i].owner {
+                        Some(p) => out.push((
+                            format!(
+                                "held by {} since {} — {}",
+                                w.polities[p].short,
+                                w.cells[i].since,
+                                crate::sim::prose::years((w.year - w.cells[i].since).max(0) as i64)
+                            ),
+                            dim,
+                        )),
+                        None => out.push(("held by nobody".into(), dim)),
+                    }
+                }
+            }
             Layer::Relations => {
                 if let Some(p) = w.cells[i].owner {
                     let pol = &w.polities[p];

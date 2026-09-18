@@ -38,6 +38,14 @@ Understanding a world, and reaching into it.
   families (power, peoples, land, living, motion) and `\` steps the maps
   within one.
 
+- **A memory layer and a settled layer.** Memory shows where in the world
+  history actually happened, from every event the chronicle still holds,
+  with great events counting for more than small ones — and it is named for
+  what it is, since compaction means it shows the world's *memory* rather
+  than its whole past. Settled shows how long each stretch of country has
+  been held by whoever holds it: dark earth newly taken, pale ground settled
+  for centuries. `:layer memory`, `:layer settled`.
+
 - **A relations layer.** The political layer says who owns what and nothing
   about who is sworn to whom, so the whole of diplomacy — tension, stances,
   tributaries, hegemony — was readable one realm page at a time and nowhere

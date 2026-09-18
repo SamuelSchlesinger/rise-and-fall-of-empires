@@ -246,6 +246,10 @@ pub enum Layer {
     Frontier,
     /// Where the weather has turned since living memory.
     Drift,
+    /// Where in the world history actually happened.
+    Memory,
+    /// How long each stretch of country has been lived in.
+    Settled,
     /// Who is bound to whom, and who is angry with whom.
     ///
     /// The political layer says who owns what and nothing about who is
@@ -273,9 +277,11 @@ impl Layer {
             Layer::Frontier => "frontier",
             Layer::Drift => "drift",
             Layer::Relations => "relations",
+            Layer::Memory => "memory",
+            Layer::Settled => "settled",
         }
     }
-    pub fn all() -> [Layer; 15] {
+    pub fn all() -> [Layer; 17] {
         [
             Layer::Political,
             Layer::Terrain,
@@ -292,6 +298,8 @@ impl Layer {
             Layer::Frontier,
             Layer::Drift,
             Layer::Relations,
+            Layer::Memory,
+            Layer::Settled,
         ]
     }
 
@@ -313,6 +321,7 @@ impl Layer {
             Layer::Settling | Layer::Fighting | Layer::Frontier | Layer::Drift => {
                 LayerFamily::Motion
             }
+            Layer::Memory | Layer::Settled => LayerFamily::Land,
         }
     }
     /// The next layer within the same family, wrapping.
@@ -372,6 +381,9 @@ impl Layer {
                 || (s == "diplomacy" && *l == Layer::Relations)
                 || (s == "alliances" && *l == Layer::Relations)
                 || (s == "tension" && *l == Layer::Relations)
+                || (s == "history" && *l == Layer::Memory)
+                || (s == "events" && *l == Layer::Memory)
+                || (s == "age" && *l == Layer::Settled)
         })
     }
 }
