@@ -48,11 +48,21 @@ impl Op {
 
 /// One condition a row must satisfy.
 #[derive(Clone, Debug)]
-pub enum Term {
+pub enum Atom {
     /// A word that must appear in the row's text.
     Text(String),
     /// A named quantity compared against a number.
     Compare { field: String, op: Op, value: f32 },
+}
+
+/// One condition a row must satisfy: any of its alternatives, inverted if
+/// the term was written with a leading `!`.
+#[derive(Clone, Debug)]
+pub struct Term {
+    /// Alternatives separated by `|`; a row passes if any of them holds.
+    pub any: Vec<Atom>,
+    /// Whether the whole term was negated.
+    pub not: bool,
 }
 
 /// Break a filter into its terms.
@@ -61,10 +71,31 @@ pub enum Term {
 /// half-typed query behaves like the plain text filter it used to be rather
 /// than matching nothing while the number is still being entered.
 pub fn parse(s: &str) -> Vec<Term> {
-    s.split_whitespace().map(parse_term).collect()
+    s.split_whitespace()
+        .filter_map(|t| {
+            let (not, rest) = match t.strip_prefix('!') {
+                Some(r) => (true, r),
+                None => (false, t),
+            };
+            // A bare `!` is somebody midway through typing, not a term that
+            // excludes the whole world.
+            if rest.is_empty() {
+                return None;
+            }
+            Some(Term {
+                any: rest
+                    .split('|')
+                    .filter(|a| !a.is_empty())
+                    .map(parse_atom)
+                    .collect(),
+                not,
+            })
+        })
+        .filter(|t| !t.any.is_empty())
+        .collect()
 }
 
-fn parse_term(t: &str) -> Term {
+fn parse_atom(t: &str) -> Atom {
     // Longest operators first, or `>=` parses as `>` and leaves an `=`.
     for (sym, op) in [
         (">=", Op::Ge),
@@ -76,7 +107,7 @@ fn parse_term(t: &str) -> Term {
         if let Some((name, rest)) = t.split_once(sym) {
             if let Ok(v) = rest.trim().parse::<f32>() {
                 if !name.trim().is_empty() {
-                    return Term::Compare {
+                    return Atom::Compare {
                         field: name.trim().to_lowercase(),
                         op,
                         value: v,
@@ -85,18 +116,19 @@ fn parse_term(t: &str) -> Term {
             }
         }
     }
-    Term::Text(t.to_lowercase())
+    Atom::Text(t.to_lowercase())
 }
 
 /// Whether a row passes every term.
 pub fn matches(w: &World, r: Ref, text: &str, terms: &[Term]) -> bool {
     let lower = text.to_lowercase();
-    terms.iter().all(|t| match t {
-        Term::Text(s) => lower.contains(s),
-        Term::Compare { field, op, value } => {
+    let holds = |a: &Atom| match a {
+        Atom::Text(s) => lower.contains(s),
+        Atom::Compare { field, op, value } => {
             value_of(w, r, field).is_some_and(|v| op.holds(v, *value))
         }
-    })
+    };
+    terms.iter().all(|t| t.any.iter().any(&holds) != t.not)
 }
 
 /// The named quantities of whatever this row points at.

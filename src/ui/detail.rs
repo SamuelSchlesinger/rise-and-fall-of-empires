@@ -484,7 +484,10 @@ pub fn query_fields(tab: usize) -> String {
         return String::new();
     }
     let first = fields.split_whitespace().next().unwrap_or("");
-    format!("filter by name, or {}>0 — {}", first, fields)
+    format!(
+        "/ name, {}>0, !x to exclude, a|b for either — {}",
+        first, fields
+    )
 }
 
 pub fn list_header(tab: usize) -> &'static str {
@@ -2603,7 +2606,8 @@ pub const HELP: &[&str] = &[
     "",
     "Browsing     e lists (realms, cities, peoples, schools, persons, wars, places, relics,",
     "             prophecies, figures, houses, wealth, roads)   In a list, / filters by name or",
-    "             by number: lands>200, income<0, prosperity>=150. The footer says what a page",
+    "             by number: lands>200, income<0, prosperity>=150. Put ! in front of a term to",
+    "             exclude it and | between terms for either: !coast, wine|spice. The footer says",
     "             will answer to.   c the chronicle (f or v cycles importance 0-3,",
     "             / filters by text)   Figures are those the world called great; Houses are the",
     "             ruling families, each with its whole line of succession.",

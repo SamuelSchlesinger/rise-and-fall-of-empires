@@ -1921,13 +1921,13 @@ fn time_the_interface() {
 #[test]
 fn a_list_can_be_asked_a_question() {
     use crate::sim::chronicle::Ref;
-    use crate::ui::query::{self, Op, Term};
+    use crate::ui::query::{self, Atom, Op};
     let mut w = world(31);
     run(&mut w, 400);
 
     // Parsing: a comparison, and anything else as a word to look for.
-    match &query::parse("lands>200")[0] {
-        Term::Compare { field, op, value } => {
+    match &query::parse("lands>200")[0].any[0] {
+        Atom::Compare { field, op, value } => {
             assert_eq!(field, "lands");
             assert_eq!(*op, Op::Gt);
             assert_eq!(*value, 200.0);
@@ -1935,8 +1935,8 @@ fn a_list_can_be_asked_a_question() {
         other => panic!("expected a comparison, got {:?}", other),
     }
     // `>=` must not parse as `>` and leave an `=` behind.
-    match &query::parse("stability>=30")[0] {
-        Term::Compare { op, value, .. } => {
+    match &query::parse("stability>=30")[0].any[0] {
+        Atom::Compare { op, value, .. } => {
             assert_eq!(*op, Op::Ge);
             assert_eq!(*value, 30.0);
         }
@@ -1944,7 +1944,13 @@ fn a_list_can_be_asked_a_question() {
     }
     // A half-typed query is a word, not a term that matches nothing: the
     // filter is typed one character at a time.
-    assert!(matches!(&query::parse("lands>")[0], Term::Text(_)));
+    assert!(matches!(&query::parse("lands>")[0].any[0], Atom::Text(_)));
+
+    // A term may be inverted, and may offer alternatives.
+    assert!(query::parse("!coast")[0].not);
+    assert_eq!(query::parse("wine|spice|salt")[0].any.len(), 3);
+    // And a half-typed `!` excludes nothing rather than everything.
+    assert!(query::parse("!").is_empty());
 
     // And the comparisons agree with the world. The bar is taken from the
     // world rather than written down, so the test does not depend on how
@@ -1986,6 +1992,37 @@ fn a_list_can_be_asked_a_question() {
             .iter()
             .any(|&p| query::matches(&w, Ref::Polity(p), "", &wrong)),
         "a realm answered a question about prosperity, which is a city's"
+    );
+
+    // Negation really inverts, and alternatives really widen: over the
+    // living realms, `!big` must be exactly the complement of `big`, and
+    // `big|tiny` must admit everything either does and nothing neither
+    // does.
+    let big = query::parse(&format!("lands>{}", bar));
+    let not_big = query::parse(&format!("!lands>{}", bar));
+    let either = query::parse(&format!("lands>{}|lands<2", bar));
+    let mut inverted = 0;
+    for &p in &w.alive_polities {
+        let r = Ref::Polity(p);
+        let yes = query::matches(&w, r, "", &big);
+        assert_ne!(
+            yes,
+            query::matches(&w, r, "", &not_big),
+            "realm {} is on both sides of a negation",
+            p
+        );
+        let small = w.polities[p].cells < 2;
+        assert_eq!(
+            query::matches(&w, r, "", &either),
+            yes || small,
+            "realm {} disagrees with its own alternatives",
+            p
+        );
+        inverted += usize::from(!yes);
+    }
+    assert!(
+        inverted > 0,
+        "nothing was excluded, so negation proves nothing"
     );
 
     // Every page that advertises fields must advertise ones that work.
